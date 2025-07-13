@@ -1,0 +1,29 @@
+# Core dependencies
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+sse-starlette==2.1.3
+python-multipart==0.0.18
+
+# LangChain and LangGraph
+langchain==0.3.15
+langchain-openai==0.2.14
+langchain-community==0.3.15
+langchain-core==0.3.31
+langgraph==0.2.72
+langchain-text-splitters==0.3.4
+
+# RAG and Vector Store
+chromadb==0.5.20
+tiktoken==0.8.0
+
+# Utils
+python-dotenv==1.0.1
+pydantic==2.10.5
+pydantic-settings==2.7.0
+
+# Development
+pytest==8.3.4
+pytest-asyncio==0.25.2
+black==24.10.0
+isort==5.13.2
+aiohttp==3.11.11  # For test client 
