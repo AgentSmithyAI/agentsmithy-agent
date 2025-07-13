@@ -34,14 +34,23 @@ async def test_streaming_request():
     async with aiohttp.ClientSession() as session:
         async with session.post(url, json=data) as response:
             print(f"📡 Response status: {response.status}")
+            print(f"📡 Response headers: {dict(response.headers)}")  # Added debug
             
+            line_count = 0  # Added debug
             async for line in response.content:
+                line_count += 1  # Added debug
                 line_str = line.decode('utf-8').strip()
+                print(f"[DEBUG] Line #{line_count}: '{line_str}'")  # Added debug
+                
                 if line_str.startswith('data: '):
                     data_str = line_str[6:]  # Remove 'data: ' prefix
+                    print(f"[DEBUG] Stripped: '{data_str}'")  # Added debug
+                    
                     if data_str and data_str != '[DONE]':
                         try:
                             data_json = json.loads(data_str)
+                            print(f"[DEBUG] Parsed JSON: {data_json}")  # Added debug
+                            
                             if 'content' in data_json:
                                 print(data_json['content'], end='', flush=True)
                             elif 'type' in data_json:
@@ -51,7 +60,10 @@ async def test_streaming_request():
                             elif 'error' in data_json:
                                 print(f"\n❌ Error: {data_json['error']}")
                         except json.JSONDecodeError:
-                            pass
+                            # Not JSON, treat as plain text content
+                            print(data_str, end='', flush=True)
+            
+            print(f"[DEBUG] Total lines received: {line_count}")  # Added debug
     print("\n")
 
 
