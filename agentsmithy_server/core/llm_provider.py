@@ -6,6 +6,7 @@ from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, System
 from langchain_openai import ChatOpenAI
 from langchain_core.callbacks import AsyncCallbackHandler
 from agentsmithy_server.config import settings
+from agentsmithy_server.utils.logger import agent_logger
 
 
 class LLMProvider(ABC):
@@ -41,6 +42,13 @@ class OpenAIProvider(LLMProvider):
         self.temperature = temperature or settings.default_temperature
         self.max_tokens = max_tokens or settings.max_tokens
         self.api_key = api_key or settings.openai_api_key
+        
+        agent_logger.info(
+            "Initializing OpenAI provider",
+            model=self.model,
+            temperature=self.temperature,
+            max_tokens=self.max_tokens
+        )
         
         self.llm = ChatOpenAI(
             model=self.model,

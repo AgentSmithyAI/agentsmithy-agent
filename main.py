@@ -9,36 +9,54 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 if __name__ == "__main__":
+    # Setup basic logging for startup
+    import logging
+    
+    # Try to import our structured logger, fallback to basic logging if not available
+    try:
+        from agentsmithy_server.utils.logger import StructuredLogger
+        startup_logger = StructuredLogger("server.startup")
+    except ImportError:
+        # Fallback to basic colored logging
+        logging.basicConfig(
+            level=logging.INFO,
+            format='\033[90m%(asctime)s\033[0m \033[32m%(levelname)-8s\033[0m \033[90m[%(name)s]\033[0m %(message)s',
+            datefmt='%H:%M:%S'
+        )
+        startup_logger = logging.getLogger("server.startup")
+    
     # Check if .env file exists
     if not os.path.exists(".env"):
-        print("⚠️  Warning: .env file not found!")
-        print("Please create a .env file based on .env.example and add your OpenAI API key.")
-        print("\nExample:")
-        print("  cp .env.example .env")
-        print("  # Edit .env and add your OPENAI_API_KEY")
+        startup_logger.error(".env file not found! Please create it from .env.example and add your OPENAI_API_KEY")
         sys.exit(1)
     
     try:
         from agentsmithy_server.api.server import app, settings
         import uvicorn
+        startup_logger.info(
+            "Starting AgentSmithy Server",
+            server_url=f"http://{settings.server_host}:{settings.server_port}",
+            docs_url=f"http://{settings.server_host}:{settings.server_port}/docs"
+        )
         
-        print("🚀 Starting AgentSmithy Server...")
-        print(f"📍 Server will be available at http://{settings.server_host}:{settings.server_port}")
-        print("📝 API documentation: http://localhost:11434/docs")
-        print("\nPress Ctrl+C to stop the server")
+        # Use custom logging configuration for consistent JSON output
+        from agentsmithy_server.config import LOGGING_CONFIG
         
         uvicorn.run(
             "agentsmithy_server.api.server:app",
             host=settings.server_host,
             port=settings.server_port,
             reload=True,
-            log_level="info"
+            log_config=LOGGING_CONFIG,
+            env_file=".env"
         )
     except ImportError as e:
-        print(f"❌ Error importing required modules: {e}")
-        print("\nPlease make sure you have installed all dependencies:")
-        print("  pip install -r requirements.txt")
+        startup_logger.error(
+            "Error importing required modules",
+            error=str(e),
+            hint="Run: pip install -r requirements.txt"
+        )
         sys.exit(1)
     except Exception as e:
-        print(f"❌ Error starting server: {e}")
+        startup_logger.error("Error starting server", error=str(e))
         sys.exit(1) 

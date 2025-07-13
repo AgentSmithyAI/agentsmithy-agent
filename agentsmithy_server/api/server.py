@@ -2,13 +2,15 @@
 
 import json
 import asyncio
+import time
 from typing import Dict, Any, List, AsyncIterator
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 from agentsmithy_server.config import settings
 from agentsmithy_server.core.agent_graph import AgentOrchestrator
+from agentsmithy_server.utils.logger import api_logger
 
 
 # Request/Response models
@@ -59,8 +61,11 @@ async def generate_sse_events(
     context: Dict[str, Any]
 ) -> AsyncIterator[str]:
     """Generate SSE events for streaming response."""
+    api_logger.info("Starting SSE event generation", query=query[:100])
+    
     try:
         # Process request with streaming
+        api_logger.debug("Processing request with orchestrator", streaming=True)
         result = await orchestrator.process_request(
             query=query,
             context=context,
@@ -68,34 +73,62 @@ async def generate_sse_events(
         )
         
         graph_execution = result["graph_execution"]
+        api_logger.debug("Graph execution started")
         
         # Stream intermediate updates
+        event_count = 0
         async for state in graph_execution:
+            event_count += 1
+            api_logger.debug(f"Processing state #{event_count}", state_keys=list(state.keys()))
+            
             # Send task type when classified
             if state.get("task_type") and not state.get("response"):
-                yield f'data: {{"type": "classification", "task_type": "{state["task_type"]}"}}\n\n'
+                event_data = f'data: {{"type": "classification", "task_type": "{state["task_type"]}"}}\n\n'
+                api_logger.stream_log("classification", state["task_type"], event_number=event_count)
+                yield event_data
             
             # Stream the response if it's an async generator
             if state.get("response"):
+                api_logger.debug("Processing response", has_aiter=hasattr(state["response"], "__aiter__"))
+                
                 if hasattr(state["response"], "__aiter__"):
                     # It's an async generator (streaming response)
+                    chunk_count = 0
                     async for chunk in state["response"]:
-                        yield f'data: {{"content": "{json.dumps(chunk)[1:-1]}"}}\n\n'
+                        chunk_count += 1
+                        event_data = f'data: {{"content": "{json.dumps(chunk)[1:-1]}"}}\n\n'
+                        api_logger.stream_log("content_chunk", chunk, chunk_number=chunk_count)
+                        yield event_data
                 else:
                     # It's a complete response
-                    yield f'data: {{"content": "{json.dumps(state["response"])[1:-1]}"}}\n\n'
+                    event_data = f'data: {{"content": "{json.dumps(state["response"])[1:-1]}"}}\n\n'
+                    api_logger.stream_log("content_complete", state["response"])
+                    yield event_data
         
         # Send completion signal
+        api_logger.info("SSE generation completed", total_events=event_count)
         yield 'data: {"done": true}\n\n'
         
     except Exception as e:
+        api_logger.error("Error in SSE generation", exception=e)
         error_msg = f"Error processing request: {str(e)}"
         yield f'data: {{"error": "{error_msg}"}}\n\n'
 
 
 @app.post("/api/chat")
-async def chat(request: ChatRequest):
+async def chat(request: ChatRequest, raw_request: Request):
     """Handle chat requests with optional streaming."""
+    start_time = time.time()
+    client_host = raw_request.client.host if raw_request.client else "unknown"
+    
+    api_logger.info(
+        "Chat request received",
+        client=client_host,
+        streaming=request.stream,
+        message_count=len(request.messages),
+        has_context="current_file" in request.context
+    )
+    
     try:
         # Extract the latest user message
         user_message = ""
@@ -105,28 +138,60 @@ async def chat(request: ChatRequest):
                 break
         
         if not user_message:
+            api_logger.warning("No user message found in request")
             raise HTTPException(status_code=400, detail="No user message found")
+        
+        api_logger.debug("User message extracted", message_length=len(user_message))
         
         if request.stream:
             # Return SSE streaming response
-            return EventSourceResponse(
-                generate_sse_events(user_message, request.context)
+            api_logger.info("Returning SSE streaming response")
+            response = EventSourceResponse(
+                generate_sse_events(user_message, request.context),
+                headers={
+                    "Cache-Control": "no-cache",
+                    "X-Accel-Buffering": "no",  # Disable nginx buffering
+                }
             )
+            
+            # Log response time
+            duration_ms = (time.time() - start_time) * 1000
+            api_logger.request_log("POST", "/api/chat", 200, duration_ms, streaming=True)
+            
+            return response
         else:
             # Return regular JSON response
+            api_logger.info("Processing non-streaming request")
             result = await orchestrator.process_request(
                 query=user_message,
                 context=request.context,
                 stream=False
             )
             
-            return ChatResponse(
+            response = ChatResponse(
                 content=result["response"],
                 done=True,
                 metadata=result["metadata"]
             )
+            
+            # Log response time
+            duration_ms = (time.time() - start_time) * 1000
+            api_logger.request_log(
+                "POST", 
+                "/api/chat", 
+                200, 
+                duration_ms, 
+                streaming=False,
+                response_length=len(result["response"])
+            )
+            
+            return response
     
+    except HTTPException:
+        raise
     except Exception as e:
+        duration_ms = (time.time() - start_time) * 1000
+        api_logger.error("Chat request failed", exception=e, duration_ms=duration_ms)
         raise HTTPException(status_code=500, detail=str(e))
 
 

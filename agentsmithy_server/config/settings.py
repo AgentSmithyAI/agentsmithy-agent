@@ -10,7 +10,8 @@ class Settings(BaseSettings):
     
     model_config = SettingsConfigDict(
         env_file=".env",
-        env_file_encoding="utf-8"
+        env_file_encoding="utf-8",
+        case_sensitive=False  # Allow uppercase env vars like DEFAULT_MODEL to match lowercase fields
     )
     
     # OpenAI Configuration
@@ -36,7 +37,7 @@ class Settings(BaseSettings):
     
     # LLM Configuration
     default_model: str = Field(
-        default="gpt-4-turbo-preview",
+        default="gpt-4o",
         description="Default LLM model"
     )
     default_temperature: float = Field(
@@ -50,6 +51,16 @@ class Settings(BaseSettings):
     streaming_enabled: bool = Field(
         default=True,
         description="Enable streaming responses"
+    )
+    
+    # Logging Configuration
+    log_level: str = Field(
+        default="INFO",
+        description="Logging level (DEBUG, INFO, WARNING, ERROR)"
+    )
+    log_format: str = Field(
+        default="pretty",
+        description="Log format (pretty or json)"
     )
 
 

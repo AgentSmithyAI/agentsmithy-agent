@@ -211,6 +211,51 @@ agentsmithy-local/
 └── README.md               # Documentation
 ```
 
+## Debugging and Diagnostics
+
+The server includes structured logging for debugging issues. All logs are output in JSON format for easy parsing.
+
+### Enable Debug Logging
+
+Add to your `.env` file:
+```env
+LOG_LEVEL=DEBUG
+```
+
+### Switch to JSON Logging
+
+By default, the server uses pretty colored logs for development. To switch to JSON format (for production or log parsing):
+
+```bash
+# Option 1: Environment variable
+LOG_FORMAT=json python main.py
+
+# Option 2: Add to .env file
+LOG_FORMAT=json
+```
+
+### Log Output Example
+
+When debug logging is enabled, you'll see detailed information about:
+- Request processing flow
+- Agent classification and routing
+- SSE event generation
+- Response streaming
+- Error details with stack traces
+
+Example log output:
+```json
+{"timestamp": "2024-01-01T12:00:00", "level": "INFO", "logger": "agentsmithy.api", "message": "Chat request received", "client": "127.0.0.1", "streaming": true}
+{"timestamp": "2024-01-01T12:00:01", "level": "DEBUG", "logger": "agentsmithy.agents", "message": "Classifying task", "query_preview": "Help me refactor this code"}
+{"timestamp": "2024-01-01T12:00:02", "level": "INFO", "logger": "agentsmithy.agents", "message": "Task classified", "task_type": "refactor"}
+```
+
+### Common Issues
+
+1. **No response in client**: Check logs for SSE event generation. Look for `"SSE Event"` entries.
+2. **Classification errors**: Debug logs show which agent is selected and why.
+3. **Streaming issues**: Look for `"content_chunk"` events in the logs.
+
 ## License
 
 MIT License

@@ -13,6 +13,7 @@ from agentsmithy_server.agents import (
     FixAgent
 )
 from agentsmithy_server.rag import ContextBuilder
+from agentsmithy_server.utils.logger import agent_logger
 
 
 class AgentState(TypedDict):
@@ -31,6 +32,7 @@ class AgentOrchestrator:
     
     def __init__(self, llm_provider_name: str = "openai"):
         # Initialize LLM provider
+        agent_logger.info("Creating AgentOrchestrator", provider=llm_provider_name)
         self.llm_provider = LLMFactory.create(llm_provider_name)
         
         # Initialize context builder
@@ -85,9 +87,13 @@ class AgentOrchestrator:
     
     async def _classify_task(self, state: AgentState) -> AgentState:
         """Classify the task type."""
+        agent_logger.info("Classifying task", query_preview=state["query"][:100])
+        
         task_type = await self.classifier.classify(state["query"], state["context"])
         state["task_type"] = task_type
         state["metadata"]["classification"] = task_type
+        
+        agent_logger.info("Task classified", task_type=task_type)
         return state
     
     def _route_to_agent(self, state: AgentState) -> str:
@@ -99,20 +105,34 @@ class AgentOrchestrator:
     
     async def _run_agent(self, agent_key: str, state: AgentState) -> AgentState:
         """Run a specific agent."""
+        agent_logger.info(f"Running agent: {agent_key}", streaming=state["streaming"])
+        
         agent = self.agents.get(agent_key)
         if not agent:
             # Fall back to explain agent for general queries
+            agent_logger.warning(f"Agent {agent_key} not found, falling back to explain agent")
             agent = self.agents["explain"]
         
-        result = await agent.process(
-            query=state["query"],
-            context=state["context"],
-            stream=state["streaming"]
-        )
-        
-        state["response"] = result["response"]
-        state["metadata"]["agent_used"] = result["agent"]
-        state["messages"].append(AIMessage(content=f"[{result['agent']}] Processing..."))
+        try:
+            result = await agent.process(
+                query=state["query"],
+                context=state["context"],
+                stream=state["streaming"]
+            )
+            
+            state["response"] = result["response"]
+            state["metadata"]["agent_used"] = result["agent"]
+            state["messages"].append(AIMessage(content=f"[{result['agent']}] Processing..."))
+            
+            agent_logger.info(
+                f"Agent {agent_key} completed",
+                agent_used=result["agent"],
+                response_type=type(result["response"]).__name__
+            )
+            
+        except Exception as e:
+            agent_logger.error(f"Agent {agent_key} failed", exception=e)
+            raise
         
         return state
     

@@ -5,6 +5,7 @@ from typing import Dict, Any, List, Optional
 from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage
 from agentsmithy_server.core import LLMProvider
 from agentsmithy_server.rag import ContextBuilder
+from agentsmithy_server.utils.logger import agent_logger
 
 
 class BaseAgent(ABC):
@@ -37,26 +38,46 @@ class BaseAgent(ABC):
         stream: bool = False
     ) -> Dict[str, Any]:
         """Process a query with optional context."""
+        agent_name = self.get_agent_name()
+        agent_logger.debug(f"{agent_name} processing query", query_length=len(query), streaming=stream)
+        
         # Build context
         full_context = await self.context_builder.build_context(query, context)
+        agent_logger.debug(
+            f"{agent_name} context built",
+            has_current_file=bool(full_context.get("current_file")),
+            open_files_count=len(full_context.get("open_files", [])),
+            relevant_docs_count=len(full_context.get("relevant_documents", []))
+        )
         
         # Prepare messages
         messages = self._prepare_messages(query, full_context)
+        agent_logger.debug(f"{agent_name} prepared {len(messages)} messages")
         
         # Generate response
-        if stream:
-            return {
-                "agent": self.get_agent_name(),
-                "response": self.llm_provider.agenerate(messages, stream=True),
-                "context": full_context
-            }
-        else:
-            response = await self.llm_provider.agenerate(messages, stream=False)
-            return {
-                "agent": self.get_agent_name(),
-                "response": response,
-                "context": full_context
-            }
+        try:
+            if stream:
+                agent_logger.debug(f"{agent_name} returning streaming response")
+                return {
+                    "agent": self.get_agent_name(),
+                    "response": self.llm_provider.agenerate(messages, stream=True),
+                    "context": full_context
+                }
+            else:
+                agent_logger.debug(f"{agent_name} generating non-streaming response")
+                response = await self.llm_provider.agenerate(messages, stream=False)
+                agent_logger.info(
+                    f"{agent_name} generated response",
+                    response_length=len(response) if isinstance(response, str) else 0
+                )
+                return {
+                    "agent": self.get_agent_name(),
+                    "response": response,
+                    "context": full_context
+                }
+        except Exception as e:
+            agent_logger.error(f"{agent_name} failed to generate response", exception=e)
+            raise
     
     def _prepare_messages(
         self,
