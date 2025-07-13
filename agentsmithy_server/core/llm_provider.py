@@ -1,7 +1,7 @@
 """LLM Provider abstraction for flexible model integration."""
 
 from abc import ABC, abstractmethod
-from typing import List, Dict, Any, Optional, AsyncIterator
+from typing import List, Dict, Any, Optional, AsyncIterator, Union
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from langchain_core.callbacks import AsyncCallbackHandler
@@ -17,7 +17,7 @@ class LLMProvider(ABC):
         messages: List[BaseMessage],
         stream: bool = False,
         **kwargs
-    ) -> AsyncIterator[str] | str:
+    ) -> Union[AsyncIterator[str], str]:
         """Generate response from messages."""
         pass
     
@@ -55,15 +55,23 @@ class OpenAIProvider(LLMProvider):
         messages: List[BaseMessage],
         stream: bool = False,
         **kwargs
-    ) -> AsyncIterator[str] | str:
+    ) -> Union[AsyncIterator[str], str]:
         """Generate response from messages."""
         if stream:
-            async for chunk in self.llm.astream(messages, **kwargs):
-                if chunk.content:
-                    yield chunk.content
+            return self._agenerate_stream(messages, **kwargs)
         else:
             response = await self.llm.ainvoke(messages, **kwargs)
             return response.content
+    
+    async def _agenerate_stream(
+        self,
+        messages: List[BaseMessage],
+        **kwargs
+    ) -> AsyncIterator[str]:
+        """Generate streaming response."""
+        async for chunk in self.llm.astream(messages, **kwargs):
+            if chunk.content:
+                yield chunk.content
     
     def get_model_name(self) -> str:
         """Get the model name."""

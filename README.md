@@ -76,7 +76,11 @@ OPENAI_API_KEY=your_openai_api_key_here
 ### Starting the Server
 
 ```bash
-python -m agentsmithy_server.api.server
+# Option 1: Using main.py (recommended)
+python main.py
+
+# Option 2: Using uvicorn directly
+uvicorn agentsmithy_server.api.server:app --reload --host localhost --port 11434
 ```
 
 The server will be available at: `http://localhost:11434`
