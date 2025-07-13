@@ -2,11 +2,13 @@
 
 import os
 from typing import List, Dict, Any, Optional
-from langchain_community.vectorstores import Chroma
+from langchain_chroma import Chroma
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from agentsmithy_server.config import settings
 from agentsmithy_server.rag.embeddings import EmbeddingsManager
+
+
 
 
 class VectorStoreManager:

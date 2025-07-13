@@ -1,29 +1,31 @@
 # Core dependencies
-fastapi==0.115.6
-uvicorn[standard]==0.34.0
-sse-starlette==2.1.3
-python-multipart==0.0.18
+fastapi==0.116.1
+uvicorn[standard]==0.35.0
+sse-starlette==2.4.1
+python-multipart==0.0.20
 
 # LangChain and LangGraph
-langchain==0.3.15
-langchain-openai==0.2.14
-langchain-community==0.3.15
-langchain-core==0.3.31
-langgraph==0.2.72
-langchain-text-splitters==0.3.4
+langchain==0.3.26
+langchain-openai==0.3.27
+langchain-community==0.3.27
+langchain-core==0.3.68
+langgraph==0.5.2
+langchain-text-splitters==0.3.8
 
 # RAG and Vector Store
-chromadb==0.5.20
-tiktoken==0.8.0
+langchain-chroma==0.2.4
+chromadb==1.0.15
+posthog==3.0.2  # Fixed version for ChromaDB telemetry compatibility
+tiktoken==0.9.0
 
 # Utils
-python-dotenv==1.0.1
-pydantic==2.10.5
-pydantic-settings==2.7.0
+python-dotenv==1.1.1
+pydantic==2.11.7
+pydantic-settings==2.10.1
 
 # Development
-pytest==8.3.4
-pytest-asyncio==0.25.2
-black==24.10.0
-isort==5.13.2
-aiohttp==3.11.11  # For test client 
+pytest==8.4.1
+pytest-asyncio==1.0.0
+black==25.1.0
+isort==6.0.1
+aiohttp==3.12.14  # For test client 
