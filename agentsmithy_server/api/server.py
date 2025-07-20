@@ -108,13 +108,15 @@ async def generate_sse_events(
                     chunk_count = 0
                     async for chunk in state["response"]:
                         chunk_count += 1
-                        event_dict = {"data": chunk}  # Send raw chunk
+                        # Wrap chunk in proper JSON format
+                        event_dict = {"data": json.dumps({"content": chunk})}
                         api_logger.stream_log("content_chunk", chunk, chunk_number=chunk_count)
                         yield event_dict
                     api_logger.info(f"Finished streaming {chunk_count} chunks")
                 else:
                     # It's a complete response
-                    event_dict = {"data": state["response"]}
+                    # Wrap response in proper JSON format
+                    event_dict = {"data": json.dumps({"content": state["response"]})}
                     api_logger.stream_log("content_complete", state["response"])
                     yield event_dict
             
@@ -129,7 +131,8 @@ async def generate_sse_events(
                             chunk_count = 0
                             async for chunk in response:
                                 chunk_count += 1
-                                event_dict = {"data": chunk}
+                                # Wrap chunk in proper JSON format
+                                event_dict = {"data": json.dumps({"content": chunk})}
                                 yield event_dict
                             api_logger.info(f"Finished streaming {chunk_count} chunks from {key}")
                         elif asyncio.iscoroutine(response):
@@ -140,12 +143,14 @@ async def generate_sse_events(
                                 chunk_count = 0
                                 async for chunk in actual_response:
                                     chunk_count += 1
-                                    event_dict = {"data": chunk}
+                                    # Wrap chunk in proper JSON format
+                                    event_dict = {"data": json.dumps({"content": chunk})}
                                     yield event_dict
                                 api_logger.info(f"Finished streaming {chunk_count} chunks from {key}")
                             else:
                                 # Non-streaming response
-                                event_dict = {"data": actual_response}
+                                # Wrap response in proper JSON format
+                                event_dict = {"data": json.dumps({"content": actual_response})}
                                 yield event_dict
         
         # Send completion signal

@@ -26,16 +26,39 @@ Respond with ONLY the category name, nothing else."""
     
     async def classify(self, query: str, context: Dict[str, Any] = None) -> str:
         """Classify the user's query into a task category."""
+        # Debug logging for context
+        import json
+        from agentsmithy_server.utils.logger import agent_logger
+        
+        agent_logger.debug(
+            "Classifier received context",
+            context_type=type(context).__name__,
+            context_is_none=context is None,
+            context_content=json.dumps(context, default=str) if context else "None"
+        )
+        
         # For classification, we use a simplified message format
         messages = [
             SystemMessage(content=self.get_default_system_prompt())
         ]
         
         # Add minimal context if there's selected code
-        if context and context.get("current_file", {}).get("selection"):
-            messages.append(SystemMessage(
-                content=f"User has selected this code:\n{context['current_file']['selection']}"
-            ))
+        if context is not None:
+            current_file = context.get("current_file")
+            agent_logger.debug(
+                "Checking current_file",
+                current_file_type=type(current_file).__name__,
+                current_file_is_none=current_file is None,
+                current_file_content=json.dumps(current_file, default=str) if current_file else "None"
+            )
+            
+            # Проверяем что current_file это словарь, а не None
+            if current_file and isinstance(current_file, dict):
+                selection = current_file.get("selection")
+                if selection:
+                    messages.append(SystemMessage(
+                        content=f"User has selected this code:\n{selection}"
+                    ))
         
         messages.append(HumanMessage(content=query))
         
