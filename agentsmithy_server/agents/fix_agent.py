@@ -5,7 +5,7 @@ from agentsmithy_server.agents.base_agent import BaseAgent
 
 class FixAgent(BaseAgent):
     """Agent specialized in fixing bugs and errors."""
-    
+
     def get_default_system_prompt(self) -> str:
         return """You are an expert debugging and bug-fixing agent. Your role is to identify and fix errors, bugs, and issues in code.
 
@@ -31,6 +31,6 @@ Always explain:
 - How your fix resolves it
 - Any potential side effects
 - How to prevent similar issues"""
-    
+
     def get_agent_name(self) -> str:
-        return "fix_agent" 
+        return "fix_agent"

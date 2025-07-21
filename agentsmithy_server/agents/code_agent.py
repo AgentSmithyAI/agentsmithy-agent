@@ -5,7 +5,7 @@ from agentsmithy_server.agents.base_agent import BaseAgent
 
 class CodeAgent(BaseAgent):
     """Agent specialized in writing new code."""
-    
+
     def get_default_system_prompt(self) -> str:
         return """You are an expert code generation agent. Your role is to write clean, efficient, and well-documented code based on user requirements.
 
@@ -19,6 +19,6 @@ Key responsibilities:
 7. Ensure code is production-ready and maintainable
 
 Always provide clear explanations of your implementation choices."""
-    
+
     def get_agent_name(self) -> str:
-        return "code_agent" 
+        return "code_agent"

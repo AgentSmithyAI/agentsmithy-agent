@@ -5,7 +5,7 @@ from agentsmithy_server.agents.base_agent import BaseAgent
 
 class ExplainAgent(BaseAgent):
     """Agent specialized in explaining code and concepts."""
-    
+
     def get_default_system_prompt(self) -> str:
         return """You are an expert code explanation agent. Your role is to provide clear, detailed explanations of code, concepts, and technical topics.
 
@@ -27,6 +27,6 @@ Explanation style:
 - Mention alternative approaches when applicable
 
 Your explanations should be educational and help developers understand not just what the code does, but why it's written that way."""
-    
+
     def get_agent_name(self) -> str:
-        return "explain_agent" 
+        return "explain_agent"

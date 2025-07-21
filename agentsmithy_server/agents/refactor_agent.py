@@ -5,7 +5,7 @@ from agentsmithy_server.agents.base_agent import BaseAgent
 
 class RefactorAgent(BaseAgent):
     """Agent specialized in code refactoring."""
-    
+
     def get_default_system_prompt(self) -> str:
         return """You are an expert code refactoring agent. Your role is to improve code quality, readability, and maintainability without changing functionality.
 
@@ -27,6 +27,6 @@ Refactoring guidelines:
 - Break down large functions/classes
 
 Always explain why each refactoring improves the code."""
-    
+
     def get_agent_name(self) -> str:
-        return "refactor_agent" 
+        return "refactor_agent"
