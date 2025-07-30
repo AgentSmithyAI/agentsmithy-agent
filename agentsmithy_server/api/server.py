@@ -121,19 +121,61 @@ async def generate_sse_events(
                     chunk_count = 0
                     async for chunk in state["response"]:
                         chunk_count += 1
-                        # Wrap chunk in proper JSON format
-                        event_dict = {"data": json.dumps({"content": chunk})}
-                        api_logger.stream_log(
-                            "content_chunk", chunk, chunk_number=chunk_count
-                        )
-                        yield event_dict
+                        # Check if chunk contains structured data (diffs/edits)
+                        if isinstance(chunk, dict):
+                            # Handle structured responses (file operations)
+                            if chunk.get("type") in ["diff", "file_change", "edit"]:
+                                event_dict = {"data": json.dumps(chunk)}
+                                api_logger.stream_log(
+                                    "file_operation", chunk, chunk_number=chunk_count
+                                )
+                                yield event_dict
+                            else:
+                                # Regular content
+                                event_dict = {"data": json.dumps({"content": chunk.get("content", str(chunk))})}
+                                yield event_dict
+                        else:
+                            # Regular text content
+                            event_dict = {"data": json.dumps({"content": chunk})}
+                            api_logger.stream_log(
+                                "content_chunk", chunk, chunk_number=chunk_count
+                            )
+                            yield event_dict
                     api_logger.info(f"Finished streaming {chunk_count} chunks")
                 else:
                     # It's a complete response
-                    # Wrap response in proper JSON format
-                    event_dict = {"data": json.dumps({"content": state["response"]})}
-                    api_logger.stream_log("content_complete", state["response"])
-                    yield event_dict
+                    if isinstance(state["response"], dict):
+                        # Check if it's structured response with file operations
+                        if "file_operations" in state["response"]:
+                            # Send explanation first
+                            if state["response"].get("explanation"):
+                                explanation_event = {"data": json.dumps({"content": state["response"]["explanation"]})}
+                                yield explanation_event
+                            
+                            # Send file operations as separate events
+                            for operation in state["response"]["file_operations"]:
+                                if operation.get("type") == "edit":
+                                    diff_event = {
+                                        "data": json.dumps({
+                                            "type": "diff",
+                                            "file": operation["file"],
+                                            "diff": operation["diff"],
+                                            "line_start": operation.get("line_start"),
+                                            "line_end": operation.get("line_end"),
+                                            "reason": operation.get("reason")
+                                        })
+                                    }
+                                    api_logger.info("Sending diff", file=operation["file"])
+                                    yield diff_event
+                        else:
+                            # Regular structured response
+                            event_dict = {"data": json.dumps({"content": str(state["response"])})}
+                            yield event_dict
+                    else:
+                        # Regular text response
+                        event_dict = {"data": json.dumps({"content": state["response"]})}
+                        api_logger.stream_log("content_complete", state["response"])
+                        yield event_dict
 
             # Check for response in agent-specific keys
             for key in state.keys():
