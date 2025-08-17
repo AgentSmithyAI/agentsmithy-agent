@@ -1,19 +1,15 @@
 # AgentSmithy Local Server
 
-A local AI server similar to Cursor, built using LangGraph for agent orchestration, RAG for contextualization, and SSE streaming support.
+A local AI server similar to Cursor, built using LangGraph for orchestration, RAG for contextualization, and SSE streaming.
 
 ## Features
 
-- 🤖 **Multi-agent system** using LangGraph
+- 🤖 **Universal agent** orchestrated with LangGraph
 - 📚 **RAG (Retrieval-Augmented Generation)** for context handling
 - 🔄 **Streaming responses** via Server-Sent Events (SSE)
-- 🎯 **Specialized agents** for different tasks:
-  - **Code Agent** - code generation
-  - **Refactor Agent** - code refactoring
-  - **Explain Agent** - code and concept explanations
-  - **Fix Agent** - bug fixing
-- 🔌 **Flexible architecture** for connecting different LLMs (starting with OpenAI)
-- 🗄️ **Vector database** ChromaDB for context storage
+- 🧰 **Tool-aware workflow** with structured edit/diff events for code changes
+- 🔌 **Flexible LLM provider interface** (OpenAI supported out of the box)
+- 🗄️ **ChromaDB** vector store for context persistence
 
 ## Architecture
 
@@ -21,24 +17,15 @@ A local AI server similar to Cursor, built using LangGraph for agent orchestrati
 graph TD
     A[User Request] --> B[API Server<br/>FastAPI + SSE]
     B --> C[LangGraph Orchestrator]
-    C --> D[Intent Classifier Agent]
-    D --> E{Intent Type}
-    E -->|Code| F[Code Agent]
-    E -->|Explain| G[Explanation Agent]
-    E -->|Fix| H[Fix Agent]
-    E -->|General| I[General Agent]
-    F --> J[RAG System]
-    G --> J
-    H --> J
-    I --> J
-    J --> K[Vector Store<br/>ChromaDB]
-    J --> L[Code Context]
-    F --> M[LLM<br/>OpenAI/Others]
-    G --> M
-    H --> M
-    I --> M
-    M --> N[Response Generator]
+    C --> U[Universal Agent]
+    U --> R[RAG System]
+    R --> K[Vector Store<br/>ChromaDB]
+    U --> T[Tools<br/>ToolExecutor/ToolManager]
+    U --> M[LLM<br/>OpenAI]
+    M --> N[Response]
+    T --> O1[Structured Events<br/>diff/tool_result]
     N --> O[SSE Stream]
+    O1 --> O
     O --> P[Client]
 ```
 
@@ -46,7 +33,7 @@ graph TD
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/agentsmithy-local.git
+git clone <repo-url>
 cd agentsmithy-local
 ```
 
@@ -61,14 +48,13 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-4. Create `.env` file from example:
-```bash
-cp .env.example .env
-```
-
-5. Add your OpenAI API key to `.env`:
+4. Create a `.env` file and set your API key:
 ```env
 OPENAI_API_KEY=your_openai_api_key_here
+# Optional overrides
+# SERVER_HOST=localhost
+# SERVER_PORT=11434
+# LOG_FORMAT=pretty  # or json
 ```
 
 ## Usage
@@ -80,7 +66,7 @@ OPENAI_API_KEY=your_openai_api_key_here
 python main.py
 
 # Option 2: Using uvicorn directly
-uvicorn agentsmithy_server.api.server:app --reload --host localhost --port 11434
+uvicorn agentsmithy_server.api.server:app --reload --host localhost --port 11434 --env-file .env
 ```
 
 The server will be available at: `http://localhost:11434`
@@ -91,6 +77,7 @@ The server will be available at: `http://localhost:11434`
 ```bash
 curl -X POST http://localhost:11434/api/chat \
      -H "Content-Type: application/json" \
+     -H "Accept: text/event-stream" \
      -d '{
        "messages": [
          {"role": "user", "content": "Help me refactor this code"}
@@ -150,11 +137,11 @@ Main chat endpoint.
 
 **Response (streaming):**
 ```
-data: {"type": "classification", "task_type": "refactor"}
+data: {"type": "classification", "task_type": "universal"}
 
 data: {"content": "I'll help you refactor "}
 
-data: {"content": "this code..."}
+data: {"type": "diff", "file": "example.py", "diff": "...", "line_start": 1, "line_end": 2, "reason": "..."}
 
 data: {"done": true}
 ```
@@ -170,8 +157,11 @@ Server health check.
 ```python
 class YourLLMProvider(LLMProvider):
     async def agenerate(self, messages, stream=False):
-        # Your implementation
-        pass
+        ...
+    def get_model_name(self) -> str:
+        ...
+    def bind_tools(self, tools: List[BaseTool]):
+        ...
 ```
 
 2. Register the provider:
@@ -181,56 +171,32 @@ LLMFactory.register_provider("your_llm", YourLLMProvider)
 
 ### Adding a New Agent
 
-1. Create a new agent class in `agentsmithy_server/agents/`:
-```python
-from agentsmithy_server.agents.base_agent import BaseAgent
-
-class YourAgent(BaseAgent):
-    def get_default_system_prompt(self) -> str:
-        return "Your agent prompt"
-    
-    def get_agent_name(self) -> str:
-        return "your_agent"
-```
-
-2. Add the agent to the orchestrator in `agentsmithy_server/core/agent_graph.py`
+The orchestrator currently routes everything to a single `UniversalAgent`. To introduce specialized agents, add your agent in `agentsmithy_server/agents/` and update `agentsmithy_server/core/agent_graph.py` to add nodes and routing.
 
 ## Project Structure
 
 ```
 agentsmithy-local/
 ├── agentsmithy_server/
-│   ├── agents/              # Specialized agents
+│   ├── agents/              # Agent implementations (UniversalAgent)
 │   ├── api/                 # FastAPI server
-│   ├── config/              # Configuration
+│   ├── config/              # Configuration (settings, logging)
 │   ├── core/                # Core components (LLM, LangGraph)
 │   ├── rag/                 # RAG system
 │   └── utils/               # Utilities
 ├── requirements.txt         # Dependencies
-├── .env.example            # Configuration example
 └── README.md               # Documentation
 ```
 
 ## Debugging and Diagnostics
 
-The server includes structured logging for debugging issues. All logs are output in JSON format for easy parsing.
-
-### Enable Debug Logging
-
-Add to your `.env` file:
-```env
-LOG_LEVEL=DEBUG
-```
-
-### Switch to JSON Logging
-
-By default, the server uses pretty colored logs for development. To switch to JSON format (for production or log parsing):
+The server includes structured logging. Pretty colored logs are used by default; set `LOG_FORMAT=json` to switch to JSON.
 
 ```bash
-# Option 1: Environment variable
+# Via environment variable
 LOG_FORMAT=json python main.py
 
-# Option 2: Add to .env file
+# Or in .env
 LOG_FORMAT=json
 ```
 
@@ -252,9 +218,8 @@ Example log output:
 
 ### Common Issues
 
-1. **No response in client**: Check logs for SSE event generation. Look for `"SSE Event"` entries.
-2. **Classification errors**: Debug logs show which agent is selected and why.
-3. **Streaming issues**: Look for `"content_chunk"` events in the logs.
+1. **No response in client**: Check logs for SSE event generation. Look for `SSE Event` entries.
+2. **Streaming issues**: Look for `content_chunk` and `file_operation` events in the logs.
 
 ## License
 
