@@ -6,8 +6,7 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langgraph.graph import END, StateGraph
 from langgraph.graph.message import add_messages
 
-from agentsmithy_server.agents import (ClassifierAgent, CodeAgent,
-                                       ExplainAgent, FixAgent, RefactorAgent)
+from agentsmithy_server.agents.universal_agent import UniversalAgent
 from agentsmithy_server.core import LLMFactory
 from agentsmithy_server.rag import ContextBuilder
 from agentsmithy_server.utils.logger import agent_logger
@@ -36,91 +35,43 @@ class AgentOrchestrator:
         # Initialize context builder
         self.context_builder = ContextBuilder()
 
-        # Initialize agents
-        self.classifier = ClassifierAgent(self.llm_provider, self.context_builder)
-        self.agents = {
-            "code": CodeAgent(self.llm_provider, self.context_builder),
-            "refactor": RefactorAgent(self.llm_provider, self.context_builder),
-            "explain": ExplainAgent(self.llm_provider, self.context_builder),
-            "fix": FixAgent(self.llm_provider, self.context_builder),
-        }
+        # Initialize single universal agent
+        self.universal_agent = UniversalAgent(self.llm_provider, self.context_builder)
+        
+        # Store SSE callback for later use
+        self._sse_callback = None
 
-        # Build the graph
+        # Build the simplified graph
         self.graph = self._build_graph()
+    
+    def set_sse_callback(self, callback):
+        """Set SSE callback for streaming updates."""
+        self._sse_callback = callback
+        # Pass it to the agent
+        if hasattr(self.universal_agent, 'set_sse_callback'):
+            self.universal_agent.set_sse_callback(callback)
 
     def _build_graph(self) -> StateGraph:
-        """Build the agent orchestration graph."""
+        """Build the simplified agent orchestration graph."""
         graph = StateGraph(AgentState)
 
-        # Add nodes
-        graph.add_node("classifier", self._classify_task)
-        graph.add_node("code_agent", self._run_code_agent)
-        graph.add_node("refactor_agent", self._run_refactor_agent)
-        graph.add_node("explain_agent", self._run_explain_agent)
-        graph.add_node("fix_agent", self._run_fix_agent)
-        graph.add_node("general_agent", self._run_general_agent)
+        # Add single universal agent node
+        graph.add_node("universal_agent", self._run_universal_agent)
 
-        # Add edges
-        graph.set_entry_point("classifier")
+        # Direct entry to universal agent
+        graph.set_entry_point("universal_agent")
 
-        # Conditional routing based on classification
-        graph.add_conditional_edges(
-            "classifier",
-            self._route_to_agent,
-            {
-                "code": "code_agent",
-                "refactor": "refactor_agent",
-                "explain": "explain_agent",
-                "fix": "fix_agent",
-                "general": "general_agent",
-                "test": "code_agent",  # Route test to code agent
-            },
-        )
-
-        # All agents lead to END
-        for agent_name in [
-            "code_agent",
-            "refactor_agent",
-            "explain_agent",
-            "fix_agent",
-            "general_agent",
-        ]:
-            graph.add_edge(agent_name, END)
+        # Universal agent leads to END
+        graph.add_edge("universal_agent", END)
 
         return graph.compile()
 
-    async def _classify_task(self, state: AgentState) -> AgentState:
-        """Classify the task type."""
-        agent_logger.info("Classifying task", query_preview=state["query"][:100])
-
-        task_type = await self.classifier.classify(state["query"], state["context"])
-        state["task_type"] = task_type
-        state["metadata"]["classification"] = task_type
-
-        agent_logger.info("Task classified", task_type=task_type)
-        return state
-
-    def _route_to_agent(self, state: AgentState) -> str:
-        """Route to the appropriate agent based on classification."""
-        task_type = state.get("task_type", "general")
-        if task_type == "test":
-            return "code"  # Route test tasks to code agent
-        return task_type
-
-    async def _run_agent(self, agent_key: str, state: AgentState) -> AgentState:
-        """Run a specific agent."""
-        agent_logger.info(f"Running agent: {agent_key}", streaming=state["streaming"])
-
-        agent = self.agents.get(agent_key)
-        if not agent:
-            # Fall back to explain agent for general queries
-            agent_logger.warning(
-                f"Agent {agent_key} not found, falling back to explain agent"
-            )
-            agent = self.agents["explain"]
+    async def _run_universal_agent(self, state: AgentState) -> AgentState:
+        """Run the universal agent."""
+        agent_logger.info("Running universal agent", streaming=state["streaming"])
 
         try:
-            result = await agent.process(
+            result = await self.universal_agent.process(
                 query=state["query"],
                 context=state["context"],
                 stream=state["streaming"],
@@ -133,36 +84,18 @@ class AgentOrchestrator:
             )
 
             agent_logger.info(
-                f"Agent {agent_key} completed",
+                "Universal agent completed",
                 agent_used=result["agent"],
                 response_type=type(result["response"]).__name__,
             )
 
         except Exception as e:
-            agent_logger.error(f"Agent {agent_key} failed", exception=e)
+            agent_logger.error("Universal agent failed", exception=e)
             raise
 
         return state
 
-    async def _run_code_agent(self, state: AgentState) -> AgentState:
-        """Run the code generation agent."""
-        return await self._run_agent("code", state)
 
-    async def _run_refactor_agent(self, state: AgentState) -> AgentState:
-        """Run the refactoring agent."""
-        return await self._run_agent("refactor", state)
-
-    async def _run_explain_agent(self, state: AgentState) -> AgentState:
-        """Run the explanation agent."""
-        return await self._run_agent("explain", state)
-
-    async def _run_fix_agent(self, state: AgentState) -> AgentState:
-        """Run the bug fixing agent."""
-        return await self._run_agent("fix", state)
-
-    async def _run_general_agent(self, state: AgentState) -> AgentState:
-        """Run a general purpose agent (defaults to explain)."""
-        return await self._run_agent("explain", state)
 
     async def process_request(
         self, query: str, context: Optional[Dict[str, Any]] = None, stream: bool = False
@@ -173,7 +106,7 @@ class AgentOrchestrator:
             "messages": [HumanMessage(content=query)],
             "query": query,
             "context": context,
-            "task_type": None,
+            "task_type": "universal",  # No longer needed but kept for compatibility
             "response": None,
             "streaming": stream,
             "metadata": {},
