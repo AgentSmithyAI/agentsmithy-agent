@@ -63,6 +63,17 @@ async def generate_sse_events(
 ) -> AsyncIterator[Dict[str, Any]]:  # Changed return type
     """Generate SSE events for streaming response."""
     api_logger.info("Starting SSE event generation", query=query[:100])
+    
+    # Define SSE callback for tool results
+    sse_events_queue = asyncio.Queue()
+    
+    async def sse_callback(event_data: Dict[str, Any]):
+        """Callback to queue SSE events from tools."""
+        await sse_events_queue.put(event_data)
+    
+    # Set the callback on orchestrator
+    if hasattr(orchestrator, 'set_sse_callback'):
+        orchestrator.set_sse_callback(sse_callback)
 
     try:
         # Process request with streaming
@@ -123,8 +134,8 @@ async def generate_sse_events(
                         chunk_count += 1
                         # Check if chunk contains structured data (diffs/edits)
                         if isinstance(chunk, dict):
-                            # Handle structured responses (file operations)
-                            if chunk.get("type") in ["diff", "file_change", "edit"]:
+                            # Handle structured responses (file operations/tool results)
+                            if chunk.get("type") in ["diff", "file_change", "edit", "change_applied", "file_patched", "tool_result"]:
                                 event_dict = {"data": json.dumps(chunk)}
                                 api_logger.stream_log(
                                     "file_operation", chunk, chunk_number=chunk_count
@@ -132,7 +143,7 @@ async def generate_sse_events(
                                 yield event_dict
                             else:
                                 # Regular content
-                                event_dict = {"data": json.dumps({"content": chunk.get("content", str(chunk))})}
+                                event_dict = {"data": json.dumps({"content": chunk.get("content", chunk.get("data", str(chunk)))})}
                                 yield event_dict
                         else:
                             # Regular text content
@@ -141,6 +152,16 @@ async def generate_sse_events(
                                 "content_chunk", chunk, chunk_number=chunk_count
                             )
                             yield event_dict
+                        
+                        # Check for tool events in queue (non-blocking)
+                        try:
+                            while not sse_events_queue.empty():
+                                tool_event = await asyncio.wait_for(sse_events_queue.get(), timeout=0.01)
+                                event_dict = {"data": json.dumps(tool_event)}
+                                api_logger.stream_log("tool_event", tool_event)
+                                yield event_dict
+                        except asyncio.TimeoutError:
+                            pass
                     api_logger.info(f"Finished streaming {chunk_count} chunks")
                 else:
                     # It's a complete response

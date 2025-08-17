@@ -37,9 +37,19 @@ class AgentOrchestrator:
 
         # Initialize single universal agent
         self.universal_agent = UniversalAgent(self.llm_provider, self.context_builder)
+        
+        # Store SSE callback for later use
+        self._sse_callback = None
 
         # Build the simplified graph
         self.graph = self._build_graph()
+    
+    def set_sse_callback(self, callback):
+        """Set SSE callback for streaming updates."""
+        self._sse_callback = callback
+        # Pass it to the agent
+        if hasattr(self.universal_agent, 'set_sse_callback'):
+            self.universal_agent.set_sse_callback(callback)
 
     def _build_graph(self) -> StateGraph:
         """Build the simplified agent orchestration graph."""

@@ -1,9 +1,10 @@
 """LLM Provider abstraction for flexible model integration."""
 
 from abc import ABC, abstractmethod
-from typing import AsyncIterator, List, Optional, Union
+from typing import AsyncIterator, List, Optional, Union, Any
 
 from langchain_core.messages import BaseMessage
+from langchain_core.tools import BaseTool
 from langchain_openai import ChatOpenAI
 
 from agentsmithy_server.config import settings
@@ -23,6 +24,11 @@ class LLMProvider(ABC):
     @abstractmethod
     def get_model_name(self) -> str:
         """Get the model name."""
+        pass
+    
+    @abstractmethod
+    def bind_tools(self, tools: List[BaseTool]) -> Any:
+        """Bind tools to the LLM for function calling."""
         pass
 
 
@@ -77,6 +83,11 @@ class OpenAIProvider(LLMProvider):
     def get_model_name(self) -> str:
         """Get the model name."""
         return self.model
+    
+    def bind_tools(self, tools: List[BaseTool]) -> ChatOpenAI:
+        """Bind tools to the LLM for function calling."""
+        # Return a new instance with tools bound. We only bind class-based tools here.
+        return self.llm.bind_tools(tools)
 
 
 class LLMFactory:
