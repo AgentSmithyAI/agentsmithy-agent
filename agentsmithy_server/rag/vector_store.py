@@ -1,7 +1,7 @@
 """Vector store module for RAG system."""
 
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
@@ -16,7 +16,7 @@ class VectorStoreManager:
 
     def __init__(
         self,
-        persist_directory: Optional[str] = None,
+        persist_directory: str | None = None,
         collection_name: str = "agentsmithy_docs",
     ):
         self.persist_directory = persist_directory or settings.chroma_persist_directory
@@ -41,10 +41,10 @@ class VectorStoreManager:
 
     async def add_documents(
         self,
-        documents: List[Document],
+        documents: list[Document],
         chunk_size: int = 1000,
         chunk_overlap: int = 200,
-    ) -> List[str]:
+    ) -> list[str]:
         """Add documents to vector store."""
         # Split documents into chunks
         text_splitter = RecursiveCharacterTextSplitter(
@@ -62,21 +62,21 @@ class VectorStoreManager:
         return ids
 
     async def add_texts(
-        self, texts: List[str], metadatas: Optional[List[Dict[str, Any]]] = None
-    ) -> List[str]:
+        self, texts: list[str], metadatas: list[dict[str, Any]] | None = None
+    ) -> list[str]:
         """Add texts directly to vector store."""
         ids = self.vectorstore.add_texts(texts, metadatas=metadatas)
         return ids
 
     async def similarity_search(
-        self, query: str, k: int = 4, filter: Optional[Dict[str, Any]] = None
-    ) -> List[Document]:
+        self, query: str, k: int = 4, filter: dict[str, Any] | None = None
+    ) -> list[Document]:
         """Search for similar documents."""
         return self.vectorstore.similarity_search(query, k=k, filter=filter)
 
     async def asimilarity_search_with_score(
-        self, query: str, k: int = 4, filter: Optional[Dict[str, Any]] = None
-    ) -> List[tuple[Document, float]]:
+        self, query: str, k: int = 4, filter: dict[str, Any] | None = None
+    ) -> list[tuple[Document, float]]:
         """Search for similar documents with relevance scores."""
         return self.vectorstore.similarity_search_with_score(query, k=k, filter=filter)
 

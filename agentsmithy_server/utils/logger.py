@@ -5,7 +5,6 @@ import logging
 import os
 import traceback
 from datetime import datetime
-from typing import Optional
 
 
 class PrettyFormatter(logging.Formatter):
@@ -134,7 +133,7 @@ class StructuredLogger:
         """Log warning message with optional extra fields."""
         self._log(logging.WARNING, message, **kwargs)
 
-    def error(self, message: str, exception: Optional[Exception] = None, **kwargs):
+    def error(self, message: str, exception: Exception | None = None, **kwargs):
         """Log error message with optional exception and extra fields."""
         if exception:
             kwargs["error_type"] = type(exception).__name__
@@ -158,7 +157,7 @@ class StructuredLogger:
             **kwargs,
         )
 
-    def stream_log(self, event_type: str, content: Optional[str] = None, **kwargs):
+    def stream_log(self, event_type: str, content: str | None = None, **kwargs):
         """Log SSE streaming events."""
         self.debug(
             f"SSE Event: {event_type}",

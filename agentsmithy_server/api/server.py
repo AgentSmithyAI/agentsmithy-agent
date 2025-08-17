@@ -3,7 +3,8 @@
 import asyncio
 import json
 import time
-from typing import Any, AsyncIterator, Dict, List
+from collections.abc import AsyncIterator
+from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -22,15 +23,15 @@ class Message(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    messages: List[Message]
-    context: Dict[str, Any] = {}
+    messages: list[Message]
+    context: dict[str, Any] = {}
     stream: bool = True
 
 
 class ChatResponse(BaseModel):
     content: str
     done: bool = False
-    metadata: Dict[str, Any] = {}
+    metadata: dict[str, Any] = {}
 
 
 class HealthResponse(BaseModel):
@@ -59,20 +60,20 @@ orchestrator = AgentOrchestrator()
 
 
 async def generate_sse_events(
-    query: str, context: Dict[str, Any]
-) -> AsyncIterator[Dict[str, Any]]:  # Changed return type
+    query: str, context: dict[str, Any]
+) -> AsyncIterator[dict[str, Any]]:  # Changed return type
     """Generate SSE events for streaming response."""
     api_logger.info("Starting SSE event generation", query=query[:100])
-    
+
     # Define SSE callback for tool results
     sse_events_queue = asyncio.Queue()
-    
-    async def sse_callback(event_data: Dict[str, Any]):
+
+    async def sse_callback(event_data: dict[str, Any]):
         """Callback to queue SSE events from tools."""
         await sse_events_queue.put(event_data)
-    
+
     # Set the callback on orchestrator
-    if hasattr(orchestrator, 'set_sse_callback'):
+    if hasattr(orchestrator, "set_sse_callback"):
         orchestrator.set_sse_callback(sse_callback)
 
     try:
@@ -135,7 +136,14 @@ async def generate_sse_events(
                         # Check if chunk contains structured data (diffs/edits)
                         if isinstance(chunk, dict):
                             # Handle structured responses (file operations/tool results)
-                            if chunk.get("type") in ["diff", "file_change", "edit", "change_applied", "file_patched", "tool_result"]:
+                            if chunk.get("type") in [
+                                "diff",
+                                "file_change",
+                                "edit",
+                                "change_applied",
+                                "file_patched",
+                                "tool_result",
+                            ]:
                                 event_dict = {"data": json.dumps(chunk)}
                                 api_logger.stream_log(
                                     "file_operation", chunk, chunk_number=chunk_count
@@ -143,7 +151,15 @@ async def generate_sse_events(
                                 yield event_dict
                             else:
                                 # Regular content
-                                event_dict = {"data": json.dumps({"content": chunk.get("content", chunk.get("data", str(chunk)))})}
+                                event_dict = {
+                                    "data": json.dumps(
+                                        {
+                                            "content": chunk.get(
+                                                "content", chunk.get("data", str(chunk))
+                                            )
+                                        }
+                                    )
+                                }
                                 yield event_dict
                         else:
                             # Regular text content
@@ -152,15 +168,17 @@ async def generate_sse_events(
                                 "content_chunk", chunk, chunk_number=chunk_count
                             )
                             yield event_dict
-                        
+
                         # Check for tool events in queue (non-blocking)
                         try:
                             while not sse_events_queue.empty():
-                                tool_event = await asyncio.wait_for(sse_events_queue.get(), timeout=0.01)
+                                tool_event = await asyncio.wait_for(
+                                    sse_events_queue.get(), timeout=0.01
+                                )
                                 event_dict = {"data": json.dumps(tool_event)}
                                 api_logger.stream_log("tool_event", tool_event)
                                 yield event_dict
-                        except asyncio.TimeoutError:
+                        except TimeoutError:
                             pass
                     api_logger.info(f"Finished streaming {chunk_count} chunks")
                 else:
@@ -170,31 +188,45 @@ async def generate_sse_events(
                         if "file_operations" in state["response"]:
                             # Send explanation first
                             if state["response"].get("explanation"):
-                                explanation_event = {"data": json.dumps({"content": state["response"]["explanation"]})}
+                                explanation_event = {
+                                    "data": json.dumps(
+                                        {"content": state["response"]["explanation"]}
+                                    )
+                                }
                                 yield explanation_event
-                            
+
                             # Send file operations as separate events
                             for operation in state["response"]["file_operations"]:
                                 if operation.get("type") == "edit":
                                     diff_event = {
-                                        "data": json.dumps({
-                                            "type": "diff",
-                                            "file": operation["file"],
-                                            "diff": operation["diff"],
-                                            "line_start": operation.get("line_start"),
-                                            "line_end": operation.get("line_end"),
-                                            "reason": operation.get("reason")
-                                        })
+                                        "data": json.dumps(
+                                            {
+                                                "type": "diff",
+                                                "file": operation["file"],
+                                                "diff": operation["diff"],
+                                                "line_start": operation.get(
+                                                    "line_start"
+                                                ),
+                                                "line_end": operation.get("line_end"),
+                                                "reason": operation.get("reason"),
+                                            }
+                                        )
                                     }
-                                    api_logger.info("Sending diff", file=operation["file"])
+                                    api_logger.info(
+                                        "Sending diff", file=operation["file"]
+                                    )
                                     yield diff_event
                         else:
                             # Regular structured response
-                            event_dict = {"data": json.dumps({"content": str(state["response"])})}
+                            event_dict = {
+                                "data": json.dumps({"content": str(state["response"])})
+                            }
                             yield event_dict
                     else:
                         # Regular text response
-                        event_dict = {"data": json.dumps({"content": state["response"]})}
+                        event_dict = {
+                            "data": json.dumps({"content": state["response"]})
+                        }
                         api_logger.stream_log("content_complete", state["response"])
                         yield event_dict
 

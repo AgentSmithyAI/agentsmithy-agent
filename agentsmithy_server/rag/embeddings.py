@@ -1,7 +1,5 @@
 """Embeddings module for RAG system."""
 
-from typing import List, Optional
-
 from langchain_core.embeddings import Embeddings
 from langchain_openai import OpenAIEmbeddings
 
@@ -11,10 +9,10 @@ from agentsmithy_server.config import settings
 class EmbeddingsManager:
     """Manager for handling document embeddings."""
 
-    def __init__(self, provider: str = "openai", model: Optional[str] = None):
+    def __init__(self, provider: str = "openai", model: str | None = None):
         self.provider = provider
         self.model = model or "text-embedding-3-small"
-        self._embeddings: Optional[Embeddings] = None
+        self._embeddings: Embeddings | None = None
 
     @property
     def embeddings(self) -> Embeddings:
@@ -29,10 +27,10 @@ class EmbeddingsManager:
 
         return self._embeddings
 
-    async def aembed_documents(self, texts: List[str]) -> List[List[float]]:
+    async def aembed_documents(self, texts: list[str]) -> list[list[float]]:
         """Embed documents asynchronously."""
         return await self.embeddings.aembed_documents(texts)
 
-    async def aembed_query(self, text: str) -> List[float]:
+    async def aembed_query(self, text: str) -> list[float]:
         """Embed query asynchronously."""
         return await self.embeddings.aembed_query(text)

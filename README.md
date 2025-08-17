@@ -149,6 +149,44 @@ data: {"done": true}
 ### GET /health
 Server health check.
 
+## Development
+
+### Tooling
+
+- Linters/formatters: Ruff + Black
+- Type checking: mypy
+- Tests: pytest
+
+### Setup (recommended)
+
+```bash
+# create venv and install runtime deps
+make install
+
+# install dev tools
+make install-dev
+```
+
+### Common tasks
+
+```bash
+# format code
+make format
+
+# run linters
+make lint
+
+# type check
+make typecheck
+
+# run tests
+make test
+
+# run server
+make run
+
+```
+
 ## Extending Functionality
 
 ### Adding a New LLM Provider

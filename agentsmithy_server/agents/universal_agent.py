@@ -1,26 +1,26 @@
 """Universal agent that handles all types of requests."""
 
-import re
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+
 from agentsmithy_server.agents.base_agent import BaseAgent
-from agentsmithy_server.tools import ToolManager, ToolExecutor, ToolFactory
+from agentsmithy_server.tools import ToolExecutor, ToolFactory
 from agentsmithy_server.utils.logger import agent_logger
 
 
 class UniversalAgent(BaseAgent):
     """Universal agent that handles all coding tasks."""
-    
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        
+
         # Initialize tool manager with default tools
         self.tool_manager = ToolFactory.create_tool_manager()
-        
+
         # Initialize tool executor
         self.tool_executor = ToolExecutor(self.tool_manager, self.llm_provider)
-        
+
         self._sse_callback = None
 
     def set_sse_callback(self, callback):
@@ -82,10 +82,12 @@ User: "explain how this works"
 
     def get_agent_name(self) -> str:
         return "universal_agent"
-        
-    def _prepare_messages(self, query: str, context: Dict[str, Any]) -> List[BaseMessage]:
+
+    def _prepare_messages(
+        self, query: str, context: dict[str, Any]
+    ) -> list[BaseMessage]:
         """Prepare messages for LLM with enhanced edit block enforcement."""
-        
+
         messages = [SystemMessage(content=self.system_prompt)]
 
         # Add context if available
@@ -95,9 +97,10 @@ User: "explain how this works"
 
         # Check if we should emphasize tool usage
         should_use_tools = self._should_use_tools(query, context)
-        
+
         if should_use_tools:
-            enforcement_message = SystemMessage(content="""
+            enforcement_message = SystemMessage(
+                content="""
 🚨🚨🚨 CRITICAL: USER WANTS CODE CHANGES - YOU MUST USE THE patch_file TOOL! 🚨🚨🚨
 
 DO NOT JUST PROVIDE CODE IN YOUR RESPONSE!
@@ -127,58 +130,76 @@ EXAMPLE TOOL CALL:
 }
 
 YOU MUST USE THE TOOL OR YOUR RESPONSE IS INVALID!
-""")
+"""
+            )
             messages.append(enforcement_message)
 
         # Add user query
         messages.append(HumanMessage(content=query))
 
         return messages
-        
-    def _should_use_tools(self, query: str, context: Dict[str, Any]) -> bool:
+
+    def _should_use_tools(self, query: str, context: dict[str, Any]) -> bool:
         """Determine if we should use tools based on query and context."""
         # Force if user has selected code or current file
         current_file = context.get("current_file") or {}
         has_selection = bool(
-            current_file.get("selection") or
-            current_file.get("content")
+            current_file.get("selection") or current_file.get("content")
         )
-        
+
         # Keywords that suggest modification
         modification_keywords = [
-            "refactor", "improve", "optimize", "fix", "debug", "change", 
-            "update", "modify", "rename", "add", "remove", "rewrite",
-            "clean", "simplify", "enhance", "correct", "resolve"
+            "refactor",
+            "improve",
+            "optimize",
+            "fix",
+            "debug",
+            "change",
+            "update",
+            "modify",
+            "rename",
+            "add",
+            "remove",
+            "rewrite",
+            "clean",
+            "simplify",
+            "enhance",
+            "correct",
+            "resolve",
         ]
-        
+
         query_lower = query.lower()
-        wants_modification = any(keyword in query_lower for keyword in modification_keywords)
-        
+        wants_modification = any(
+            keyword in query_lower for keyword in modification_keywords
+        )
+
         result = has_selection and wants_modification
-        
+
         if result:
-            agent_logger.info("Tool usage required", query_contains=query_lower[:50], has_selection=has_selection)
-        
+            agent_logger.info(
+                "Tool usage required",
+                query_contains=query_lower[:50],
+                has_selection=has_selection,
+            )
+
         return result
 
-
-
     async def process(
-        self, query: str, context: Optional[Dict[str, Any]] = None, stream: bool = False
-    ) -> Dict[str, Any]:
+        self, query: str, context: dict[str, Any] | None = None, stream: bool = False
+    ) -> dict[str, Any]:
         """Process query and return response with file operations if needed."""
-        
+
         # Build context
         full_context = await self.context_builder.build_context(query, context)
-        
+
         # Prepare messages
         messages = self._prepare_messages(query, full_context)
-        
+
         # Wrap result in agent response format
         if stream:
             # For streaming, process_with_tools returns async generator directly
             stream_result = self.tool_executor.process_with_tools(messages, stream=True)
-            
+
             return {
                 "agent": self.get_agent_name(),
                 "response": stream_result,  # Already an async generator from _process_streaming
@@ -192,17 +213,16 @@ YOU MUST USE THE TOOL OR YOUR RESPONSE IS INVALID!
                 "response": self._format_response(result),
                 "context": full_context,
             }
-    
 
-    def _format_response(self, result: Dict[str, Any]) -> Any:
+    def _format_response(self, result: dict[str, Any]) -> Any:
         """Format the response from tool executor."""
-        if result['type'] == 'tool_response':
+        if result["type"] == "tool_response":
             # Return structured response with tool results
             return {
-                "explanation": result.get('content', ''),
-                "tool_calls": result.get('tool_calls', []),
-                "tool_results": result.get('tool_results', [])
+                "explanation": result.get("content", ""),
+                "tool_calls": result.get("tool_calls", []),
+                "tool_results": result.get("tool_results", []),
             }
         else:
             # Regular text response
-            return result.get('content', '') 
+            return result.get("content", "")

@@ -1,6 +1,6 @@
 """Context builder for RAG system."""
 
-from typing import Any, Dict, Optional
+from typing import Any
 
 from agentsmithy_server.config import settings
 from agentsmithy_server.rag.vector_store import VectorStoreManager
@@ -9,16 +9,16 @@ from agentsmithy_server.rag.vector_store import VectorStoreManager
 class ContextBuilder:
     """Build context from various sources for LLM."""
 
-    def __init__(self, vector_store_manager: Optional[VectorStoreManager] = None):
+    def __init__(self, vector_store_manager: VectorStoreManager | None = None):
         self.vector_store_manager = vector_store_manager or VectorStoreManager()
         self.max_context_length = settings.max_context_length
 
     async def build_context(
         self,
         query: str,
-        file_context: Optional[Dict[str, Any]] = None,
+        file_context: dict[str, Any] | None = None,
         k_documents: int = 4,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Build context from query and file information."""
         context = {
             "query": query,
@@ -102,7 +102,7 @@ class ContextBuilder:
 
         return truncated + "\n... (truncated)"
 
-    def format_context_for_prompt(self, context: Dict[str, Any]) -> str:
+    def format_context_for_prompt(self, context: dict[str, Any]) -> str:
         """Format context into a string for LLM prompt."""
         formatted_parts = []
 
