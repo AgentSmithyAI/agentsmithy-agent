@@ -36,7 +36,7 @@ if __name__ == "__main__":
     try:
         import uvicorn
 
-        from agentsmithy_server.api.server import app, settings
+        from agentsmithy_server.api.server import settings
 
         startup_logger.info(
             "Starting AgentSmithy Server",

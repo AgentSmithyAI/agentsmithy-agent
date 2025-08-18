@@ -40,7 +40,7 @@ def visualize_graph(graph: StateGraph, output_path: str = "agent_graph.png") -> 
                 f.write(mermaid_str)
             print(f"💡 Mermaid diagram saved to: {mermaid_path}")
             return mermaid_path
-        except:
+        except Exception:
             return None
 
 

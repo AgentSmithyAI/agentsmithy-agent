@@ -359,7 +359,7 @@ async def chat(request: ChatRequest, raw_request: Request):
     except Exception as e:
         duration_ms = (time.time() - start_time) * 1000
         api_logger.error("Chat request failed", exception=e, duration_ms=duration_ms)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.get("/health", response_model=HealthResponse)
