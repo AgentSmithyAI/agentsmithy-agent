@@ -3,6 +3,7 @@
 
 import os
 import sys
+from argparse import ArgumentParser
 from pathlib import Path
 
 # Add the project root to Python path
@@ -34,6 +35,37 @@ if __name__ == "__main__":
         sys.exit(1)
 
     try:
+        # Parse required --workdir before importing the server
+        parser = ArgumentParser(description="Start AgentSmithy server")
+        parser.add_argument(
+            "--workdir",
+            required=True,
+            help="Absolute path to the working directory (agent state stored here)",
+        )
+        args, _ = parser.parse_known_args()
+
+        workdir_path = Path(args.workdir).expanduser().resolve()
+        if not workdir_path.exists():
+            startup_logger.error("--workdir does not exist", path=str(workdir_path))
+            sys.exit(1)
+        if not workdir_path.is_dir():
+            startup_logger.error("--workdir is not a directory", path=str(workdir_path))
+            sys.exit(1)
+
+        # Ensure hidden state directory exists
+        try:
+            # Initialize a workspace entity to own directory management
+            from agentsmithy_server.core.project import set_workspace
+
+            workspace = set_workspace(workdir_path)
+            state_dir = workspace.root_state_dir
+        except Exception as e:
+            startup_logger.error("Failed to initialize workspace", error=str(e))
+            sys.exit(1)
+
+        # Expose to the process for later access
+        os.environ["AGENTSMITHY_WORKDIR"] = str(workdir_path)
+
         import uvicorn
 
         from agentsmithy_server.api.server import settings
@@ -42,6 +74,8 @@ if __name__ == "__main__":
             "Starting AgentSmithy Server",
             server_url=f"http://{settings.server_host}:{settings.server_port}",
             docs_url=f"http://{settings.server_host}:{settings.server_port}/docs",
+            workdir=str(workdir_path),
+            state_dir=str(state_dir),
         )
 
         # Use custom logging configuration for consistent JSON output

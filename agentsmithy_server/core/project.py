@@ -1,0 +1,105 @@
+"""Project and workspace management.
+
+This module defines an extensible Project entity and a ProjectWorkspace that
+own directory-related concerns. It is designed to be expanded with metadata,
+configuration, indexing, and other project-level behaviors.
+"""
+
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass
+from pathlib import Path
+from typing import List, Optional
+
+
+@dataclass
+class Project:
+    """Represents a single project located under a workspace directory.
+
+    Attributes:
+        name: Project name (directory name under the workspace).
+        root: Absolute path to the project directory.
+        state_dir: Absolute path to the project's hidden state directory.
+    """
+
+    name: str
+    root: Path
+    state_dir: Path
+
+    def exists(self) -> bool:
+        return self.root.exists() and self.root.is_dir()
+
+    def validate(self) -> None:
+        if not self.exists():
+            raise FileNotFoundError(f"Project directory not found: {self.root}")
+
+    def ensure_state_dir(self) -> None:
+        """Ensure the project's hidden state directory exists."""
+        self.state_dir.mkdir(parents=True, exist_ok=True)
+
+
+class ProjectWorkspace:
+    """Represents a workspace containing multiple projects.
+
+    The workspace itself maintains a root-level hidden directory for global
+    state. Individual projects can additionally keep their own hidden state
+    directories inside each project folder.
+    """
+
+    def __init__(self, workdir: Path):
+        self.workdir: Path = workdir.expanduser().resolve()
+        if not self.workdir.exists() or not self.workdir.is_dir():
+            raise NotADirectoryError(f"Invalid workdir: {self.workdir}")
+        self.root_state_dir: Path = self.workdir / ".agentsmithy"
+
+    def ensure_root_state(self) -> None:
+        """Ensure the workspace-level hidden state directory exists."""
+        self.root_state_dir.mkdir(parents=True, exist_ok=True)
+
+    def list_projects(self) -> List[str]:
+        """Return a list of project directory names under the workspace."""
+        return [p.name for p in self.workdir.iterdir() if p.is_dir()]
+
+    def get_project(self, name: str) -> Project:
+        """Get a Project by name (does not create files)."""
+        project_root = (self.workdir / name).resolve()
+        # Prevent escaping the workspace
+        project_root.relative_to(self.workdir)
+        project_state = project_root / ".agentsmithy"
+        return Project(name=name, root=project_root, state_dir=project_state)
+
+
+_workspace_singleton: Optional[ProjectWorkspace] = None
+
+
+def set_workspace(workdir: Path) -> ProjectWorkspace:
+    """Create and set the global workspace singleton, ensuring root state."""
+    global _workspace_singleton
+    workspace = ProjectWorkspace(workdir)
+    workspace.ensure_root_state()
+    _workspace_singleton = workspace
+    return workspace
+
+
+def get_workspace() -> ProjectWorkspace:
+    """Get the global workspace, initializing from env if needed.
+
+    Requires AGENTSMITHY_WORKDIR to be set if not explicitly initialized via
+    set_workspace().
+    """
+    global _workspace_singleton
+    if _workspace_singleton is not None:
+        return _workspace_singleton
+
+    workdir_env = os.getenv("AGENTSMITHY_WORKDIR")
+    if not workdir_env:
+        raise RuntimeError(
+            "AGENTSMITHY_WORKDIR is not set. Initialize workspace at startup."
+        )
+    workspace = ProjectWorkspace(Path(workdir_env))
+    workspace.ensure_root_state()
+    _workspace_singleton = workspace
+    return workspace
+
+
