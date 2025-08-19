@@ -17,5 +17,3 @@ MODIFICATION_KEYWORDS = [
     "correct",
     "resolve",
 ]
-
-

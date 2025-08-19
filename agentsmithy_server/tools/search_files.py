@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Any, List
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -26,7 +26,7 @@ class SearchFilesTool(BaseTool):
         file_glob = kwargs.get("file_pattern") or "**/*"
 
         regex = re.compile(pattern)
-        results: List[dict[str, Any]] = []
+        results: list[dict[str, Any]] = []
 
         for file_path in base.glob(file_glob):
             if not file_path.is_file():
@@ -46,5 +46,3 @@ class SearchFilesTool(BaseTool):
                     )
 
         return {"type": "search_files_result", "results": results}
-
-

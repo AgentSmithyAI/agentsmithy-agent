@@ -3,14 +3,29 @@
 from typing import Any
 
 from agentsmithy_server.config import settings
+from agentsmithy_server.core.project import Project, get_workspace
 from agentsmithy_server.rag.vector_store import VectorStoreManager
 
 
 class ContextBuilder:
     """Build context from various sources for LLM."""
 
-    def __init__(self, vector_store_manager: VectorStoreManager | None = None):
-        self.vector_store_manager = vector_store_manager or VectorStoreManager()
+    def __init__(
+        self,
+        vector_store_manager: VectorStoreManager | None = None,
+        project: Project | None = None,
+        project_name: str | None = None,
+    ):
+        if vector_store_manager is not None:
+            self.vector_store_manager = vector_store_manager
+        else:
+            # Choose project by instance or by name from workspace
+            if project is None:
+                workspace = get_workspace()
+                default_name = project_name or "default"
+                project = workspace.get_project(default_name)
+                project.root.mkdir(parents=True, exist_ok=True)
+            self.vector_store_manager = VectorStoreManager(project)
         self.max_context_length = settings.max_context_length
 
     async def build_context(

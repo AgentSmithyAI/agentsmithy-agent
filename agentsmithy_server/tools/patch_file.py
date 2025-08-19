@@ -3,7 +3,7 @@ from __future__ import annotations
 import difflib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, List
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -21,7 +21,7 @@ class FileChange:
 
 class PatchArgs(BaseModel):
     file_path: str = Field(..., description="Path to file to modify")
-    changes: List[dict] = Field(..., description="List of change objects")
+    changes: list[dict] = Field(..., description="List of change objects")
 
 
 class PatchFileTool(BaseTool):
@@ -31,7 +31,7 @@ class PatchFileTool(BaseTool):
 
     async def _arun(self, **kwargs: Any) -> dict[str, Any]:
         file_path = Path(kwargs["file_path"]).resolve()
-        changes: List[dict[str, Any]] = kwargs.get("changes", [])
+        changes: list[dict[str, Any]] = kwargs.get("changes", [])
 
         # Read original file content
         original_text = file_path.read_text(encoding="utf-8")
@@ -61,7 +61,9 @@ class PatchFileTool(BaseTool):
             modified_lines[start_idx:end_idx] = new_lines
 
         # Write updated content
-        new_text = "\n".join(modified_lines) + ("\n" if original_text.endswith("\n") else "")
+        new_text = "\n".join(modified_lines) + (
+            "\n" if original_text.endswith("\n") else ""
+        )
         file_path.write_text(new_text, encoding="utf-8")
 
         # Compute diff for entire file
@@ -92,5 +94,3 @@ class PatchFileTool(BaseTool):
             "diff": unified,
             "applied_changes": [c.__dict__ for c in parsed_changes],
         }
-
-

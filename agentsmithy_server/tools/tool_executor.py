@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
-from typing import Any, Dict, List
 import json
+from collections.abc import AsyncGenerator
+from typing import Any
 
 from langchain_core.messages import BaseMessage, ToolMessage
 
 from agentsmithy_server.core.llm_provider import LLMProvider
+
 from .tool_manager import ToolManager
 
 
@@ -27,16 +28,20 @@ class ToolExecutor:
         tools = [t for t in self.tool_manager._tools.values()]
         return self.llm_provider.bind_tools(tools)
 
-    def process_with_tools(self, messages: List[BaseMessage], stream: bool = True) -> AsyncGenerator[Any, None]:
+    def process_with_tools(
+        self, messages: list[BaseMessage], stream: bool = True
+    ) -> AsyncGenerator[Any, None]:
         """Streaming path: yield strings or structured dicts suitable for SSE."""
         return self._process_streaming(messages)
 
-    async def process_with_tools_async(self, messages: List[BaseMessage]) -> dict[str, Any]:
+    async def process_with_tools_async(
+        self, messages: list[BaseMessage]
+    ) -> dict[str, Any]:
         """Non-streaming path using iterative tool loop until completion."""
         bound_llm = self._bind_tools()
-        conversation: List[BaseMessage] = list(messages)
-        aggregated_tool_results: List[dict[str, Any]] = []
-        aggregated_tool_calls: List[dict[str, Any]] = []
+        conversation: list[BaseMessage] = list(messages)
+        aggregated_tool_results: list[dict[str, Any]] = []
+        aggregated_tool_calls: list[dict[str, Any]] = []
 
         while True:
             response = await bound_llm.ainvoke(conversation)
@@ -71,10 +76,12 @@ class ToolExecutor:
                 )
                 conversation.append(tool_message)
 
-    async def _process_streaming(self, messages: List[BaseMessage]) -> AsyncGenerator[Any, None]:
+    async def _process_streaming(
+        self, messages: list[BaseMessage]
+    ) -> AsyncGenerator[Any, None]:
         """Streaming loop: emit tool_result events as they happen, then final content."""
         bound_llm = self._bind_tools()
-        conversation: List[BaseMessage] = list(messages)
+        conversation: list[BaseMessage] = list(messages)
 
         while True:
             # For simplicity, do non-chunked model call per iteration
@@ -98,6 +105,3 @@ class ToolExecutor:
                     tool_call_id=call.get("id", ""),
                 )
                 conversation.append(tool_message)
-
-
-

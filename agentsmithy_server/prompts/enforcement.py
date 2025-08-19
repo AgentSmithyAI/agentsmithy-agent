@@ -30,5 +30,3 @@ def build_tool_enforcement_message() -> str:
               reason: "Add behavior"
         """
     ).strip()
-
-

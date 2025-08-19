@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional
+from typing import Any
 
 
 @dataclass
@@ -38,6 +38,48 @@ class Project:
         """Ensure the project's hidden state directory exists."""
         self.state_dir.mkdir(parents=True, exist_ok=True)
 
+    # ---- RAG management (project-owned) ----
+    @property
+    def rag_dir(self) -> Path:
+        """Directory for all RAG-related state for this project."""
+        return self.state_dir / "rag"
+
+    def ensure_rag_dirs(self) -> None:
+        """Ensure RAG directories exist under the project state directory."""
+        self.ensure_state_dir()
+        (self.rag_dir / "chroma_db").mkdir(parents=True, exist_ok=True)
+
+    def get_vector_store(self, collection_name: str = "agentsmithy_docs"):
+        """Return a project-scoped VectorStoreManager instance.
+
+        Lazy-import to avoid circular imports at module load time.
+        """
+        from agentsmithy_server.rag.vector_store import VectorStoreManager
+
+        self.ensure_rag_dirs()
+        return VectorStoreManager(self, collection_name=collection_name)
+
+    async def rag_add_texts(
+        self,
+        texts: list[str],
+        metadatas: list[dict[str, Any]] | None = None,
+        collection_name: str = "agentsmithy_docs",
+    ) -> list[str]:
+        """Convenience method to add texts to this project's vector store."""
+        vsm = self.get_vector_store(collection_name)
+        return await vsm.add_texts(texts, metadatas=metadatas)
+
+    async def rag_similarity_search(
+        self,
+        query: str,
+        k: int = 4,
+        filter: dict[str, Any] | None = None,
+        collection_name: str = "agentsmithy_docs",
+    ):
+        """Search this project's vector store for similar documents."""
+        vsm = self.get_vector_store(collection_name)
+        return await vsm.similarity_search(query, k=k, filter=filter)
+
 
 class ProjectWorkspace:
     """Represents a workspace containing multiple projects.
@@ -57,7 +99,7 @@ class ProjectWorkspace:
         """Ensure the workspace-level hidden state directory exists."""
         self.root_state_dir.mkdir(parents=True, exist_ok=True)
 
-    def list_projects(self) -> List[str]:
+    def list_projects(self) -> list[str]:
         """Return a list of project directory names under the workspace."""
         return [p.name for p in self.workdir.iterdir() if p.is_dir()]
 
@@ -70,7 +112,7 @@ class ProjectWorkspace:
         return Project(name=name, root=project_root, state_dir=project_state)
 
 
-_workspace_singleton: Optional[ProjectWorkspace] = None
+_workspace_singleton: ProjectWorkspace | None = None
 
 
 def set_workspace(workdir: Path) -> ProjectWorkspace:
@@ -101,5 +143,3 @@ def get_workspace() -> ProjectWorkspace:
     workspace.ensure_root_state()
     _workspace_singleton = workspace
     return workspace
-
-

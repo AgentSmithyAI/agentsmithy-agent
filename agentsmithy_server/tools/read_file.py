@@ -21,5 +21,3 @@ class ReadFileTool(BaseTool):
         file_path = Path(kwargs["path"]).resolve()
         content = file_path.read_text(encoding="utf-8")
         return {"type": "read_file_result", "path": str(file_path), "content": content}
-
-

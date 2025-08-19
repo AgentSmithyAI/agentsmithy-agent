@@ -13,5 +13,3 @@ DEFAULT_SYSTEM_PROMPT = (
     "- Keep responses concise and technical.\n"
     "- When not modifying code, just answer without tools.\n"
 )
-
-

@@ -29,5 +29,3 @@ class ListFilesTool(BaseTool):
             for p in base.glob("*"):
                 items.append(str(p))
         return {"type": "list_files_result", "path": str(base), "items": items}
-
-

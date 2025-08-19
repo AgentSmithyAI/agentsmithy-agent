@@ -1,32 +1,41 @@
-"""Vector store module for RAG system."""
+"""Vector store module for RAG system.
+
+Persistency is project-scoped: vectors are stored inside the selected
+project's hidden state directory.
+"""
 
 import os
+from pathlib import Path
 from typing import Any
 
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-from agentsmithy_server.config import settings
+from agentsmithy_server.core.project import Project
 from agentsmithy_server.rag.embeddings import EmbeddingsManager
 
 
 class VectorStoreManager:
-    """Manager for vector store operations."""
+    """Manager for vector store operations, scoped to a Project."""
 
     def __init__(
         self,
-        persist_directory: str | None = None,
+        project: Project,
         collection_name: str = "agentsmithy_docs",
     ):
-        self.persist_directory = persist_directory or settings.chroma_persist_directory
+        self.project = project
+        # Store under project state directory
+        self.persist_directory = str(
+            Path(self.project.state_dir).joinpath("rag", "chroma_db")
+        )
         self.collection_name = collection_name
         self.embeddings_manager = EmbeddingsManager()
         self._vectorstore = None
 
-        # Create persist directory if it doesn't exist
-        if self.persist_directory:
-            os.makedirs(self.persist_directory, exist_ok=True)
+        # Ensure project state and persist directory exist
+        self.project.ensure_state_dir()
+        os.makedirs(self.persist_directory, exist_ok=True)
 
     @property
     def vectorstore(self) -> Chroma:

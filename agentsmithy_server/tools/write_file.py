@@ -23,5 +23,3 @@ class WriteFileTool(BaseTool):
         file_path.parent.mkdir(parents=True, exist_ok=True)
         file_path.write_text(kwargs["content"], encoding="utf-8")
         return {"type": "write_file_result", "path": str(file_path)}
-
-
