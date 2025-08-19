@@ -16,32 +16,9 @@ def visualize_graph(graph: StateGraph, output_path: str = "agent_graph.png") -> 
     Returns:
         Path to the saved image
     """
-    try:
-        # Try to get the graph visualization
-        # This requires graphviz to be installed
-        graph_image = graph.get_graph().draw_mermaid_png()
-
-        # Save the image
-        with open(output_path, "wb") as f:
-            f.write(graph_image)
-
-        print(f"✅ Graph visualization saved to: {output_path}")
-        return output_path
-
-    except Exception as e:
-        print(f"⚠️  Could not generate graph visualization: {e}")
-        print("   Make sure graphviz is installed: pip install graphviz")
-
-        # Try to at least output the mermaid representation
-        try:
-            mermaid_str = graph.get_graph().draw_mermaid()
-            mermaid_path = output_path.replace(".png", ".mermaid")
-            with open(mermaid_path, "w") as f:
-                f.write(mermaid_str)
-            print(f"💡 Mermaid diagram saved to: {mermaid_path}")
-            return mermaid_path
-        except Exception:
-            return None
+    # Disable heavy visualization by default to avoid dependency/version issues
+    print("⚠️  Graph visualization is disabled in this build.")
+    return ""
 
 
 def get_graph_structure(graph: Any) -> dict:
@@ -59,7 +36,10 @@ def get_graph_structure(graph: Any) -> dict:
         edges = []
 
         # Extract nodes and edges from the graph
-        graph_obj = graph.get_graph()
+        try:
+            graph_obj = graph.get_graph()
+        except Exception:
+            graph_obj = graph
 
         # Get nodes
         for node in graph_obj.nodes:

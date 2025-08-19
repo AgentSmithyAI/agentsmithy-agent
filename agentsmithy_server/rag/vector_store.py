@@ -31,7 +31,7 @@ class VectorStoreManager:
         )
         self.collection_name = collection_name
         self.embeddings_manager = EmbeddingsManager()
-        self._vectorstore = None
+        self._vectorstore: Chroma | None = None
 
         # Ensure project state and persist directory exist
         self.project.ensure_state_dir()

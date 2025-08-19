@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     )
 
     # OpenAI Configuration
-    openai_api_key: str = Field(..., description="OpenAI API key")
+    openai_api_key: str | None = Field(default=None, description="OpenAI API key")
 
     # Server Configuration
     server_host: str = Field(default="localhost", description="Server host")

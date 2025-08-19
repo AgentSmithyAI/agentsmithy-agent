@@ -29,6 +29,15 @@ class BaseTool(LCBaseTool, ABC):
         if self._sse_callback is not None:
             await self._sse_callback(event)
 
-    async def arun(self, **kwargs: Any) -> dict[str, Any]:
+    # Match LC BaseTool coroutine signature to satisfy type checker
+    async def arun(self, tool_input: str | dict[Any, Any] | None = None, **kwargs: Any) -> Any:  # type: ignore[override]
         """Execute tool asynchronously. Default calls LangChain _arun hook."""
-        return await self._arun(**kwargs)
+        merged_kwargs: dict[Any, Any] = {}
+        if isinstance(tool_input, dict):
+            merged_kwargs.update(tool_input)
+        merged_kwargs.update(kwargs)
+        return await self._arun(**merged_kwargs)
+
+    # Provide a default _run so subclasses are not abstract for mypy
+    def _run(self, *args: Any, **kwargs: Any) -> Any:  # pragma: no cover
+        raise NotImplementedError("Synchronous run is not supported; use arun")

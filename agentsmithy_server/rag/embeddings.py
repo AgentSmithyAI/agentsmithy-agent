@@ -3,8 +3,6 @@
 from langchain_core.embeddings import Embeddings
 from langchain_openai import OpenAIEmbeddings
 
-from agentsmithy_server.config import settings
-
 
 class EmbeddingsManager:
     """Manager for handling document embeddings."""
@@ -19,9 +17,8 @@ class EmbeddingsManager:
         """Get embeddings instance."""
         if self._embeddings is None:
             if self.provider == "openai":
-                self._embeddings = OpenAIEmbeddings(
-                    model=self.model, api_key=settings.openai_api_key
-                )
+                # Let SDK pick API key from environment; avoids SecretStr typing issues
+                self._embeddings = OpenAIEmbeddings(model=self.model)
             else:
                 raise ValueError(f"Unknown embeddings provider: {self.provider}")
 

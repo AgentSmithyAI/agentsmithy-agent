@@ -1,9 +1,9 @@
 """Context builder for RAG system."""
 
+import os
 from typing import Any
 
 from agentsmithy_server.config import settings
-import os
 from agentsmithy_server.core.project import Project, get_workspace
 from agentsmithy_server.rag.vector_store import VectorStoreManager
 
@@ -17,6 +17,7 @@ class ContextBuilder:
         project: Project | None = None,
         project_name: str | None = None,
     ):
+        self.project: Project | None = None
         if vector_store_manager is not None:
             self.vector_store_manager = vector_store_manager
             # Try to capture project if manager exposes it
@@ -25,7 +26,9 @@ class ContextBuilder:
             # Choose project by instance or by name from workspace
             if project is None:
                 workspace = get_workspace()
-                default_name = project_name or os.getenv("AGENTSMITHY_PROJECT") or "default"
+                default_name = (
+                    project_name or os.getenv("AGENTSMITHY_PROJECT") or "default"
+                )
                 project = workspace.get_project(default_name)
                 project.root.mkdir(parents=True, exist_ok=True)
             self.vector_store_manager = VectorStoreManager(project)
@@ -39,7 +42,7 @@ class ContextBuilder:
         k_documents: int = 4,
     ) -> dict[str, Any]:
         """Build context from query and file information."""
-        context = {
+        context: dict[str, Any] = {
             "query": query,
             "current_file": None,
             "open_files": [],
@@ -48,19 +51,17 @@ class ContextBuilder:
         }
 
         # Inject project metadata if available
-        project_info = {}
-        if getattr(self, "project", None) is not None:
-            metadata = {}
+        if self.project is not None:
+            metadata: dict[str, Any] = {}
             try:
                 metadata = self.project.load_metadata()
             except Exception:
                 metadata = {}
-            project_info = {
+            context["project"] = {
                 "name": self.project.name,
                 "root": str(self.project.root),
                 "metadata": metadata,
             }
-            context["project"] = project_info
 
         # Add current file context
         if file_context and file_context.get("current_file"):

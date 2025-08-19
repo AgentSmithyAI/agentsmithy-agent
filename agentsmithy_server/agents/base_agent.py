@@ -84,7 +84,7 @@ class BaseAgent(ABC):
         self, query: str, context: dict[str, Any]
     ) -> list[BaseMessage]:
         """Prepare messages for LLM."""
-        messages = [SystemMessage(content=self.system_prompt)]
+        messages: list[BaseMessage] = [SystemMessage(content=self.system_prompt)]
 
         # Add context if available
         formatted_context = self.context_builder.format_context_for_prompt(context)

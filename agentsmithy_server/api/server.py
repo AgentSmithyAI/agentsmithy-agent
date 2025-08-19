@@ -66,7 +66,7 @@ async def generate_sse_events(
     api_logger.info("Starting SSE event generation", query=query[:100])
 
     # Define SSE callback for tool results
-    sse_events_queue = asyncio.Queue()
+    sse_events_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
 
     async def sse_callback(event_data: dict[str, Any]):
         """Callback to queue SSE events from tools."""
@@ -146,7 +146,7 @@ async def generate_sse_events(
                             ]:
                                 event_dict = {"data": json.dumps(chunk)}
                                 api_logger.stream_log(
-                                    "file_operation", chunk, chunk_number=chunk_count
+                                    "file_operation", None, chunk_number=chunk_count
                                 )
                                 yield event_dict
                             else:
@@ -176,7 +176,9 @@ async def generate_sse_events(
                                     sse_events_queue.get(), timeout=0.01
                                 )
                                 event_dict = {"data": json.dumps(tool_event)}
-                                api_logger.stream_log("tool_event", tool_event)
+                                api_logger.stream_log(
+                                    "tool_event", json.dumps(tool_event)[:100]
+                                )
                                 yield event_dict
                         except TimeoutError:
                             pass
@@ -315,7 +317,7 @@ async def chat(request: ChatRequest, raw_request: Request):
         if request.stream:
             # Return SSE streaming response
             api_logger.info("Returning SSE streaming response")
-            response = EventSourceResponse(
+            sse_response = EventSourceResponse(
                 generate_sse_events(user_message, request.context),
                 headers={
                     "Cache-Control": "no-cache",
@@ -329,7 +331,7 @@ async def chat(request: ChatRequest, raw_request: Request):
                 "POST", "/api/chat", 200, duration_ms, streaming=True
             )
 
-            return response
+            return sse_response
         else:
             # Return regular JSON response
             api_logger.info("Processing non-streaming request")
@@ -337,7 +339,7 @@ async def chat(request: ChatRequest, raw_request: Request):
                 query=user_message, context=request.context, stream=False
             )
 
-            response = ChatResponse(
+            json_response = ChatResponse(
                 content=result["response"], done=True, metadata=result["metadata"]
             )
 
@@ -352,7 +354,7 @@ async def chat(request: ChatRequest, raw_request: Request):
                 response_length=len(result["response"]),
             )
 
-            return response
+            return json_response
 
     except HTTPException:
         raise

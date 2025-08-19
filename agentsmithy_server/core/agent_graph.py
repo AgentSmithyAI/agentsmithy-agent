@@ -51,7 +51,7 @@ class AgentOrchestrator:
         if hasattr(self.universal_agent, "set_sse_callback"):
             self.universal_agent.set_sse_callback(callback)
 
-    def _build_graph(self) -> StateGraph:
+    def _build_graph(self) -> Any:
         """Build the simplified agent orchestration graph."""
         graph = StateGraph(AgentState)
 

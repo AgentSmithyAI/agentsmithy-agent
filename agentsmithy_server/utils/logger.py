@@ -108,11 +108,14 @@ class StructuredLogger:
 
             # Add exception info if present
             if record.exc_info:
-                log_data["exception"] = {
-                    "type": record.exc_info[0].__name__,
-                    "message": str(record.exc_info[1]),
-                    "traceback": traceback.format_exception(*record.exc_info),
-                }
+                exc_type = record.exc_info[0]
+                exc_value = record.exc_info[1]
+                if exc_type is not None:
+                    log_data["exception"] = {
+                        "type": getattr(exc_type, "__name__", str(exc_type)),
+                        "message": str(exc_value),
+                        "traceback": traceback.format_exception(*record.exc_info),
+                    }
 
             return json.dumps(log_data)
 

@@ -74,12 +74,13 @@ if __name__ == "__main__":
         # If project specified and it's new (no metadata), run LLM-driven inspector agent
         if args.project:
             try:
-                from agentsmithy_server.core.project import get_workspace
+                import asyncio
+
                 from agentsmithy_server.agents.project_inspector_agent import (
                     ProjectInspectorAgent,
                 )
                 from agentsmithy_server.core import LLMFactory
-                import asyncio
+                from agentsmithy_server.core.project import get_workspace
 
                 ws = get_workspace()
                 project = ws.get_project(args.project)

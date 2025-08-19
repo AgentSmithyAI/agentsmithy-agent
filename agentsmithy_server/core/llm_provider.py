@@ -55,12 +55,9 @@ class OpenAIProvider(LLMProvider):
             max_tokens=self.max_tokens,
         )
 
+        # Initialize LLM; rely on SDK/env for auth. Avoid args that break typing across versions
         self.llm = ChatOpenAI(
-            model=self.model,
-            temperature=self.temperature,
-            max_tokens=self.max_tokens,
-            api_key=self.api_key,
-            streaming=True,
+            model=self.model, temperature=self.temperature, streaming=True
         )
 
     async def agenerate(
@@ -71,30 +68,35 @@ class OpenAIProvider(LLMProvider):
             return self._agenerate_stream(messages, **kwargs)
         else:
             response = await self.llm.ainvoke(messages, **kwargs)
-            return response.content
+            content = getattr(response, "content", "")
+            if isinstance(content, str):
+                return content
+            # Fallback to stringified
+            return str(content)
 
     async def _agenerate_stream(
         self, messages: list[BaseMessage], **kwargs
     ) -> AsyncIterator[str]:
         """Generate streaming response."""
         async for chunk in self.llm.astream(messages, **kwargs):
-            if chunk.content:
-                yield chunk.content
+            content = getattr(chunk, "content", None)
+            if isinstance(content, str) and content:
+                yield content
 
     def get_model_name(self) -> str:
         """Get the model name."""
         return self.model
 
-    def bind_tools(self, tools: list[BaseTool]) -> ChatOpenAI:
+    def bind_tools(self, tools: list[BaseTool]) -> Any:
         """Bind tools to the LLM for function calling."""
-        # Return a new instance with tools bound. We only bind class-based tools here.
+        # Return a tool-bound runnable/LLM as provided by SDK
         return self.llm.bind_tools(tools)
 
 
 class LLMFactory:
     """Factory for creating LLM providers."""
 
-    _providers = {
+    _providers: dict[str, type[LLMProvider]] = {
         "openai": OpenAIProvider,
     }
 
@@ -105,7 +107,8 @@ class LLMFactory:
             raise ValueError(f"Unknown provider: {provider}")
 
         provider_class = cls._providers[provider]
-        return provider_class(**kwargs)
+        provider_instance: LLMProvider = provider_class(**kwargs)
+        return provider_instance
 
     @classmethod
     def register_provider(cls, name: str, provider_class: type[LLMProvider]):
