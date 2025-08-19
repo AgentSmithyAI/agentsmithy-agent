@@ -1,6 +1,11 @@
 from __future__ import annotations
 
 from .patch_file import PatchFileTool
+from .read_file import ReadFileTool
+from .write_file import WriteFileTool
+from .replace_in_file import ReplaceInFileTool
+from .list_files import ListFilesTool
+from .search_files import SearchFilesTool
 from .tool_manager import ToolManager
 
 
@@ -10,8 +15,13 @@ class ToolFactory:
     @staticmethod
     def create_tool_manager() -> ToolManager:
         manager = ToolManager()
-        # Register default tools
-        manager.register(PatchFileTool())
+        # Register default tools (Cline-style set)
+        manager.register(ReadFileTool())
+        manager.register(WriteFileTool())
+        manager.register(ReplaceInFileTool())
+        manager.register(ListFilesTool())
+        manager.register(SearchFilesTool())
+        manager.register(PatchFileTool())  # keep for unified diff workflow
         return manager
 
 

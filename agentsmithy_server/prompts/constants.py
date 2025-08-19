@@ -1,0 +1,21 @@
+MODIFICATION_KEYWORDS = [
+    "refactor",
+    "improve",
+    "optimize",
+    "fix",
+    "debug",
+    "change",
+    "update",
+    "modify",
+    "rename",
+    "add",
+    "remove",
+    "rewrite",
+    "clean",
+    "simplify",
+    "enhance",
+    "correct",
+    "resolve",
+]
+
+

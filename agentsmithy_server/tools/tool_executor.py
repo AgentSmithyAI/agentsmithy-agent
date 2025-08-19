@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, List
+import json
 
-from langchain_core.messages import BaseMessage
+from langchain_core.messages import BaseMessage, ToolMessage
 
 from agentsmithy_server.core.llm_provider import LLMProvider
 from .tool_manager import ToolManager
@@ -31,48 +32,72 @@ class ToolExecutor:
         return self._process_streaming(messages)
 
     async def process_with_tools_async(self, messages: List[BaseMessage]) -> dict[str, Any]:
-        """Non-streaming path: returns full aggregated result."""
+        """Non-streaming path using iterative tool loop until completion."""
         bound_llm = self._bind_tools()
-        # Non-streaming: ainvoke returns full response
-        response = await bound_llm.ainvoke(messages)
-        content = getattr(response, "content", "")
-        tool_calls = getattr(response, "tool_calls", [])
+        conversation: List[BaseMessage] = list(messages)
+        aggregated_tool_results: List[dict[str, Any]] = []
+        aggregated_tool_calls: List[dict[str, Any]] = []
 
-        tool_results: List[dict[str, Any]] = []
-        for call in tool_calls or []:
-            name = call.get("name") or call.get("tool", {}).get("name")
-            args = call.get("args") or call.get("tool", {}).get("args") or {}
-            if not name:
-                continue
-            result = await self.tool_manager.run_tool(name, **args)
-            tool_results.append({"name": name, "result": result})
+        while True:
+            response = await bound_llm.ainvoke(conversation)
+            tool_calls = getattr(response, "tool_calls", [])
 
-        if tool_results:
-            return {
-                "type": "tool_response",
-                "content": content,
-                "tool_calls": tool_calls,
-                "tool_results": tool_results,
-            }
-        return {"type": "text", "content": content}
+            if not tool_calls:
+                # Completed text answer. If tools were used, return structured tool_response
+                final_content = getattr(response, "content", "")
+                if aggregated_tool_results:
+                    return {
+                        "type": "tool_response",
+                        "content": final_content,
+                        "tool_calls": aggregated_tool_calls,
+                        "tool_results": aggregated_tool_results,
+                    }
+                return {"type": "text", "content": final_content}
+
+            # Execute tools one-by-one, append ToolMessages to conversation
+            for call in tool_calls:
+                name = call.get("name") or call.get("tool", {}).get("name")
+                args = call.get("args") or call.get("tool", {}).get("args") or {}
+                if not name:
+                    continue
+                result = await self.tool_manager.run_tool(name, **args)
+                aggregated_tool_results.append({"name": name, "result": result})
+                aggregated_tool_calls.append({"name": name, "args": args})
+
+                # Append ToolMessage with serialized result back to model
+                tool_message = ToolMessage(
+                    content=json.dumps(result, ensure_ascii=False),
+                    tool_call_id=call.get("id", ""),
+                )
+                conversation.append(tool_message)
 
     async def _process_streaming(self, messages: List[BaseMessage]) -> AsyncGenerator[Any, None]:
+        """Streaming loop: emit tool_result events as they happen, then final content."""
         bound_llm = self._bind_tools()
-        # Streaming path: astream yields chunks; reconstruct if tool-calls appear
-        async for chunk in bound_llm.astream(messages):
-            if hasattr(chunk, "tool_calls") and chunk.tool_calls:
-                # Execute tools immediately and emit structured events
-                for call in chunk.tool_calls:
-                    name = call.get("name") or call.get("tool", {}).get("name")
-                    args = call.get("args") or call.get("tool", {}).get("args") or {}
-                    if not name:
-                        continue
-                    result = await self.tool_manager.run_tool(name, **args)
-                    yield {"type": "tool_result", "name": name, "result": result}
-            else:
-                text = getattr(chunk, "content", None)
-                if text:
-                    yield text
+        conversation: List[BaseMessage] = list(messages)
+
+        while True:
+            # For simplicity, do non-chunked model call per iteration
+            response = await bound_llm.ainvoke(conversation)
+            tool_calls = getattr(response, "tool_calls", [])
+            if not tool_calls:
+                final_text = getattr(response, "content", "")
+                if final_text:
+                    yield {"content": final_text}
+                break
+
+            for call in tool_calls:
+                name = call.get("name") or call.get("tool", {}).get("name")
+                args = call.get("args") or call.get("tool", {}).get("args") or {}
+                if not name:
+                    continue
+                result = await self.tool_manager.run_tool(name, **args)
+                yield {"type": "tool_result", "name": name, "result": result}
+                tool_message = ToolMessage(
+                    content=json.dumps(result, ensure_ascii=False),
+                    tool_call_id=call.get("id", ""),
+                )
+                conversation.append(tool_message)
 
 
 

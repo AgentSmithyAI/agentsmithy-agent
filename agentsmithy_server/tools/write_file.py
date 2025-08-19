@@ -1,0 +1,27 @@
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+from pydantic import BaseModel, Field
+
+from .base_tool import BaseTool
+
+
+class WriteFileArgs(BaseModel):
+    path: str = Field(..., description="Path to write")
+    content: str = Field(..., description="Complete file content to write")
+
+
+class WriteFileTool(BaseTool):
+    name = "write_to_file"
+    description = "Write complete content to a file (create or overwrite)."
+    args_schema = WriteFileArgs
+
+    async def _arun(self, **kwargs: Any) -> dict[str, Any]:
+        file_path = Path(kwargs["path"]).resolve()
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_text(kwargs["content"], encoding="utf-8")
+        return {"type": "write_file_result", "path": str(file_path)}
+
+

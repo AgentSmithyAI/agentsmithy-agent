@@ -2,6 +2,11 @@
 
 A local AI server similar to Cursor, built using LangGraph for orchestration, RAG for contextualization, and SSE streaming.
 
+## Documentation
+
+- See the documentation in [docs/](./docs).
+- SSE protocol details: [docs/sse-protocol.md](./docs/sse-protocol.md)
+
 ## Features
 
 - 🤖 **Universal agent** orchestrated with LangGraph
