@@ -13,9 +13,9 @@ class ReadFileArgs(BaseModel):
 
 
 class ReadFileTool(BaseTool):
-    name = "read_file"
-    description = "Read the contents of a file at the specified path."
-    args_schema = ReadFileArgs
+    name: str = "read_file"
+    description: str = "Read the contents of a file at the specified path."
+    args_schema: type[BaseModel] = ReadFileArgs
 
     async def _arun(self, **kwargs: Any) -> dict[str, Any]:
         file_path = Path(kwargs["path"]).resolve()

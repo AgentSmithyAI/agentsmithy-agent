@@ -42,8 +42,13 @@ class PrettyFormatter(logging.Formatter):
         extras = []
         if hasattr(record, "extra_fields") and record.extra_fields:
             for key, value in record.extra_fields.items():
-                if isinstance(value, str) and len(value) > 50:
-                    value = value[:47] + "..."
+                # Do not truncate for ERROR/CRITICAL; use a higher limit otherwise
+                if (
+                    isinstance(value, str)
+                    and record.levelname not in ("ERROR", "CRITICAL")
+                    and len(value) > 300
+                ):
+                    value = value[:297] + "..."
                 extras.append(f"{self.GRAY}{key}={self.RESET}{value}")
 
         # Build final message

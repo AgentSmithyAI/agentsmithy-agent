@@ -25,9 +25,11 @@ class PatchArgs(BaseModel):
 
 
 class PatchFileTool(BaseTool):
-    name = "patch_file"
-    description = "Apply multiple line-range changes to a file and emit diff events."
-    args_schema = PatchArgs
+    name: str = "patch_file"
+    description: str = (
+        "Apply multiple line-range changes to a file and emit diff events."
+    )
+    args_schema: type[BaseModel] = PatchArgs
 
     async def _arun(self, **kwargs: Any) -> dict[str, Any]:
         file_path = Path(kwargs["file_path"]).resolve()

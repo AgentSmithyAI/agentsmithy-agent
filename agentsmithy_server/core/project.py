@@ -167,3 +167,18 @@ def get_workspace() -> ProjectWorkspace:
     workspace.ensure_root_state()
     _workspace_singleton = workspace
     return workspace
+
+
+def get_current_project() -> Project:
+    """Return the active Project inferred from AGENTSMITHY_WORKDIR.
+
+    In setups where the working directory is the project directory, this
+    provides a direct Project instance rooted at that path.
+    """
+    workdir_env = os.getenv("AGENTSMITHY_WORKDIR")
+    if not workdir_env:
+        raise RuntimeError(
+            "AGENTSMITHY_WORKDIR is not set. Initialize workspace at startup."
+        )
+    root = Path(workdir_env).expanduser().resolve()
+    return Project(name=root.name, root=root, state_dir=root / ".agentsmithy")

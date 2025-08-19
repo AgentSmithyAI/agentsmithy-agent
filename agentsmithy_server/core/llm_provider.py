@@ -9,6 +9,10 @@ from langchain_core.tools import BaseTool
 from langchain_openai import ChatOpenAI
 
 from agentsmithy_server.config import settings
+from agentsmithy_server.core.agent_config import (
+    AgentConfig,
+    get_agent_config_provider,
+)
 from agentsmithy_server.utils.logger import agent_logger
 
 
@@ -42,7 +46,16 @@ class OpenAIProvider(LLMProvider):
         temperature: float | None = None,
         max_tokens: int | None = None,
         api_key: str | None = None,
+        agent_name: str | None = None,
     ):
+        # Resolve model/temperature from provider if not explicitly passed
+        if model is None or temperature is None:
+            cfg: AgentConfig = get_agent_config_provider().get_config(
+                (agent_name or "").strip() or "universal_agent"
+            )
+            model = model or cfg.model
+            temperature = temperature or cfg.temperature
+
         self.model = model or settings.default_model
         self.temperature = temperature or settings.default_temperature
         self.max_tokens = max_tokens or settings.max_tokens
@@ -55,10 +68,19 @@ class OpenAIProvider(LLMProvider):
             max_tokens=self.max_tokens,
         )
 
-        # Initialize LLM; rely on SDK/env for auth. Avoid args that break typing across versions
-        self.llm = ChatOpenAI(
-            model=self.model, temperature=self.temperature, streaming=True
-        )
+        # Initialize LLM; use explicit API key if provided
+        if self.api_key:
+            # Note: langchain_openai expects SecretStr; use environment variable fallback instead
+            import os
+
+            os.environ.setdefault("OPENAI_API_KEY", str(self.api_key))
+            self.llm = ChatOpenAI(
+                model=self.model, temperature=self.temperature, streaming=True
+            )
+        else:
+            self.llm = ChatOpenAI(
+                model=self.model, temperature=self.temperature, streaming=True
+            )
 
     async def agenerate(
         self, messages: list[BaseMessage], stream: bool = False, **kwargs

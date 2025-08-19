@@ -140,7 +140,14 @@ YOU MUST USE THE TOOL OR YOUR RESPONSE IS INVALID!
         self, query: str, context: dict[str, Any] | None = None, stream: bool = False
     ) -> dict[str, Any]:
         """Process query and return response with file operations if needed."""
-
+        # Concise run log: which agent, model, and input context keys
+        agent_logger.info(
+            "Agent run",
+            agent=self.get_agent_name(),
+            model=self.llm_provider.get_model_name(),
+            stream=stream,
+            context_keys=list((context or {}).keys()),
+        )
         # Build context
         full_context = await self.context_builder.build_context(query, context)
 

@@ -1,10 +1,9 @@
 """Context builder for RAG system."""
 
-import os
 from typing import Any
 
 from agentsmithy_server.config import settings
-from agentsmithy_server.core.project import Project, get_workspace
+from agentsmithy_server.core.project import Project
 from agentsmithy_server.rag.vector_store import VectorStoreManager
 
 
@@ -25,11 +24,10 @@ class ContextBuilder:
         else:
             # Choose project by instance or by name from workspace
             if project is None:
-                workspace = get_workspace()
-                default_name = (
-                    project_name or os.getenv("AGENTSMITHY_PROJECT") or "default"
-                )
-                project = workspace.get_project(default_name)
+                # If no explicit project provided, use workdir as current project
+                from agentsmithy_server.core.project import get_current_project
+
+                project = get_current_project()
                 project.root.mkdir(parents=True, exist_ok=True)
             self.vector_store_manager = VectorStoreManager(project)
             self.project = project
@@ -100,8 +98,9 @@ class ContextBuilder:
 
         # Search for relevant documents
         if query:
+            # Keep RAG small during inspection to avoid token bloat
             relevant_docs = await self.vector_store_manager.similarity_search(
-                query, k=k_documents
+                query, k=min(k_documents, 2)
             )
 
             for doc in relevant_docs:

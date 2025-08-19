@@ -14,9 +14,9 @@ class WriteFileArgs(BaseModel):
 
 
 class WriteFileTool(BaseTool):
-    name = "write_to_file"
-    description = "Write complete content to a file (create or overwrite)."
-    args_schema = WriteFileArgs
+    name: str = "write_to_file"
+    description: str = "Write complete content to a file (create or overwrite)."
+    args_schema: type[BaseModel] = WriteFileArgs
 
     async def _arun(self, **kwargs: Any) -> dict[str, Any]:
         file_path = Path(kwargs["path"]).resolve()

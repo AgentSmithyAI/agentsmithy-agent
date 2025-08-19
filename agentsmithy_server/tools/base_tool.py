@@ -16,8 +16,7 @@ class BaseTool(LCBaseTool, ABC):
     the provided callback. Subclasses should implement `arun`.
     """
 
-    name: str = "tool"
-    description: str = "Generic tool"
+    # Tool subclasses should declare: name: str, description: str, args_schema: type[BaseModel]
 
     def __init__(self) -> None:
         self._sse_callback: SseCallback | None = None

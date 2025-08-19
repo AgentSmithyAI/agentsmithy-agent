@@ -16,9 +16,11 @@ class SearchFilesArgs(BaseModel):
 
 
 class SearchFilesTool(BaseTool):
-    name = "search_files"
-    description = "Regex search across files in a directory, returning context lines."
-    args_schema = SearchFilesArgs
+    name: str = "search_files"
+    description: str = (
+        "Regex search across files in a directory, returning context lines."
+    )
+    args_schema: type[BaseModel] = SearchFilesArgs
 
     async def _arun(self, **kwargs: Any) -> dict[str, Any]:
         base = Path(kwargs["path"]).resolve()

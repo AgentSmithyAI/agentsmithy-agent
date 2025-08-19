@@ -42,11 +42,7 @@ if __name__ == "__main__":
             required=True,
             help="Absolute path to the working directory (agent state stored here)",
         )
-        parser.add_argument(
-            "--project",
-            required=False,
-            help="Project directory name under the workdir to activate (optional)",
-        )
+        # No --project: workdir is the project
         args, _ = parser.parse_known_args()
 
         workdir_path = Path(args.workdir).expanduser().resolve()
@@ -71,34 +67,44 @@ if __name__ == "__main__":
         # Expose to the process for later access
         os.environ["AGENTSMITHY_WORKDIR"] = str(workdir_path)
 
-        # If project specified and it's new (no metadata), run LLM-driven inspector agent
-        if args.project:
-            try:
-                import asyncio
+        # Treat workdir as the active project; inspect and save metadata if missing
+        try:
+            import asyncio
 
-                from agentsmithy_server.agents.project_inspector_agent import (
-                    ProjectInspectorAgent,
+            from agentsmithy_server.agents.project_inspector_agent import (
+                ProjectInspectorAgent,
+            )
+            from agentsmithy_server.core import LLMFactory
+            from agentsmithy_server.core.project import get_current_project
+
+            project = get_current_project()
+            project.root.mkdir(parents=True, exist_ok=True)
+            project.ensure_state_dir()
+            if not project.has_metadata():
+                # Use a tool-capable model for inspector; allow env override
+                import os as _os
+
+                inspector_model = _os.getenv("AGENTSMITHY_INSPECTOR_MODEL")
+                llm_provider = LLMFactory.create(
+                    "openai",
+                    model=inspector_model,
+                    agent_name="project_inspector",
                 )
-                from agentsmithy_server.core import LLMFactory
-                from agentsmithy_server.core.project import get_workspace
+                inspector = ProjectInspectorAgent(llm_provider, None)
+                asyncio.run(inspector.inspect_and_save(project))
+                startup_logger.info(
+                    "Project analyzed by inspector agent and metadata saved",
+                    project=project.name,
+                )
+        except Exception as e:
+            # Log full exception details for diagnostics
+            import traceback as _tb
 
-                ws = get_workspace()
-                project = ws.get_project(args.project)
-                project.root.mkdir(parents=True, exist_ok=True)
-                project.ensure_state_dir()
-                if not project.has_metadata():
-                    # Construct minimal inspector agent using default provider
-                    llm_provider = LLMFactory.create("openai")
-                    inspector = ProjectInspectorAgent(llm_provider, None)
-                    asyncio.run(inspector.inspect_and_save(project))
-                    startup_logger.info(
-                        "Project analyzed by inspector agent and metadata saved",
-                        project=project.name,
-                    )
-                # Expose selected project to the process so ContextBuilder picks it up
-                os.environ["AGENTSMITHY_PROJECT"] = args.project
-            except Exception as e:
-                startup_logger.warning("Project inspection failed", error=str(e))
+            startup_logger.error(
+                "Project inspection failed",
+                error=str(e),
+                traceback="".join(_tb.format_exception(type(e), e, e.__traceback__)),
+            )
 
         import uvicorn
 

@@ -14,9 +14,9 @@ class ListFilesArgs(BaseModel):
 
 
 class ListFilesTool(BaseTool):
-    name = "list_files"
-    description = "List files and directories under a path."
-    args_schema = ListFilesArgs
+    name: str = "list_files"
+    description: str = "List files and directories under a path."
+    args_schema: type[BaseModel] = ListFilesArgs
 
     async def _arun(self, **kwargs: Any) -> dict[str, Any]:
         base = Path(kwargs["path"]).resolve()

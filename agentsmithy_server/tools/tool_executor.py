@@ -7,6 +7,7 @@ from typing import Any
 from langchain_core.messages import BaseMessage, ToolMessage
 
 from agentsmithy_server.core.llm_provider import LLMProvider
+from agentsmithy_server.utils.logger import agent_logger
 
 from .tool_manager import ToolManager
 
@@ -44,8 +45,10 @@ class ToolExecutor:
         aggregated_tool_calls: list[dict[str, Any]] = []
 
         while True:
+            agent_logger.info("LLM invoke", messages=len(conversation))
             response = await bound_llm.ainvoke(conversation)
             tool_calls = getattr(response, "tool_calls", [])
+            agent_logger.info("LLM response", has_tool_calls=bool(tool_calls))
 
             if not tool_calls:
                 # Completed text answer. If tools were used, return structured tool_response
@@ -60,6 +63,8 @@ class ToolExecutor:
                 return {"type": "text", "content": final_content}
 
             # Execute tools one-by-one, append ToolMessages to conversation
+            # IMPORTANT: append the AI response (with tool_calls) first per OpenAI spec
+            conversation.append(response)
             for call in tool_calls:
                 name = call.get("name") or call.get("tool", {}).get("name")
                 args = call.get("args") or call.get("tool", {}).get("args") or {}
@@ -85,6 +90,7 @@ class ToolExecutor:
 
         while True:
             # For simplicity, do non-chunked model call per iteration
+            agent_logger.info("LLM invoke", messages=len(conversation))
             response = await bound_llm.ainvoke(conversation)
             tool_calls = getattr(response, "tool_calls", [])
             if not tool_calls:
@@ -93,6 +99,8 @@ class ToolExecutor:
                     yield {"content": final_text}
                 break
 
+            # Append the AI response with tool_calls before sending tool results
+            conversation.append(response)
             for call in tool_calls:
                 name = call.get("name") or call.get("tool", {}).get("name")
                 args = call.get("args") or call.get("tool", {}).get("args") or {}
