@@ -42,6 +42,11 @@ if __name__ == "__main__":
             required=True,
             help="Absolute path to the working directory (agent state stored here)",
         )
+        parser.add_argument(
+            "--project",
+            required=False,
+            help="Project directory name under the workdir to activate (optional)",
+        )
         args, _ = parser.parse_known_args()
 
         workdir_path = Path(args.workdir).expanduser().resolve()
@@ -65,6 +70,34 @@ if __name__ == "__main__":
 
         # Expose to the process for later access
         os.environ["AGENTSMITHY_WORKDIR"] = str(workdir_path)
+
+        # If project specified and it's new (no metadata), run LLM-driven inspector agent
+        if args.project:
+            try:
+                from agentsmithy_server.core.project import get_workspace
+                from agentsmithy_server.agents.project_inspector_agent import (
+                    ProjectInspectorAgent,
+                )
+                from agentsmithy_server.core import LLMFactory
+                import asyncio
+
+                ws = get_workspace()
+                project = ws.get_project(args.project)
+                project.root.mkdir(parents=True, exist_ok=True)
+                project.ensure_state_dir()
+                if not project.has_metadata():
+                    # Construct minimal inspector agent using default provider
+                    llm_provider = LLMFactory.create("openai")
+                    inspector = ProjectInspectorAgent(llm_provider, None)
+                    asyncio.run(inspector.inspect_and_save(project))
+                    startup_logger.info(
+                        "Project analyzed by inspector agent and metadata saved",
+                        project=project.name,
+                    )
+                # Expose selected project to the process so ContextBuilder picks it up
+                os.environ["AGENTSMITHY_PROJECT"] = args.project
+            except Exception as e:
+                startup_logger.warning("Project inspection failed", error=str(e))
 
         import uvicorn
 

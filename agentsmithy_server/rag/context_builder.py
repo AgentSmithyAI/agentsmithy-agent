@@ -3,6 +3,7 @@
 from typing import Any
 
 from agentsmithy_server.config import settings
+import os
 from agentsmithy_server.core.project import Project, get_workspace
 from agentsmithy_server.rag.vector_store import VectorStoreManager
 
@@ -18,14 +19,17 @@ class ContextBuilder:
     ):
         if vector_store_manager is not None:
             self.vector_store_manager = vector_store_manager
+            # Try to capture project if manager exposes it
+            self.project = getattr(vector_store_manager, "project", None)
         else:
             # Choose project by instance or by name from workspace
             if project is None:
                 workspace = get_workspace()
-                default_name = project_name or "default"
+                default_name = project_name or os.getenv("AGENTSMITHY_PROJECT") or "default"
                 project = workspace.get_project(default_name)
                 project.root.mkdir(parents=True, exist_ok=True)
             self.vector_store_manager = VectorStoreManager(project)
+            self.project = project
         self.max_context_length = settings.max_context_length
 
     async def build_context(
@@ -42,6 +46,21 @@ class ContextBuilder:
             "relevant_documents": [],
             "total_context_length": 0,
         }
+
+        # Inject project metadata if available
+        project_info = {}
+        if getattr(self, "project", None) is not None:
+            metadata = {}
+            try:
+                metadata = self.project.load_metadata()
+            except Exception:
+                metadata = {}
+            project_info = {
+                "name": self.project.name,
+                "root": str(self.project.root),
+                "metadata": metadata,
+            }
+            context["project"] = project_info
 
         # Add current file context
         if file_context and file_context.get("current_file"):
@@ -120,6 +139,28 @@ class ContextBuilder:
     def format_context_for_prompt(self, context: dict[str, Any]) -> str:
         """Format context into a string for LLM prompt."""
         formatted_parts = []
+
+        # Project info
+        if context.get("project"):
+            pj = context["project"]
+            formatted_parts.append(
+                f"=== Project: {pj.get('name','')} ===\nRoot: {pj.get('root','')}"
+            )
+            analysis = (pj.get("metadata") or {}).get("analysis") or {}
+            if analysis:
+                dom_langs = analysis.get("dominant_languages") or []
+                frameworks = analysis.get("frameworks") or []
+                arch = analysis.get("architecture_hints") or []
+                parts = []
+                if dom_langs:
+                    parts.append(f"Languages: {', '.join(dom_langs)}")
+                if frameworks:
+                    parts.append(f"Frameworks: {', '.join(frameworks)}")
+                if arch:
+                    parts.append(f"Architecture: {', '.join(arch)}")
+                if parts:
+                    formatted_parts.append("\n".join(parts))
+            formatted_parts.append("")
 
         # Current file
         if context.get("current_file"):

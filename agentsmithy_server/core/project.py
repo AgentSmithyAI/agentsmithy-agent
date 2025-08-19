@@ -8,6 +8,7 @@ configuration, indexing, and other project-level behaviors.
 from __future__ import annotations
 
 import os
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -79,6 +80,29 @@ class Project:
         """Search this project's vector store for similar documents."""
         vsm = self.get_vector_store(collection_name)
         return await vsm.similarity_search(query, k=k, filter=filter)
+
+    # ---- Metadata management ----
+    @property
+    def metadata_path(self) -> Path:
+        return self.state_dir / "project.json"
+
+    def has_metadata(self) -> bool:
+        return self.metadata_path.exists()
+
+    def load_metadata(self) -> dict[str, Any]:
+        if not self.metadata_path.exists():
+            return {}
+        try:
+            return json.loads(self.metadata_path.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+
+    def save_metadata(self, metadata: dict[str, Any]) -> None:
+        self.ensure_state_dir()
+        tmp_path = self.metadata_path.with_suffix(".tmp")
+        data = json.dumps(metadata, ensure_ascii=False, indent=2)
+        tmp_path.write_text(data, encoding="utf-8")
+        tmp_path.replace(self.metadata_path)
 
 
 class ProjectWorkspace:
