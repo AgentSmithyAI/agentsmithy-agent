@@ -67,14 +67,23 @@ OPENAI_API_KEY=your_openai_api_key_here
 ### Starting the Server
 
 ```bash
-# Option 1: Using main.py (recommended)
-python main.py
-
-# Option 2: Using uvicorn directly
-uvicorn agentsmithy_server.api.server:app --reload --host localhost --port 11434 --env-file .env
+# Start via main.py with a working directory (required)
+python main.py --workdir /abs/path/to/workspace
 ```
 
 The server will be available at: `http://localhost:11434`
+
+### Startup Parameters
+
+- `--workdir` (required when using `main.py`): absolute path to the workspace directory. On startup, the server will ensure a hidden directory `/abs/path/to/workspace/.agentsmithy` exists. Project-specific data (e.g., RAG index) will be stored under each project's own `.agentsmithy` directory inside the workspace.
+
+Environment alternative for advanced setups: set `AGENTSMITHY_WORKDIR=/abs/path/to/workspace` before starting the process.
+
+### Projects and RAG Storage
+
+- Workspace root state: `<workdir>/.agentsmithy`
+- Per-project state: `<workdir>/<project>/.agentsmithy`
+- RAG (ChromaDB) persistence per project: `<workdir>/<project>/.agentsmithy/rag/chroma_db`
 
 ### Testing the API
 
