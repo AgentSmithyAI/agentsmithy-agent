@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import asyncio
+import os
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from agentsmithy_server.agents.base_agent import BaseAgent
 from agentsmithy_server.core.project import Project
+from agentsmithy_server.core.project_runtime import set_scan_status
 from agentsmithy_server.tools import ToolExecutor, ToolFactory
 
 
@@ -25,6 +28,19 @@ class ProjectInspectorAgent(BaseAgent):
 
     async def inspect_and_save(self, project: Project) -> dict[str, Any]:
         project.ensure_state_dir()
+        # Mark scan started
+        try:
+            task = asyncio.current_task()
+            task_id = str(id(task)) if task else None
+            set_scan_status(
+                project,
+                "scanning",
+                progress=0,
+                pid=os.getpid(),
+                task_id=task_id,
+            )
+        except Exception:
+            pass
         system = SystemMessage(
             content=(
                 "You are a software project inspector.\n"
@@ -86,6 +102,18 @@ class ProjectInspectorAgent(BaseAgent):
                 }
             )
             project.save_metadata(metadata)
+            try:
+                task = asyncio.current_task()
+                task_id = str(id(task)) if task else None
+                set_scan_status(
+                    project,
+                    "done",
+                    progress=100,
+                    pid=os.getpid(),
+                    task_id=task_id,
+                )
+            except Exception:
+                pass
         except Exception:
             # If parsing fails, store raw note (for debugging), but prefer strict analysis later
             metadata = project.load_metadata() or {}
@@ -97,5 +125,17 @@ class ProjectInspectorAgent(BaseAgent):
                 }
             )
             project.save_metadata(metadata)
+            try:
+                task = asyncio.current_task()
+                task_id = str(id(task)) if task else None
+                set_scan_status(
+                    project,
+                    "error",
+                    error="strict tool result missing",
+                    pid=os.getpid(),
+                    task_id=task_id,
+                )
+            except Exception:
+                pass
 
         return {"status": "ok", "saved": True}

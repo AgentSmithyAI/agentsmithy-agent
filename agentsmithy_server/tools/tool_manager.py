@@ -87,7 +87,17 @@ class ToolManager:
         except Exception:
             agent_logger.info("Tool call", tool=name)
 
-        result = await tool.arun(**kwargs)
+        # Validate/normalize args via args_schema if available
+        args = kwargs
+        try:
+            schema = getattr(tool, "args_schema", None)
+            if schema is not None:
+                parsed = schema(**kwargs)
+                args = parsed.model_dump()
+        except Exception as ve:
+            return {"type": "tool_error", "name": name, "error": str(ve)}
+
+        result = await tool.arun(**args)
 
         # Diagnostics: result size
         try:

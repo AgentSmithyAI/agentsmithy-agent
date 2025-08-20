@@ -67,6 +67,16 @@ if __name__ == "__main__":
         # Expose to the process for later access
         os.environ["AGENTSMITHY_WORKDIR"] = str(workdir_path)
 
+        # Delegate port selection and status.json management to project runtime
+        from agentsmithy_server.core.project import get_current_project
+        from agentsmithy_server.core.project_runtime import (
+            ensure_singleton_and_select_port,
+        )
+
+        chosen_port = ensure_singleton_and_select_port(
+            get_current_project(), base_port=int(os.getenv("SERVER_PORT", "11434"))
+        )
+
         # Treat workdir as the active project; inspect and save metadata if missing
         try:
             import asyncio

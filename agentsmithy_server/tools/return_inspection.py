@@ -10,15 +10,10 @@ from .base_tool import BaseTool
 class ReturnInspectionArgs(BaseModel):
     """Strict schema for project inspection results."""
 
-    language_stats: dict[str, int] = Field(
-        ..., description="Mapping from language name to file/count estimate"
-    )
-    dominant_languages: list[str] = Field(..., description="Top languages by presence")
+    language: str = Field(..., description="Main programming language")
     frameworks: list[str] = Field(..., description="Detected frameworks/libraries")
     package_managers: list[str] = Field(..., description="Detected package managers")
     build_tools: list[str] = Field(..., description="Detected build tools")
-    has_tests: bool = Field(..., description="Whether tests are present")
-    test_frameworks: list[str] = Field(..., description="Detected test frameworks")
     architecture_hints: list[str] = Field(
         ..., description="High-level architecture hints (folders, patterns)"
     )
