@@ -76,3 +76,5 @@ chroma_db/
 # Temporary files
 tmp/
 temp/ 
+
+.agentsmithy

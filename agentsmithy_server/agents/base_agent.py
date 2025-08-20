@@ -1,7 +1,7 @@
 """Base agent class for all specialized agents."""
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 
@@ -16,8 +16,8 @@ class BaseAgent(ABC):
     def __init__(
         self,
         llm_provider: LLMProvider,
-        context_builder: Optional[ContextBuilder] = None,
-        system_prompt: Optional[str] = None,
+        context_builder: ContextBuilder | None = None,
+        system_prompt: str | None = None,
     ):
         self.llm_provider = llm_provider
         self.context_builder = context_builder or ContextBuilder()
@@ -34,8 +34,8 @@ class BaseAgent(ABC):
         pass
 
     async def process(
-        self, query: str, context: Optional[Dict[str, Any]] = None, stream: bool = False
-    ) -> Dict[str, Any]:
+        self, query: str, context: dict[str, Any] | None = None, stream: bool = False
+    ) -> dict[str, Any]:
         """Process a query with optional context."""
         agent_name = self.get_agent_name()
         agent_logger.debug(
@@ -81,10 +81,10 @@ class BaseAgent(ABC):
             raise
 
     def _prepare_messages(
-        self, query: str, context: Dict[str, Any]
-    ) -> List[BaseMessage]:
+        self, query: str, context: dict[str, Any]
+    ) -> list[BaseMessage]:
         """Prepare messages for LLM."""
-        messages = [SystemMessage(content=self.system_prompt)]
+        messages: list[BaseMessage] = [SystemMessage(content=self.system_prompt)]
 
         # Add context if available
         formatted_context = self.context_builder.format_context_for_prompt(context)

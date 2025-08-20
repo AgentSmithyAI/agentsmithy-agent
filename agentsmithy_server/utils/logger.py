@@ -5,7 +5,6 @@ import logging
 import os
 import traceback
 from datetime import datetime
-from typing import Optional
 
 
 class PrettyFormatter(logging.Formatter):
@@ -43,8 +42,13 @@ class PrettyFormatter(logging.Formatter):
         extras = []
         if hasattr(record, "extra_fields") and record.extra_fields:
             for key, value in record.extra_fields.items():
-                if isinstance(value, str) and len(value) > 50:
-                    value = value[:47] + "..."
+                # Do not truncate for ERROR/CRITICAL; use a higher limit otherwise
+                if (
+                    isinstance(value, str)
+                    and record.levelname not in ("ERROR", "CRITICAL")
+                    and len(value) > 300
+                ):
+                    value = value[:297] + "..."
                 extras.append(f"{self.GRAY}{key}={self.RESET}{value}")
 
         # Build final message
@@ -109,11 +113,14 @@ class StructuredLogger:
 
             # Add exception info if present
             if record.exc_info:
-                log_data["exception"] = {
-                    "type": record.exc_info[0].__name__,
-                    "message": str(record.exc_info[1]),
-                    "traceback": traceback.format_exception(*record.exc_info),
-                }
+                exc_type = record.exc_info[0]
+                exc_value = record.exc_info[1]
+                if exc_type is not None:
+                    log_data["exception"] = {
+                        "type": getattr(exc_type, "__name__", str(exc_type)),
+                        "message": str(exc_value),
+                        "traceback": traceback.format_exception(*record.exc_info),
+                    }
 
             return json.dumps(log_data)
 
@@ -134,7 +141,7 @@ class StructuredLogger:
         """Log warning message with optional extra fields."""
         self._log(logging.WARNING, message, **kwargs)
 
-    def error(self, message: str, exception: Optional[Exception] = None, **kwargs):
+    def error(self, message: str, exception: Exception | None = None, **kwargs):
         """Log error message with optional exception and extra fields."""
         if exception:
             kwargs["error_type"] = type(exception).__name__
@@ -158,7 +165,7 @@ class StructuredLogger:
             **kwargs,
         )
 
-    def stream_log(self, event_type: str, content: Optional[str] = None, **kwargs):
+    def stream_log(self, event_type: str, content: str | None = None, **kwargs):
         """Log SSE streaming events."""
         self.debug(
             f"SSE Event: {event_type}",

@@ -1,13 +1,18 @@
 """LLM Provider abstraction for flexible model integration."""
 
 from abc import ABC, abstractmethod
-from typing import AsyncIterator, List, Optional, Union, Any
+from collections.abc import AsyncIterator
+from typing import Any
 
 from langchain_core.messages import BaseMessage
 from langchain_core.tools import BaseTool
 from langchain_openai import ChatOpenAI
 
 from agentsmithy_server.config import settings
+from agentsmithy_server.core.agent_config import (
+    AgentConfig,
+    get_agent_config_provider,
+)
 from agentsmithy_server.utils.logger import agent_logger
 
 
@@ -16,8 +21,8 @@ class LLMProvider(ABC):
 
     @abstractmethod
     async def agenerate(
-        self, messages: List[BaseMessage], stream: bool = False, **kwargs
-    ) -> Union[AsyncIterator[str], str]:
+        self, messages: list[BaseMessage], stream: bool = False, **kwargs
+    ) -> AsyncIterator[str] | str:
         """Generate response from messages."""
         pass
 
@@ -25,9 +30,9 @@ class LLMProvider(ABC):
     def get_model_name(self) -> str:
         """Get the model name."""
         pass
-    
+
     @abstractmethod
-    def bind_tools(self, tools: List[BaseTool]) -> Any:
+    def bind_tools(self, tools: list[BaseTool]) -> Any:
         """Bind tools to the LLM for function calling."""
         pass
 
@@ -37,11 +42,20 @@ class OpenAIProvider(LLMProvider):
 
     def __init__(
         self,
-        model: Optional[str] = None,
-        temperature: Optional[float] = None,
-        max_tokens: Optional[int] = None,
-        api_key: Optional[str] = None,
+        model: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        api_key: str | None = None,
+        agent_name: str | None = None,
     ):
+        # Resolve model/temperature from provider if not explicitly passed
+        if model is None or temperature is None:
+            cfg: AgentConfig = get_agent_config_provider().get_config(
+                (agent_name or "").strip() or "universal_agent"
+            )
+            model = model or cfg.model
+            temperature = temperature or cfg.temperature
+
         self.model = model or settings.default_model
         self.temperature = temperature or settings.default_temperature
         self.max_tokens = max_tokens or settings.max_tokens
@@ -54,46 +68,57 @@ class OpenAIProvider(LLMProvider):
             max_tokens=self.max_tokens,
         )
 
-        self.llm = ChatOpenAI(
-            model=self.model,
-            temperature=self.temperature,
-            max_tokens=self.max_tokens,
-            api_key=self.api_key,
-            streaming=True,
-        )
+        # Initialize LLM; use explicit API key if provided
+        if self.api_key:
+            # Note: langchain_openai expects SecretStr; use environment variable fallback instead
+            import os
+
+            os.environ.setdefault("OPENAI_API_KEY", str(self.api_key))
+            self.llm = ChatOpenAI(
+                model=self.model, temperature=self.temperature, streaming=True
+            )
+        else:
+            self.llm = ChatOpenAI(
+                model=self.model, temperature=self.temperature, streaming=True
+            )
 
     async def agenerate(
-        self, messages: List[BaseMessage], stream: bool = False, **kwargs
-    ) -> Union[AsyncIterator[str], str]:
+        self, messages: list[BaseMessage], stream: bool = False, **kwargs
+    ) -> AsyncIterator[str] | str:
         """Generate response from messages."""
         if stream:
             return self._agenerate_stream(messages, **kwargs)
         else:
             response = await self.llm.ainvoke(messages, **kwargs)
-            return response.content
+            content = getattr(response, "content", "")
+            if isinstance(content, str):
+                return content
+            # Fallback to stringified
+            return str(content)
 
     async def _agenerate_stream(
-        self, messages: List[BaseMessage], **kwargs
+        self, messages: list[BaseMessage], **kwargs
     ) -> AsyncIterator[str]:
         """Generate streaming response."""
         async for chunk in self.llm.astream(messages, **kwargs):
-            if chunk.content:
-                yield chunk.content
+            content = getattr(chunk, "content", None)
+            if isinstance(content, str) and content:
+                yield content
 
     def get_model_name(self) -> str:
         """Get the model name."""
         return self.model
-    
-    def bind_tools(self, tools: List[BaseTool]) -> ChatOpenAI:
+
+    def bind_tools(self, tools: list[BaseTool]) -> Any:
         """Bind tools to the LLM for function calling."""
-        # Return a new instance with tools bound. We only bind class-based tools here.
+        # Return a tool-bound runnable/LLM as provided by SDK
         return self.llm.bind_tools(tools)
 
 
 class LLMFactory:
     """Factory for creating LLM providers."""
 
-    _providers = {
+    _providers: dict[str, type[LLMProvider]] = {
         "openai": OpenAIProvider,
     }
 
@@ -104,7 +129,8 @@ class LLMFactory:
             raise ValueError(f"Unknown provider: {provider}")
 
         provider_class = cls._providers[provider]
-        return provider_class(**kwargs)
+        provider_instance: LLMProvider = provider_class(**kwargs)
+        return provider_instance
 
     @classmethod
     def register_provider(cls, name: str, provider_class: type[LLMProvider]):

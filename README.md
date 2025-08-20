@@ -2,6 +2,11 @@
 
 A local AI server similar to Cursor, built using LangGraph for orchestration, RAG for contextualization, and SSE streaming.
 
+## Documentation
+
+- See the documentation in [docs/](./docs).
+- SSE protocol details: [docs/sse-protocol.md](./docs/sse-protocol.md)
+
 ## Features
 
 - 🤖 **Universal agent** orchestrated with LangGraph
@@ -62,14 +67,23 @@ OPENAI_API_KEY=your_openai_api_key_here
 ### Starting the Server
 
 ```bash
-# Option 1: Using main.py (recommended)
-python main.py
-
-# Option 2: Using uvicorn directly
-uvicorn agentsmithy_server.api.server:app --reload --host localhost --port 11434 --env-file .env
+# Start via main.py with a working directory (required)
+python main.py --workdir /abs/path/to/workspace
 ```
 
 The server will be available at: `http://localhost:11434`
+
+### Startup Parameters
+
+- `--workdir` (required when using `main.py`): absolute path to the workspace directory. On startup, the server will ensure a hidden directory `/abs/path/to/workspace/.agentsmithy` exists. Project-specific data (e.g., RAG index) will be stored under each project's own `.agentsmithy` directory inside the workspace.
+
+Environment alternative for advanced setups: set `AGENTSMITHY_WORKDIR=/abs/path/to/workspace` before starting the process.
+
+### Projects and RAG Storage
+
+- Workspace root state: `<workdir>/.agentsmithy`
+- Per-project state: `<workdir>/<project>/.agentsmithy`
+- RAG (ChromaDB) persistence per project: `<workdir>/<project>/.agentsmithy/rag/chroma_db`
 
 ### Testing the API
 
@@ -148,6 +162,44 @@ data: {"done": true}
 
 ### GET /health
 Server health check.
+
+## Development
+
+### Tooling
+
+- Linters/formatters: Ruff + Black
+- Type checking: mypy
+- Tests: pytest
+
+### Setup (recommended)
+
+```bash
+# create venv and install runtime deps
+make install
+
+# install dev tools
+make install-dev
+```
+
+### Common tasks
+
+```bash
+# format code
+make format
+
+# run linters
+make lint
+
+# type check
+make typecheck
+
+# run tests
+make test
+
+# run server
+make run
+
+```
 
 ## Extending Functionality
 

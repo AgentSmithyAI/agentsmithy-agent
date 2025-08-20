@@ -1,6 +1,6 @@
 """Agent orchestration using LangGraph."""
 
-from typing import Annotated, Any, Dict, List, Optional, TypedDict
+from typing import Annotated, Any, TypedDict
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langgraph.graph import END, StateGraph
@@ -15,13 +15,13 @@ from agentsmithy_server.utils.logger import agent_logger
 class AgentState(TypedDict):
     """State for the agent graph."""
 
-    messages: Annotated[List[BaseMessage], add_messages]
+    messages: Annotated[list[BaseMessage], add_messages]
     query: str
-    context: Optional[Dict[str, Any]]
-    task_type: Optional[str]
-    response: Optional[str]
+    context: dict[str, Any] | None
+    task_type: str | None
+    response: str | None
     streaming: bool
-    metadata: Dict[str, Any]
+    metadata: dict[str, Any]
 
 
 class AgentOrchestrator:
@@ -30,28 +30,30 @@ class AgentOrchestrator:
     def __init__(self, llm_provider_name: str = "openai"):
         # Initialize LLM provider
         agent_logger.info("Creating AgentOrchestrator", provider=llm_provider_name)
-        self.llm_provider = LLMFactory.create(llm_provider_name)
+        self.llm_provider = LLMFactory.create(
+            llm_provider_name, agent_name="universal_agent"
+        )
 
         # Initialize context builder
         self.context_builder = ContextBuilder()
 
         # Initialize single universal agent
         self.universal_agent = UniversalAgent(self.llm_provider, self.context_builder)
-        
+
         # Store SSE callback for later use
         self._sse_callback = None
 
         # Build the simplified graph
         self.graph = self._build_graph()
-    
+
     def set_sse_callback(self, callback):
         """Set SSE callback for streaming updates."""
         self._sse_callback = callback
         # Pass it to the agent
-        if hasattr(self.universal_agent, 'set_sse_callback'):
+        if hasattr(self.universal_agent, "set_sse_callback"):
             self.universal_agent.set_sse_callback(callback)
 
-    def _build_graph(self) -> StateGraph:
+    def _build_graph(self) -> Any:
         """Build the simplified agent orchestration graph."""
         graph = StateGraph(AgentState)
 
@@ -95,11 +97,9 @@ class AgentOrchestrator:
 
         return state
 
-
-
     async def process_request(
-        self, query: str, context: Optional[Dict[str, Any]] = None, stream: bool = False
-    ) -> Dict[str, Any]:
+        self, query: str, context: dict[str, Any] | None = None, stream: bool = False
+    ) -> dict[str, Any]:
         """Process a user request through the agent graph."""
         # Initialize state
         initial_state: AgentState = {

@@ -1,32 +1,65 @@
 """Context builder for RAG system."""
 
-from typing import Any, Dict, Optional
+from typing import Any
 
 from agentsmithy_server.config import settings
+from agentsmithy_server.core.project import Project
 from agentsmithy_server.rag.vector_store import VectorStoreManager
 
 
 class ContextBuilder:
     """Build context from various sources for LLM."""
 
-    def __init__(self, vector_store_manager: Optional[VectorStoreManager] = None):
-        self.vector_store_manager = vector_store_manager or VectorStoreManager()
+    def __init__(
+        self,
+        vector_store_manager: VectorStoreManager | None = None,
+        project: Project | None = None,
+        project_name: str | None = None,
+    ):
+        self.project: Project | None = None
+        if vector_store_manager is not None:
+            self.vector_store_manager = vector_store_manager
+            # Try to capture project if manager exposes it
+            self.project = getattr(vector_store_manager, "project", None)
+        else:
+            # Choose project by instance or by name from workspace
+            if project is None:
+                # If no explicit project provided, use workdir as current project
+                from agentsmithy_server.core.project import get_current_project
+
+                project = get_current_project()
+                project.root.mkdir(parents=True, exist_ok=True)
+            self.vector_store_manager = VectorStoreManager(project)
+            self.project = project
         self.max_context_length = settings.max_context_length
 
     async def build_context(
         self,
         query: str,
-        file_context: Optional[Dict[str, Any]] = None,
+        file_context: dict[str, Any] | None = None,
         k_documents: int = 4,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Build context from query and file information."""
-        context = {
+        context: dict[str, Any] = {
             "query": query,
             "current_file": None,
             "open_files": [],
             "relevant_documents": [],
             "total_context_length": 0,
         }
+
+        # Inject project metadata if available
+        if self.project is not None:
+            metadata: dict[str, Any] = {}
+            try:
+                metadata = self.project.load_metadata()
+            except Exception:
+                metadata = {}
+            context["project"] = {
+                "name": self.project.name,
+                "root": str(self.project.root),
+                "metadata": metadata,
+            }
 
         # Add current file context
         if file_context and file_context.get("current_file"):
@@ -65,8 +98,9 @@ class ContextBuilder:
 
         # Search for relevant documents
         if query:
+            # Keep RAG small during inspection to avoid token bloat
             relevant_docs = await self.vector_store_manager.similarity_search(
-                query, k=k_documents
+                query, k=min(k_documents, 2)
             )
 
             for doc in relevant_docs:
@@ -102,9 +136,31 @@ class ContextBuilder:
 
         return truncated + "\n... (truncated)"
 
-    def format_context_for_prompt(self, context: Dict[str, Any]) -> str:
+    def format_context_for_prompt(self, context: dict[str, Any]) -> str:
         """Format context into a string for LLM prompt."""
         formatted_parts = []
+
+        # Project info
+        if context.get("project"):
+            pj = context["project"]
+            formatted_parts.append(
+                f"=== Project: {pj.get('name','')} ===\nRoot: {pj.get('root','')}"
+            )
+            analysis = (pj.get("metadata") or {}).get("analysis") or {}
+            if analysis:
+                dom_langs = analysis.get("dominant_languages") or []
+                frameworks = analysis.get("frameworks") or []
+                arch = analysis.get("architecture_hints") or []
+                parts = []
+                if dom_langs:
+                    parts.append(f"Languages: {', '.join(dom_langs)}")
+                if frameworks:
+                    parts.append(f"Frameworks: {', '.join(frameworks)}")
+                if arch:
+                    parts.append(f"Architecture: {', '.join(arch)}")
+                if parts:
+                    formatted_parts.append("\n".join(parts))
+            formatted_parts.append("")
 
         # Current file
         if context.get("current_file"):
