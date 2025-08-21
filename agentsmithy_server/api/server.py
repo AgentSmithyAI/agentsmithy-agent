@@ -11,14 +11,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
-from agentsmithy_server.config import settings
 from agentsmithy_server.core.agent_graph import AgentOrchestrator
-from agentsmithy_server.core.project import get_current_project
 from agentsmithy_server.core.dialog_io import (
+    DialogMessage,
     append_message,
     read_messages,
-    DialogMessage,
 )
+from agentsmithy_server.core.project import get_current_project
 from agentsmithy_server.utils.logger import api_logger
 
 
@@ -81,6 +80,8 @@ app.add_middleware(
 
 # Initialize orchestrator
 orchestrator = AgentOrchestrator()
+
+
 @app.on_event("startup")
 async def _init_dialogs_state() -> None:
     """Ensure dialogs state exists; create a default dialog if none present."""
@@ -94,7 +95,6 @@ async def _init_dialogs_state() -> None:
     except Exception as e:
         # Non-fatal: server can still operate; chat path will auto-create
         api_logger.error("Dialog state init failed", exception=e)
-
 
 
 async def generate_sse_events(
@@ -163,7 +163,9 @@ async def generate_sse_events(
                             {
                                 "type": "classification",
                                 "task_type": classifier_data["task_type"],
-                                "dialog_id": project_dialog[1] if project_dialog else None,
+                                "dialog_id": (
+                                    project_dialog[1] if project_dialog else None
+                                ),
                             }
                         )
                     }
@@ -193,7 +195,9 @@ async def generate_sse_events(
                                 "tool_result",
                             ]:
                                 payload = dict(chunk)
-                                payload["dialog_id"] = project_dialog[1] if project_dialog else None
+                                payload["dialog_id"] = (
+                                    project_dialog[1] if project_dialog else None
+                                )
                                 event_dict = {"data": json.dumps(payload)}
                                 api_logger.stream_log(
                                     "file_operation", None, chunk_number=chunk_count
@@ -206,16 +210,30 @@ async def generate_sse_events(
                                         {
                                             "content": chunk.get(
                                                 "content", chunk.get("data", str(chunk))
-                                            )
-                                            ,
-                                            "dialog_id": project_dialog[1] if project_dialog else None,
+                                            ),
+                                            "dialog_id": (
+                                                project_dialog[1]
+                                                if project_dialog
+                                                else None
+                                            ),
                                         }
                                     )
                                 }
                                 yield event_dict
                         else:
                             # Regular text content
-                            event_dict = {"data": json.dumps({"content": chunk, "dialog_id": project_dialog[1] if project_dialog else None})}
+                            event_dict = {
+                                "data": json.dumps(
+                                    {
+                                        "content": chunk,
+                                        "dialog_id": (
+                                            project_dialog[1]
+                                            if project_dialog
+                                            else None
+                                        ),
+                                    }
+                                )
+                            }
                             api_logger.stream_log(
                                 "content_chunk", chunk, chunk_number=chunk_count
                             )
@@ -251,7 +269,14 @@ async def generate_sse_events(
                             if state["response"].get("explanation"):
                                 explanation_event = {
                                     "data": json.dumps(
-                                        {"content": state["response"]["explanation"], "dialog_id": project_dialog[1] if project_dialog else None}
+                                        {
+                                            "content": state["response"]["explanation"],
+                                            "dialog_id": (
+                                                project_dialog[1]
+                                                if project_dialog
+                                                else None
+                                            ),
+                                        }
                                     )
                                 }
                                 yield explanation_event
@@ -270,7 +295,11 @@ async def generate_sse_events(
                                                 ),
                                                 "line_end": operation.get("line_end"),
                                                 "reason": operation.get("reason"),
-                                                "dialog_id": project_dialog[1] if project_dialog else None,
+                                                "dialog_id": (
+                                                    project_dialog[1]
+                                                    if project_dialog
+                                                    else None
+                                                ),
                                             }
                                         )
                                     }
@@ -281,13 +310,29 @@ async def generate_sse_events(
                         else:
                             # Regular structured response
                             event_dict = {
-                                "data": json.dumps({"content": str(state["response"]), "dialog_id": project_dialog[1] if project_dialog else None})
+                                "data": json.dumps(
+                                    {
+                                        "content": str(state["response"]),
+                                        "dialog_id": (
+                                            project_dialog[1]
+                                            if project_dialog
+                                            else None
+                                        ),
+                                    }
+                                )
                             }
                             yield event_dict
                     else:
                         # Regular text response
                         event_dict = {
-                            "data": json.dumps({"content": state["response"], "dialog_id": project_dialog[1] if project_dialog else None})
+                            "data": json.dumps(
+                                {
+                                    "content": state["response"],
+                                    "dialog_id": (
+                                        project_dialog[1] if project_dialog else None
+                                    ),
+                                }
+                            )
                         }
                         api_logger.stream_log("content_complete", state["response"])
                         assistant_buffer.append(str(state["response"]))
@@ -305,7 +350,18 @@ async def generate_sse_events(
                             async for chunk in response:
                                 chunk_count += 1
                                 # Wrap chunk in proper JSON format
-                                event_dict = {"data": json.dumps({"content": chunk, "dialog_id": project_dialog[1] if project_dialog else None})}
+                                event_dict = {
+                                    "data": json.dumps(
+                                        {
+                                            "content": chunk,
+                                            "dialog_id": (
+                                                project_dialog[1]
+                                                if project_dialog
+                                                else None
+                                            ),
+                                        }
+                                    )
+                                }
                                 yield event_dict
                             api_logger.info(
                                 f"Finished streaming {chunk_count} chunks from {key}"
@@ -319,7 +375,18 @@ async def generate_sse_events(
                                 async for chunk in actual_response:
                                     chunk_count += 1
                                     # Wrap chunk in proper JSON format
-                                    event_dict = {"data": json.dumps({"content": chunk, "dialog_id": project_dialog[1] if project_dialog else None})}
+                                    event_dict = {
+                                        "data": json.dumps(
+                                            {
+                                                "content": chunk,
+                                                "dialog_id": (
+                                                    project_dialog[1]
+                                                    if project_dialog
+                                                    else None
+                                                ),
+                                            }
+                                        )
+                                    }
                                     yield event_dict
                                 api_logger.info(
                                     f"Finished streaming {chunk_count} chunks from {key}"
@@ -327,20 +394,42 @@ async def generate_sse_events(
                             else:
                                 # Non-streaming response
                                 # Wrap response in proper JSON format
-                                event_dict = {"data": json.dumps({"content": actual_response, "dialog_id": project_dialog[1] if project_dialog else None})}
+                                event_dict = {
+                                    "data": json.dumps(
+                                        {
+                                            "content": actual_response,
+                                            "dialog_id": (
+                                                project_dialog[1]
+                                                if project_dialog
+                                                else None
+                                            ),
+                                        }
+                                    )
+                                }
                                 yield event_dict
 
         # Persist assistant response if dialog logging is enabled
         if project_dialog and assistant_buffer:
             project, dialog_id = project_dialog
             try:
-                append_message(project, dialog_id, DialogMessage(role="assistant", content="".join(assistant_buffer)))
+                append_message(
+                    project,
+                    dialog_id,
+                    DialogMessage(role="assistant", content="".join(assistant_buffer)),
+                )
             except Exception as e:
                 api_logger.error("Failed to append assistant message", exception=e)
 
         # Send completion signal
         api_logger.info("SSE generation completed", total_events=event_count)
-        completion_dict = {"data": json.dumps({"done": True, "dialog_id": project_dialog[1] if project_dialog else None})}
+        completion_dict = {
+            "data": json.dumps(
+                {
+                    "done": True,
+                    "dialog_id": project_dialog[1] if project_dialog else None,
+                }
+            )
+        }
         yield completion_dict
 
     except Exception as e:
@@ -389,7 +478,9 @@ async def chat(request: ChatRequest, raw_request: Request):
 
         # Append user message to dialog log
         try:
-            append_message(project, dialog_id, DialogMessage(role="user", content=user_message))
+            append_message(
+                project, dialog_id, DialogMessage(role="user", content=user_message)
+            )
         except Exception as e:
             api_logger.error("Failed to append user message", exception=e)
 
@@ -408,7 +499,9 @@ async def chat(request: ChatRequest, raw_request: Request):
             # Return SSE streaming response
             api_logger.info("Returning SSE streaming response")
             sse_response = EventSourceResponse(
-                generate_sse_events(user_message, request.context, (project, dialog_id)),
+                generate_sse_events(
+                    user_message, request.context, (project, dialog_id)
+                ),
                 headers={
                     "Cache-Control": "no-cache",
                     "X-Accel-Buffering": "no",  # Disable nginx buffering
@@ -432,14 +525,23 @@ async def chat(request: ChatRequest, raw_request: Request):
             # Persist assistant response to dialog log (best-effort)
             try:
                 assistant_text = ""
-                if isinstance(result.get("response"), str):
-                    assistant_text = result.get("response")
-                elif isinstance(result.get("response"), dict):
-                    assistant_text = result["response"].get("content") or result["response"].get("explanation") or ""
+                resp: Any = result.get("response")
+                if isinstance(resp, str):
+                    assistant_text = resp
+                elif isinstance(resp, dict):
+                    assistant_text = str(
+                        resp.get("content") or resp.get("explanation") or ""
+                    )
                 if assistant_text:
-                    append_message(project, dialog_id, DialogMessage(role="assistant", content=assistant_text))
+                    append_message(
+                        project,
+                        dialog_id,
+                        DialogMessage(role="assistant", content=assistant_text),
+                    )
             except Exception as e:
-                api_logger.error("Failed to append assistant message (non-stream)", exception=e)
+                api_logger.error(
+                    "Failed to append assistant message (non-stream)", exception=e
+                )
 
             json_response = ChatResponse(
                 content=result["response"], done=True, metadata=result["metadata"]
@@ -525,7 +627,9 @@ async def list_dialogs(
 @app.post("/api/dialogs")
 async def create_dialog(payload: DialogCreateRequest):
     project = get_current_project()
-    dialog_id = project.create_dialog(title=payload.title, set_current=payload.set_current)
+    dialog_id = project.create_dialog(
+        title=payload.title, set_current=payload.set_current
+    )
     return {"id": dialog_id}
 
 
@@ -571,4 +675,3 @@ async def delete_dialog(dialog_id: str):
     project = get_current_project()
     project.delete_dialog(dialog_id)
     return {"ok": True}
- 

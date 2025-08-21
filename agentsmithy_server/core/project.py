@@ -9,10 +9,10 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass
-from datetime import datetime, timezone
-import uuid
 import shutil
+import uuid
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -59,7 +59,7 @@ class Project:
 
     def _now_iso(self) -> str:
         # Use Z suffix for UTC to simplify client parsing
-        return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
     def load_dialogs_index(self) -> dict[str, Any]:
         """Load dialogs index; return default structure if missing or invalid."""
@@ -208,7 +208,12 @@ class Project:
         if index.get("current_dialog_id") == dialog_id:
             # Choose a new current dialog: pick most recent by last_message_at/updated_at
             def _key(d: dict[str, Any]):
-                return d.get("last_message_at") or d.get("updated_at") or d.get("created_at") or ""
+                return (
+                    d.get("last_message_at")
+                    or d.get("updated_at")
+                    or d.get("created_at")
+                    or ""
+                )
 
             new_current = None
             if dialogs_list:

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from agentsmithy_server.core.project import Project
 
@@ -17,7 +18,7 @@ class DialogMessage:
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 
 def _messages_path(project: Project, dialog_id: str) -> Path:
@@ -74,6 +75,7 @@ def iter_messages(project: Project, dialog_id: str) -> Iterable[dict[str, Any]]:
     path = _messages_path(project, dialog_id)
     if not path.exists():
         return []
+
     def _gen() -> Iterable[dict[str, Any]]:
         with path.open("r", encoding="utf-8") as f:
             for line in f:
@@ -81,6 +83,5 @@ def iter_messages(project: Project, dialog_id: str) -> Iterable[dict[str, Any]]:
                 if not line:
                     continue
                 yield json.loads(line)
+
     return _gen()
-
-
