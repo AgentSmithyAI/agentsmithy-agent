@@ -10,11 +10,13 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
+from agentsmithy_server.config import settings  # re-export for external imports
 
 from agentsmithy_server.core.agent_graph import AgentOrchestrator
 from agentsmithy_server.core.dialog_io import (
     DialogMessage,
     append_message,
+    append_sse_event,
     read_messages,
 )
 from agentsmithy_server.core.project import get_current_project
@@ -78,8 +80,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize orchestrator
-orchestrator = AgentOrchestrator()
+# Initialize orchestrator lazily to avoid import-time side effects
+orchestrator: AgentOrchestrator | None = None
 
 
 @app.on_event("startup")
@@ -95,6 +97,13 @@ async def _init_dialogs_state() -> None:
     except Exception as e:
         # Non-fatal: server can still operate; chat path will auto-create
         api_logger.error("Dialog state init failed", exception=e)
+
+    # Create orchestrator on startup (runtime env should be configured here)
+    try:
+        global orchestrator
+        orchestrator = AgentOrchestrator()
+    except Exception as e:
+        api_logger.error("AgentOrchestrator init failed", exception=e)
 
 
 async def generate_sse_events(
@@ -113,12 +122,14 @@ async def generate_sse_events(
         await sse_events_queue.put(event_data)
 
     # Set the callback on orchestrator
-    if hasattr(orchestrator, "set_sse_callback"):
+    if orchestrator and hasattr(orchestrator, "set_sse_callback"):
         orchestrator.set_sse_callback(sse_callback)
 
     try:
         # Process request with streaming
         api_logger.debug("Processing request with orchestrator", streaming=True)
+        if orchestrator is None:
+            raise RuntimeError("Orchestrator not initialized")
         result = await orchestrator.process_request(
             query=query, context=context, stream=True
         )
@@ -149,6 +160,15 @@ async def generate_sse_events(
                         }
                     )
                 }
+                if project_dialog:
+                    try:
+                        append_sse_event(
+                            project_dialog[0],
+                            project_dialog[1],
+                            json.loads(event_dict["data"]),
+                        )
+                    except Exception as e:
+                        api_logger.error("Failed to append SSE event", exception=e)
                 api_logger.stream_log(
                     "classification", state["task_type"], event_number=event_count
                 )
@@ -169,6 +189,15 @@ async def generate_sse_events(
                             }
                         )
                     }
+                    if project_dialog:
+                        try:
+                            append_sse_event(
+                                project_dialog[0],
+                                project_dialog[1],
+                                json.loads(event_dict["data"]),
+                            )
+                        except Exception as e:
+                            api_logger.error("Failed to append SSE event", exception=e)
                     yield event_dict
 
             # Stream the response if it's an async generator
@@ -202,6 +231,17 @@ async def generate_sse_events(
                                 api_logger.stream_log(
                                     "file_operation", None, chunk_number=chunk_count
                                 )
+                                if project_dialog:
+                                    try:
+                                        append_sse_event(
+                                            project_dialog[0],
+                                            project_dialog[1],
+                                            payload,
+                                        )
+                                    except Exception as e:
+                                        api_logger.error(
+                                            "Failed to append SSE event", exception=e
+                                        )
                                 yield event_dict
                             else:
                                 # Regular content
@@ -219,6 +259,17 @@ async def generate_sse_events(
                                         }
                                     )
                                 }
+                                if project_dialog:
+                                    try:
+                                        append_sse_event(
+                                            project_dialog[0],
+                                            project_dialog[1],
+                                            json.loads(event_dict["data"]),
+                                        )
+                                    except Exception as e:
+                                        api_logger.error(
+                                            "Failed to append SSE event", exception=e
+                                        )
                                 yield event_dict
                         else:
                             # Regular text content
@@ -238,6 +289,17 @@ async def generate_sse_events(
                                 "content_chunk", chunk, chunk_number=chunk_count
                             )
                             assistant_buffer.append(str(chunk))
+                            if project_dialog:
+                                try:
+                                    append_sse_event(
+                                        project_dialog[0],
+                                        project_dialog[1],
+                                        json.loads(event_dict["data"]),
+                                    )
+                                except Exception as e:
+                                    api_logger.error(
+                                        "Failed to append SSE event", exception=e
+                                    )
                             yield event_dict
 
                         # Check for tool events in queue (non-blocking)
@@ -256,6 +318,15 @@ async def generate_sse_events(
                                 api_logger.stream_log(
                                     "tool_event", json.dumps(tool_event)[:100]
                                 )
+                                if project_dialog:
+                                    try:
+                                        append_sse_event(
+                                            project_dialog[0], project_dialog[1], te
+                                        )
+                                    except Exception as e:
+                                        api_logger.error(
+                                            "Failed to append SSE event", exception=e
+                                        )
                                 yield event_dict
                         except TimeoutError:
                             pass
@@ -279,6 +350,17 @@ async def generate_sse_events(
                                         }
                                     )
                                 }
+                                if project_dialog:
+                                    try:
+                                        append_sse_event(
+                                            project_dialog[0],
+                                            project_dialog[1],
+                                            json.loads(explanation_event["data"]),
+                                        )
+                                    except Exception as e:
+                                        api_logger.error(
+                                            "Failed to append SSE event", exception=e
+                                        )
                                 yield explanation_event
 
                             # Send file operations as separate events
@@ -306,6 +388,18 @@ async def generate_sse_events(
                                     api_logger.info(
                                         "Sending diff", file=operation["file"]
                                     )
+                                    if project_dialog:
+                                        try:
+                                            append_sse_event(
+                                                project_dialog[0],
+                                                project_dialog[1],
+                                                json.loads(diff_event["data"]),
+                                            )
+                                        except Exception as e:
+                                            api_logger.error(
+                                                "Failed to append SSE event",
+                                                exception=e,
+                                            )
                                     yield diff_event
                         else:
                             # Regular structured response
@@ -321,6 +415,17 @@ async def generate_sse_events(
                                     }
                                 )
                             }
+                            if project_dialog:
+                                try:
+                                    append_sse_event(
+                                        project_dialog[0],
+                                        project_dialog[1],
+                                        json.loads(event_dict["data"]),
+                                    )
+                                except Exception as e:
+                                    api_logger.error(
+                                        "Failed to append SSE event", exception=e
+                                    )
                             yield event_dict
                     else:
                         # Regular text response
@@ -336,6 +441,17 @@ async def generate_sse_events(
                         }
                         api_logger.stream_log("content_complete", state["response"])
                         assistant_buffer.append(str(state["response"]))
+                        if project_dialog:
+                            try:
+                                append_sse_event(
+                                    project_dialog[0],
+                                    project_dialog[1],
+                                    json.loads(event_dict["data"]),
+                                )
+                            except Exception as e:
+                                api_logger.error(
+                                    "Failed to append SSE event", exception=e
+                                )
                         yield event_dict
 
             # Check for response in agent-specific keys
@@ -430,6 +546,15 @@ async def generate_sse_events(
                 }
             )
         }
+        if project_dialog:
+            try:
+                append_sse_event(
+                    project_dialog[0],
+                    project_dialog[1],
+                    json.loads(completion_dict["data"]),
+                )
+            except Exception as e:
+                api_logger.error("Failed to append SSE event", exception=e)
         yield completion_dict
 
     except Exception as e:
@@ -518,6 +643,8 @@ async def chat(request: ChatRequest, raw_request: Request):
         else:
             # Return regular JSON response
             api_logger.info("Processing non-streaming request")
+            if orchestrator is None:
+                raise RuntimeError("Orchestrator not initialized")
             result = await orchestrator.process_request(
                 query=user_message, context=request.context, stream=False
             )

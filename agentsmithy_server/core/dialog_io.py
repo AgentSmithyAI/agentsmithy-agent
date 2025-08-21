@@ -38,7 +38,12 @@ def append_message(project: Project, dialog_id: str, message: DialogMessage) -> 
     ensure_dialog(project, dialog_id)
     path = _messages_path(project, dialog_id)
     ts = message.ts or _now_iso()
-    record = {"role": message.role, "content": message.content, "ts": ts}
+    record = {
+        "type": "message",
+        "role": message.role,
+        "content": message.content,
+        "ts": ts,
+    }
     with path.open("a", encoding="utf-8") as f:
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
@@ -64,7 +69,14 @@ def read_messages(
     lines: list[str] = path.read_text(encoding="utf-8").splitlines()
     if limit is not None and limit < len(lines):
         lines = lines[-limit:]
-    records = [json.loads(line) for line in lines if line.strip()]
+    raw_records = [json.loads(line) for line in lines if line.strip()]
+    # Only return semantic user/assistant messages for prompts
+    records = []
+    for rec in raw_records:
+        if rec.get("type") == "message" or (
+            "role" in rec and "content" in rec and rec.get("type") is None
+        ):
+            records.append(rec)
     if reverse:
         records.reverse()
     return records
@@ -85,3 +97,13 @@ def iter_messages(project: Project, dialog_id: str) -> Iterable[dict[str, Any]]:
                 yield json.loads(line)
 
     return _gen()
+
+
+def append_sse_event(project: Project, dialog_id: str, event: dict[str, Any]) -> None:
+    """Append a raw SSE payload object into messages.jsonl as a typed record."""
+    ensure_dialog(project, dialog_id)
+    path = _messages_path(project, dialog_id)
+    ts = _now_iso()
+    record = {"type": "sse", "event": event, "ts": ts}
+    with path.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(record, ensure_ascii=False) + "\n")
