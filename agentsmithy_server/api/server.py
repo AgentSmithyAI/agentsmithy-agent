@@ -394,14 +394,4 @@ async def root():
             }
         },
     }
-
-
-if __name__ == "__main__":
-    import uvicorn
-
-    print("Starting AgentSmithy Server...")
-    print(
-        f"Server will be available at http://{settings.server_host}:{settings.server_port}"
-    )
-
-    uvicorn.run(app, host=settings.server_host, port=settings.server_port, reload=True)
+ 

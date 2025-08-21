@@ -131,11 +131,15 @@ if __name__ == "__main__":
         # Use custom logging configuration for consistent JSON output
         from agentsmithy_server.config import LOGGING_CONFIG
 
+        # Allow reload to be controlled via env (default False for prod)
+        reload_enabled_env = os.getenv("SERVER_RELOAD", "false").lower()
+        reload_enabled = reload_enabled_env in {"1", "true", "yes", "on"}
+
         uvicorn.run(
             "agentsmithy_server.api.server:app",
             host=settings.server_host,
             port=settings.server_port,
-            reload=True,
+            reload=reload_enabled,
             log_config=LOGGING_CONFIG,
             env_file=".env",
         )
