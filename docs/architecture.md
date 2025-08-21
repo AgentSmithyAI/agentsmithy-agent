@@ -44,6 +44,12 @@ High level:
 - Project entity owns `state_dir` and RAG paths per project
 - Runtime manages singleton server per project and writes `.agentsmithy/status.json`
 
+### Dialogs Persistence (MVP)
+- Registry: `<project>/.agentsmithy/dialogs/index.json`
+  - `current_dialog_id`, `dialogs[]` (id, title, created/updated/last_message timestamps)
+- Messages: `<project>/.agentsmithy/dialogs/<dialog_id>/messages.jsonl` (LDJSON: `{role, content, ts}`)
+- On server startup: if no dialogs exist, a default dialog is created and set current
+
 ## Request Flow
 
 ```mermaid
@@ -61,6 +67,11 @@ graph TD
 
 - When code edits are needed the agent returns unified diffs as SSE `type: diff`
 - Each diff includes: `file`, `diff`, `line_start`, `line_end`, `reason`
+
+## Streaming (SSE)
+
+- `/api/chat` streams content and structured events
+- All SSE events include `dialog_id` when dialog logging is enabled (classification, content chunks, diffs, tool results, completion)
 
 ## Configuration
 

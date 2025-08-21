@@ -55,6 +55,10 @@ Optional early signal about the detected task type.
 ```json
 { "type": "classification", "task_type": "refactor" }
 ```
+With dialog id:
+```json
+{ "type": "classification", "task_type": "refactor", "dialog_id": "01J..." }
+```
 
 ### 2) Content
 
@@ -62,6 +66,10 @@ Plain assistant text content.
 
 ```json
 { "content": "I'll refactor this function to improve readability..." }
+```
+With dialog id:
+```json
+{ "content": "...", "dialog_id": "01J..." }
 ```
 
 ### 3) Diff
@@ -77,6 +85,10 @@ Structured file modification with unified diff that clients can apply.
   "line_end": 2,
   "reason": "Improved function naming and added documentation"
 }
+```
+With dialog id:
+```json
+{ "type": "diff", "file": "src/example.py", "diff": "@@ ...", "line_start": 1, "line_end": 2, "reason": "...", "dialog_id": "01J..." }
 ```
 
 Fields:
@@ -115,6 +127,10 @@ Signals the end of the stream.
 
 ```json
 { "done": true }
+```
+With dialog id:
+```json
+{ "done": true, "dialog_id": "01J..." }
 ```
 
 ### 6) Error

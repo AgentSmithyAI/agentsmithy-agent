@@ -10,6 +10,9 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
+from datetime import datetime, timezone
+import uuid
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +41,181 @@ class Project:
     def ensure_state_dir(self) -> None:
         """Ensure the project's hidden state directory exists."""
         self.state_dir.mkdir(parents=True, exist_ok=True)
+
+    # ---- Dialogs management (project-owned) ----
+    @property
+    def dialogs_dir(self) -> Path:
+        """Directory for all dialog-related state for this project."""
+        return self.state_dir / "dialogs"
+
+    def ensure_dialogs_dir(self) -> None:
+        """Ensure dialogs directory exists under the project state directory."""
+        self.ensure_state_dir()
+        self.dialogs_dir.mkdir(parents=True, exist_ok=True)
+
+    @property
+    def dialogs_index_path(self) -> Path:
+        return self.dialogs_dir / "index.json"
+
+    def _now_iso(self) -> str:
+        # Use Z suffix for UTC to simplify client parsing
+        return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+    def load_dialogs_index(self) -> dict[str, Any]:
+        """Load dialogs index; return default structure if missing or invalid."""
+        self.ensure_dialogs_dir()
+        if not self.dialogs_index_path.exists():
+            return {"current_dialog_id": None, "dialogs": []}
+        try:
+            return json.loads(self.dialogs_index_path.read_text(encoding="utf-8"))
+        except Exception:
+            return {"current_dialog_id": None, "dialogs": []}
+
+    def save_dialogs_index(self, index: dict[str, Any]) -> None:
+        """Atomically save dialogs index to disk."""
+        self.ensure_dialogs_dir()
+        tmp_path = self.dialogs_index_path.with_suffix(".tmp")
+        data = json.dumps(index, ensure_ascii=False, indent=2)
+        tmp_path.write_text(data, encoding="utf-8")
+        tmp_path.replace(self.dialogs_index_path)
+
+    def get_dialog_dir(self, dialog_id: str) -> Path:
+        """Return directory path for a given dialog id (without creating)."""
+        return self.dialogs_dir / dialog_id
+
+    def create_dialog(self, title: str | None = None, set_current: bool = True) -> str:
+        """Create a new dialog under this project and return its id.
+
+        Creates the directory `.agentsmithy/dialogs/<dialog_id>/` and updates
+        `.agentsmithy/dialogs/index.json` with metadata.
+        """
+        self.ensure_dialogs_dir()
+        dialog_id = uuid.uuid4().hex  # simple unique id; can switch to ULID later
+        dialog_dir = self.get_dialog_dir(dialog_id)
+        dialog_dir.mkdir(parents=True, exist_ok=True)
+
+        index = self.load_dialogs_index()
+        now = self._now_iso()
+        meta = {
+            "id": dialog_id,
+            "title": title or None,
+            "created_at": now,
+            "updated_at": now,
+            "last_message_at": None,
+        }
+        # Ensure dialogs is a list
+        dialogs_list = list(index.get("dialogs", []))
+        dialogs_list.append(meta)
+        index["dialogs"] = dialogs_list
+        if set_current:
+            index["current_dialog_id"] = dialog_id
+        self.save_dialogs_index(index)
+        return dialog_id
+
+    def list_dialogs(
+        self,
+        sort_by: str = "last_message_at",
+        descending: bool = True,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """Return dialogs with optional sorting and filtering.
+
+        sort_by: one of ["last_message_at", "updated_at", "created_at"].
+        """
+        index = self.load_dialogs_index()
+        items: list[dict[str, Any]] = list(index.get("dialogs", []))
+
+        # Sort by timestamp field
+        def sort_key(d: dict[str, Any]):
+            ts = d.get(sort_by)
+            # None timestamps should be treated as oldest
+            return ts or ""
+
+        items.sort(key=sort_key, reverse=descending)
+
+        if offset:
+            items = items[offset:]
+        if limit is not None:
+            items = items[:limit]
+        return items
+
+    def get_current_dialog_id(self) -> str | None:
+        index = self.load_dialogs_index()
+        cid = index.get("current_dialog_id")
+        return cid if isinstance(cid, str) else None
+
+    def set_current_dialog_id(self, dialog_id: str) -> None:
+        index = self.load_dialogs_index()
+        # Validate dialog exists
+        dialog_ids = {d.get("id") for d in index.get("dialogs", [])}
+        if dialog_id not in dialog_ids:
+            raise ValueError(f"Dialog id not found: {dialog_id}")
+        index["current_dialog_id"] = dialog_id
+        self.save_dialogs_index(index)
+
+    def upsert_dialog_meta(self, dialog_id: str, **fields: Any) -> None:
+        """Update metadata for dialog in index; create entry if missing."""
+        index = self.load_dialogs_index()
+        dialogs_list: list[dict[str, Any]] = list(index.get("dialogs", []))
+        found = False
+        for d in dialogs_list:
+            if d.get("id") == dialog_id:
+                d.update(fields)
+                # Always bump updated_at when we touch metadata
+                d["updated_at"] = self._now_iso()
+                found = True
+                break
+        if not found:
+            now = self._now_iso()
+            meta = {
+                "id": dialog_id,
+                "title": fields.get("title"),
+                "created_at": now,
+                "updated_at": now,
+                "last_message_at": fields.get("last_message_at"),
+            }
+            dialogs_list.append(meta)
+        index["dialogs"] = dialogs_list
+        self.save_dialogs_index(index)
+
+    def get_dialog_meta(self, dialog_id: str) -> dict[str, Any] | None:
+        """Return metadata for a single dialog id, or None if absent."""
+        index = self.load_dialogs_index()
+        for d in index.get("dialogs", []):
+            if d.get("id") == dialog_id:
+                return d
+        return None
+
+    def delete_dialog(self, dialog_id: str) -> None:
+        """Delete dialog directory and remove from index. If current, unset or pick latest.
+
+        This operation removes `.agentsmithy/dialogs/<dialog_id>` recursively.
+        """
+        self.ensure_dialogs_dir()
+        # Remove directory if exists
+        ddir = self.get_dialog_dir(dialog_id)
+        if ddir.exists():
+            shutil.rmtree(ddir, ignore_errors=True)
+
+        # Update index
+        index = self.load_dialogs_index()
+        dialogs_list: list[dict[str, Any]] = [
+            d for d in index.get("dialogs", []) if d.get("id") != dialog_id
+        ]
+        index["dialogs"] = dialogs_list
+
+        if index.get("current_dialog_id") == dialog_id:
+            # Choose a new current dialog: pick most recent by last_message_at/updated_at
+            def _key(d: dict[str, Any]):
+                return d.get("last_message_at") or d.get("updated_at") or d.get("created_at") or ""
+
+            new_current = None
+            if dialogs_list:
+                new_current = sorted(dialogs_list, key=_key, reverse=True)[0].get("id")
+            index["current_dialog_id"] = new_current
+
+        self.save_dialogs_index(index)
 
     # ---- RAG management (project-owned) ----
     @property
