@@ -33,7 +33,7 @@ class DialogHistory:
         if self._history is None:
             self._history = FileChatMessageHistory(
                 file_path=str(self.history_file_path),
-                ensure_ascii=False  # Allow non-ASCII characters
+                ensure_ascii=False,  # Allow non-ASCII characters
             )
         return self._history
 

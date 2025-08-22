@@ -11,9 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
-from agentsmithy_server.config import settings
 from agentsmithy_server.core.agent_graph import AgentOrchestrator
-
 from agentsmithy_server.core.project import get_current_project
 from agentsmithy_server.utils.logger import api_logger
 
@@ -547,13 +545,13 @@ async def chat(request: ChatRequest, raw_request: Request):
 
         # Get dialog history
         dialog_history = project.get_dialog_history(dialog_id)
-        
+
         # Append user message to dialog history
         try:
             dialog_history.add_user_message(user_message)
         except Exception as e:
             api_logger.error("Failed to append user message", exception=e)
-        
+
         # Load recent messages for context
         recent_messages = []
         try:
@@ -562,7 +560,7 @@ async def chat(request: ChatRequest, raw_request: Request):
             recent_messages = messages
         except Exception as e:
             api_logger.error("Failed to load dialog history", exception=e)
-        
+
         # Inject dialog info into context
         request.context = dict(request.context or {})
         request.context["dialog"] = {"id": dialog_id, "messages": recent_messages}
@@ -601,7 +599,7 @@ async def chat(request: ChatRequest, raw_request: Request):
                 assistant_text = ""
                 resp: Any = result.get("response")
                 conversation = []
-                
+
                 if isinstance(resp, str):
                     assistant_text = resp
                 elif isinstance(resp, dict):
@@ -609,24 +607,30 @@ async def chat(request: ChatRequest, raw_request: Request):
                         resp.get("content") or resp.get("explanation") or ""
                     )
                     conversation = resp.get("conversation", [])
-                
+
                 # Save full conversation history including tool calls
                 dialog_history = project.get_dialog_history(dialog_id)
-                
+
                 # Save intermediate messages (tool calls and results)
                 if conversation:
                     # Skip messages already in history and add only new ones
                     existing_msg_count = len(recent_messages)
-                    for msg in conversation[existing_msg_count + 1:]:  # +1 for system message
-                        if hasattr(msg, 'tool_calls') and msg.tool_calls:
+                    for msg in conversation[
+                        existing_msg_count + 1 :
+                    ]:  # +1 for system message
+                        if hasattr(msg, "tool_calls") and msg.tool_calls:
                             # It's an AIMessage with tool calls
                             dialog_history.history.add_message(msg)
-                        elif hasattr(msg, 'tool_call_id'):
+                        elif hasattr(msg, "tool_call_id"):
                             # It's a ToolMessage
                             dialog_history.history.add_message(msg)
-                
+
                 # Save final assistant message if it's different from tool response
-                if assistant_text and (not conversation or assistant_text not in [getattr(m, 'content', '') for m in conversation]):
+                if assistant_text and (
+                    not conversation
+                    or assistant_text
+                    not in [getattr(m, "content", "") for m in conversation]
+                ):
                     dialog_history.add_ai_message(assistant_text)
             except Exception as e:
                 api_logger.error(

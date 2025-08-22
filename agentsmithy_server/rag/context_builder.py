@@ -60,7 +60,7 @@ class ContextBuilder:
                 "root": str(self.project.root),
                 "metadata": metadata,
             }
-        
+
         # Add dialog context (if supplied by caller)
         if file_context and file_context.get("dialog"):
             dialog_info = file_context["dialog"]
@@ -148,9 +148,9 @@ class ContextBuilder:
     def format_context_for_prompt(self, context: dict[str, Any]) -> str:
         """Format context into a string for LLM prompt."""
         formatted_parts = []
-        
+
         # Note: Dialog history is now handled as actual messages in agents, not as context text
-        
+
         # Project info
         if context.get("project"):
             pj = context["project"]

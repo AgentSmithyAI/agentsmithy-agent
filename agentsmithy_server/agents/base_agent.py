@@ -88,13 +88,14 @@ class BaseAgent(ABC):
 
         # Add dialog history as actual messages (not as context text)
         if context and context.get("dialog") and context["dialog"].get("messages"):
-            from langchain_core.messages import AIMessage, ToolMessage
+            from langchain_core.messages import AIMessage
+
             dialog_messages = context["dialog"]["messages"]
-            
+
             # Add historical messages
             for msg in dialog_messages:
                 # If it's already a BaseMessage object, just add it
-                if hasattr(msg, 'content') and hasattr(msg, 'type'):
+                if hasattr(msg, "content") and hasattr(msg, "type"):
                     messages.append(msg)
                 # Otherwise convert from dict (backward compatibility)
                 elif isinstance(msg, dict):
@@ -102,7 +103,7 @@ class BaseAgent(ABC):
                         messages.append(HumanMessage(content=msg["content"]))
                     elif msg.get("role") == "assistant":
                         messages.append(AIMessage(content=msg["content"]))
-            
+
             # Remove dialog from context to avoid duplication
             context = dict(context)
             context.pop("dialog", None)
