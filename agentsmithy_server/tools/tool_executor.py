@@ -59,8 +59,9 @@ class ToolExecutor:
                         "content": final_content,
                         "tool_calls": aggregated_tool_calls,
                         "tool_results": aggregated_tool_results,
+                        "conversation": conversation,  # Return full conversation for history
                     }
-                return {"type": "text", "content": final_content}
+                return {"type": "text", "content": final_content, "conversation": conversation}
 
             # Execute tools one-by-one, append ToolMessages to conversation
             # IMPORTANT: append the AI response (with tool_calls) first per OpenAI spec

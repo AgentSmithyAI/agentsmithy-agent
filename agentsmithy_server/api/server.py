@@ -13,11 +13,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from agentsmithy_server.config import settings
 from agentsmithy_server.core.agent_graph import AgentOrchestrator
-from agentsmithy_server.core.dialog_io import (
-    DialogMessage,
-    append_message,
-    read_messages,
-)
+
 from agentsmithy_server.core.project import get_current_project
 from agentsmithy_server.utils.logger import api_logger
 
@@ -487,11 +483,8 @@ async def generate_sse_events(
                     has_content=bool(content_joined),
                 )
                 if content_joined:
-                    append_message(
-                        project,
-                        dialog_id,
-                        DialogMessage(role="assistant", content=content_joined),
-                    )
+                    dialog_history = project.get_dialog_history(dialog_id)
+                    dialog_history.add_ai_message(content_joined)
                     api_logger.info("Assistant message persisted successfully")
             except Exception as e:
                 api_logger.error("Failed to append assistant message", exception=e)
@@ -552,21 +545,24 @@ async def chat(request: ChatRequest, raw_request: Request):
         if not dialog_id:
             dialog_id = project.create_dialog(set_current=True)
 
-        # Append user message to dialog log
+        # Get dialog history
+        dialog_history = project.get_dialog_history(dialog_id)
+        
+        # Append user message to dialog history
         try:
-            append_message(
-                project, dialog_id, DialogMessage(role="user", content=user_message)
-            )
+            dialog_history.add_user_message(user_message)
         except Exception as e:
             api_logger.error("Failed to append user message", exception=e)
-
-        # Load recent dialog messages for context (e.g., last 20)
+        
+        # Load recent messages for context
         recent_messages = []
         try:
-            recent_messages = read_messages(project, dialog_id, limit=20)
+            messages = dialog_history.get_messages(limit=20)
+            # Pass the actual message objects to preserve tool calls
+            recent_messages = messages
         except Exception as e:
-            api_logger.error("Failed to read dialog messages", exception=e)
-
+            api_logger.error("Failed to load dialog history", exception=e)
+        
         # Inject dialog info into context
         request.context = dict(request.context or {})
         request.context["dialog"] = {"id": dialog_id, "messages": recent_messages}
@@ -604,18 +600,34 @@ async def chat(request: ChatRequest, raw_request: Request):
             try:
                 assistant_text = ""
                 resp: Any = result.get("response")
+                conversation = []
+                
                 if isinstance(resp, str):
                     assistant_text = resp
                 elif isinstance(resp, dict):
                     assistant_text = str(
                         resp.get("content") or resp.get("explanation") or ""
                     )
-                if assistant_text:
-                    append_message(
-                        project,
-                        dialog_id,
-                        DialogMessage(role="assistant", content=assistant_text),
-                    )
+                    conversation = resp.get("conversation", [])
+                
+                # Save full conversation history including tool calls
+                dialog_history = project.get_dialog_history(dialog_id)
+                
+                # Save intermediate messages (tool calls and results)
+                if conversation:
+                    # Skip messages already in history and add only new ones
+                    existing_msg_count = len(recent_messages)
+                    for msg in conversation[existing_msg_count + 1:]:  # +1 for system message
+                        if hasattr(msg, 'tool_calls') and msg.tool_calls:
+                            # It's an AIMessage with tool calls
+                            dialog_history.history.add_message(msg)
+                        elif hasattr(msg, 'tool_call_id'):
+                            # It's a ToolMessage
+                            dialog_history.history.add_message(msg)
+                
+                # Save final assistant message if it's different from tool response
+                if assistant_text and (not conversation or assistant_text not in [getattr(m, 'content', '') for m in conversation]):
+                    dialog_history.add_ai_message(assistant_text)
             except Exception as e:
                 api_logger.error(
                     "Failed to append assistant message (non-stream)", exception=e

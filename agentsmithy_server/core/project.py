@@ -16,6 +16,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from agentsmithy_server.core.dialog_history import DialogHistory
+
 
 @dataclass
 class Project:
@@ -82,6 +84,10 @@ class Project:
     def get_dialog_dir(self, dialog_id: str) -> Path:
         """Return directory path for a given dialog id (without creating)."""
         return self.dialogs_dir / dialog_id
+
+    def get_dialog_history(self, dialog_id: str) -> DialogHistory:
+        """Get DialogHistory instance for a given dialog."""
+        return DialogHistory(self, dialog_id)
 
     def create_dialog(self, title: str | None = None, set_current: bool = True) -> str:
         """Create a new dialog under this project and return its id.

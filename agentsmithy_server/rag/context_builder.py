@@ -60,11 +60,11 @@ class ContextBuilder:
                 "root": str(self.project.root),
                 "metadata": metadata,
             }
-
+        
         # Add dialog context (if supplied by caller)
         if file_context and file_context.get("dialog"):
             dialog_info = file_context["dialog"]
-            # expect: {"id": str, "messages": list[{role, content, ts?}]}
+            # expect: {"id": str, "messages": list[{role, content}]}
             context["dialog"] = {
                 "id": dialog_info.get("id"),
                 "messages": dialog_info.get("messages", []),
@@ -148,21 +148,9 @@ class ContextBuilder:
     def format_context_for_prompt(self, context: dict[str, Any]) -> str:
         """Format context into a string for LLM prompt."""
         formatted_parts = []
-
-        # Dialog history
-        if context.get("dialog"):
-            dlg = context["dialog"]
-            formatted_parts.append(
-                f"=== Dialog: {dlg.get('id','(none)')} (recent messages) ==="
-            )
-            messages = dlg.get("messages", [])
-            # Print last N messages succinctly
-            for msg in messages:
-                role = msg.get("role", "")
-                content = msg.get("content", "")
-                formatted_parts.append(f"[{role}] {content}")
-            formatted_parts.append("")
-
+        
+        # Note: Dialog history is now handled as actual messages in agents, not as context text
+        
         # Project info
         if context.get("project"):
             pj = context["project"]
