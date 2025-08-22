@@ -347,16 +347,17 @@ async def generate_sse_events(
                             # Try to extract meaningful text content to log as assistant message
                             content_str = ""
                             try:
-                                if isinstance(state["response"], dict):
+                                resp = state["response"]
+                                if isinstance(resp, dict):
                                     content_str = (
-                                        state["response"].get("content")
-                                        or state["response"].get("explanation")
+                                        resp.get("content")
+                                        or resp.get("explanation")
                                         or ""
                                     )
                                 else:
-                                    content_str = str(state["response"])  # fallback
+                                    content_str = str(resp)  # type: ignore  # fallback
                             except Exception:
-                                content_str = str(state["response"])  # safe fallback
+                                content_str = ""  # safe fallback
 
                             event_dict = {
                                 "data": json.dumps(
@@ -620,10 +621,10 @@ async def chat(request: ChatRequest, raw_request: Request):
                     ]:  # +1 for system message
                         if hasattr(msg, "tool_calls") and msg.tool_calls:
                             # It's an AIMessage with tool calls
-                            dialog_history.history.add_message(msg)
+                            dialog_history.history.add_message(msg)  # type: ignore
                         elif hasattr(msg, "tool_call_id"):
                             # It's a ToolMessage
-                            dialog_history.history.add_message(msg)
+                            dialog_history.history.add_message(msg)  # type: ignore
 
                 # Save final assistant message if it's different from tool response
                 if assistant_text and (
