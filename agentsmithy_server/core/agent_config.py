@@ -12,7 +12,7 @@ class AgentConfig:
     Extend with temperature, tools policy, etc. as needed.
     """
 
-    model: str = "gpt-4o"
+    model: str  # No default - must be set explicitly
     temperature: float = 0.7
 
 
@@ -35,8 +35,10 @@ class DefaultAgentConfigProvider:
     """
 
     def get_config(self, agent_name: str) -> AgentConfig:
+        from agentsmithy_server.config import settings
+        
         key = (agent_name or "").upper()
-        default_model = os.getenv("AGENT_DEFAULT_MODEL", "gpt-4o")
+        default_model = os.getenv("AGENT_DEFAULT_MODEL", settings.default_model)
         default_temp = float(os.getenv("AGENT_DEFAULT_TEMPERATURE", "0.7"))
 
         model = os.getenv(f"AGENT_MODEL_{key}", default_model)

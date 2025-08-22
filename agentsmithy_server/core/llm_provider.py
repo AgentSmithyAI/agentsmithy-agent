@@ -61,6 +61,13 @@ class OpenAIProvider(LLMProvider):
         self.max_tokens = max_tokens or settings.max_tokens
         self.api_key = api_key or settings.openai_api_key
 
+        # Validate that model is set
+        if not self.model:
+            raise ValueError(
+                "LLM model not specified. Please set DEFAULT_MODEL in .env file "
+                "or pass model parameter explicitly"
+            )
+
         agent_logger.info(
             "Initializing OpenAI provider",
             model=self.model,

@@ -32,11 +32,26 @@ class Settings(BaseSettings):
     )
 
     # LLM Configuration
-    default_model: str = Field(default="gpt-4o", description="Default LLM model")
-    default_temperature: float = Field(
-        default=0.7, description="Default temperature for LLM"
+    default_model: str = Field(
+        ..., 
+        description="Default LLM model",
+        validation_alias="DEFAULT_MODEL"
     )
-    max_tokens: int = Field(default=4000, description="Maximum tokens for LLM response")
+    default_temperature: float = Field(
+        default=0.7, 
+        description="Default temperature for LLM",
+        validation_alias="DEFAULT_TEMPERATURE"
+    )
+    default_embedding_model: str = Field(
+        default="text-embedding-3-small",
+        description="Default embedding model",
+        validation_alias="DEFAULT_EMBEDDING_MODEL"
+    )
+    max_tokens: int = Field(
+        default=4000, 
+        description="Maximum tokens for LLM response",
+        validation_alias="MAX_TOKENS"
+    )
     streaming_enabled: bool = Field(
         default=True, description="Enable streaming responses"
     )
