@@ -9,10 +9,6 @@ from langchain_core.tools import BaseTool
 from langchain_openai import ChatOpenAI
 
 from agentsmithy_server.config import settings
-from agentsmithy_server.core.agent_config import (
-    AgentConfig,
-    get_agent_config_provider,
-)
 from agentsmithy_server.utils.logger import agent_logger
 
 
@@ -48,14 +44,7 @@ class OpenAIProvider(LLMProvider):
         api_key: str | None = None,
         agent_name: str | None = None,
     ):
-        # Resolve model/temperature from provider if not explicitly passed
-        if model is None or temperature is None:
-            cfg: AgentConfig = get_agent_config_provider().get_config(
-                (agent_name or "").strip() or "universal_agent"
-            )
-            model = model or cfg.model
-            temperature = temperature or cfg.temperature
-
+        # Use explicit model/temperature or fall back to global settings only
         self.model = model or settings.default_model
         self.temperature = temperature or settings.default_temperature
         self.max_tokens = max_tokens or settings.max_tokens
@@ -75,19 +64,51 @@ class OpenAIProvider(LLMProvider):
             max_tokens=self.max_tokens,
         )
 
+        # Build extra provider-specific kwargs (e.g., GPT-5 reasoning controls)
+        extra_model_kwargs: dict[str, Any] = {}
+        # Pass GPT-5 reasoning controls only for GPT-5 models
+        if (
+            getattr(settings, "reasoning_effort", None)
+            and isinstance(self.model, str)
+            and self.model.startswith("gpt-5")
+        ):
+            extra_model_kwargs["reasoning"] = {"effort": settings.reasoning_effort}
+
+        # Determine whether to include temperature (unsupported on some models like gpt-5)
+        def _supports_temperature(model_name: str) -> bool:
+            try:
+                # Disallow temperature for GPT-5 family (Responses API rejects it)
+                if model_name.startswith("gpt-5"):
+                    return False
+            except Exception:
+                pass
+            return True
+
+        # Assemble ChatOpenAI kwargs conditionally
+        base_kwargs: dict[str, Any] = {
+            "model": self.model,
+            "streaming": True,
+        }
+        if _supports_temperature(self.model) and self.temperature is not None:
+            base_kwargs["temperature"] = self.temperature
+        # Route token limit to correct parameter depending on model family
+        if isinstance(self.model, str) and self.model.startswith("gpt-5"):
+            # Responses API expects max_output_tokens
+            extra_model_kwargs["max_output_tokens"] = self.max_tokens
+        else:
+            base_kwargs["max_tokens"] = self.max_tokens
+        if extra_model_kwargs:
+            base_kwargs["model_kwargs"] = extra_model_kwargs
+
         # Initialize LLM; use explicit API key if provided
         if self.api_key:
             # Note: langchain_openai expects SecretStr; use environment variable fallback instead
             import os
 
             os.environ.setdefault("OPENAI_API_KEY", str(self.api_key))
-            self.llm = ChatOpenAI(
-                model=self.model, temperature=self.temperature, streaming=True
-            )
+            self.llm = ChatOpenAI(**base_kwargs)
         else:
-            self.llm = ChatOpenAI(
-                model=self.model, temperature=self.temperature, streaming=True
-            )
+            self.llm = ChatOpenAI(**base_kwargs)
 
     async def agenerate(
         self, messages: list[BaseMessage], stream: bool = False, **kwargs
@@ -110,7 +131,21 @@ class OpenAIProvider(LLMProvider):
         async for chunk in self.llm.astream(messages, **kwargs):
             content = getattr(chunk, "content", None)
             if isinstance(content, str) and content:
-                yield content
+                # Attach metadata if SDK provides it
+                try:
+                    response_meta = {
+                        "response_metadata": getattr(chunk, "response_metadata", {})
+                        or {},
+                        "additional_kwargs": getattr(chunk, "additional_kwargs", {})
+                        or {},
+                    }
+                except Exception:
+                    response_meta = {}
+
+                if response_meta and any(response_meta.values()):
+                    yield {"content": content, "metadata": response_meta}
+                else:
+                    yield content
 
     def get_model_name(self) -> str:
         """Get the model name."""

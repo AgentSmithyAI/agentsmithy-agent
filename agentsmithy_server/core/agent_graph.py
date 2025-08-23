@@ -30,9 +30,8 @@ class AgentOrchestrator:
     def __init__(self, llm_provider_name: str = "openai"):
         # Initialize LLM provider
         agent_logger.info("Creating AgentOrchestrator", provider=llm_provider_name)
-        self.llm_provider = LLMFactory.create(
-            llm_provider_name, agent_name="universal_agent"
-        )
+        # No agent-specific overrides; rely on global settings/defaults
+        self.llm_provider = LLMFactory.create(llm_provider_name)
 
         # Initialize context builder
         self.context_builder = ContextBuilder()

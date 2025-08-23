@@ -215,10 +215,12 @@ async def generate_sse_events(
                                 content_val = chunk.get(
                                     "content", chunk.get("data", str(chunk))
                                 )
+                                metadata_val = chunk.get("metadata") or {}
                                 event_dict = {
                                     "data": json.dumps(
                                         {
                                             "content": content_val,
+                                            "metadata": metadata_val,
                                             "dialog_id": (
                                                 project_dialog[1]
                                                 if project_dialog
@@ -228,6 +230,19 @@ async def generate_sse_events(
                                         }
                                     )
                                 }
+                                try:
+                                    if metadata_val:
+                                        api_logger.debug(
+                                            "Chunk metadata",
+                                            has_metadata=True,
+                                            metadata_keys=list(metadata_val.keys())
+                                            if isinstance(metadata_val, dict)
+                                            else "n/a",
+                                        )
+                                    else:
+                                        api_logger.debug("Chunk metadata", has_metadata=False)
+                                except Exception:
+                                    pass
                                 api_logger.stream_log(
                                     "content_chunk",
                                     str(content_val),

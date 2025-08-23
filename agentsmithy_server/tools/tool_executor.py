@@ -98,10 +98,35 @@ class ToolExecutor:
             agent_logger.info("LLM invoke", messages=len(conversation))
             response = await bound_llm.ainvoke(conversation)
             tool_calls = getattr(response, "tool_calls", [])
+            # Capture any model-provided metadata (if available)
+            try:
+                response_meta = {
+                    "response_metadata": getattr(response, "response_metadata", {}) or {},
+                    "additional_kwargs": getattr(response, "additional_kwargs", {}) or {},
+                }
+            except Exception:
+                response_meta = {}
             if not tool_calls:
                 final_text = getattr(response, "content", "")
                 if final_text:
-                    yield {"content": final_text}
+                    # Yield content along with metadata so SSE can surface it
+                    payload = {"content": final_text}
+                    if response_meta:
+                        payload["metadata"] = response_meta
+                        try:
+                            agent_logger.debug(
+                                "Model response metadata",
+                                has_metadata=True,
+                                metadata_keys=list(response_meta.keys()),
+                            )
+                        except Exception:
+                            pass
+                    else:
+                        try:
+                            agent_logger.debug("Model response metadata", has_metadata=False)
+                        except Exception:
+                            pass
+                    yield payload
                 break
 
             # Append the AI response with tool_calls before sending tool results

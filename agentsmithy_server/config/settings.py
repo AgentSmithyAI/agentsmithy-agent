@@ -1,5 +1,6 @@
 """Configuration settings for AgentSmithy server."""
 
+from pathlib import Path
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -41,6 +42,17 @@ class Settings(BaseSettings):
         default=0.7, 
         description="Default temperature for LLM",
         validation_alias="DEFAULT_TEMPERATURE"
+    )
+    # Reasoning controls (GPT-5)
+    reasoning_effort: str | None = Field(
+        default=None,
+        description="Reasoning depth effort for GPT-5 (e.g., 'low', 'medium', 'high')",
+        validation_alias="REASONING_EFFORT",
+    )
+    reasoning_verbosity: str | None = Field(
+        default=None,
+        description="Verbosity level for GPT-5 outputs (e.g., 'low', 'medium', 'high')",
+        validation_alias="REASONING_VERBOSITY",
     )
     default_embedding_model: str = Field(
         default="text-embedding-3-small",
