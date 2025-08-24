@@ -67,12 +67,16 @@ class OpenAIProvider(LLMProvider):
         # Build extra provider-specific kwargs (e.g., GPT-5 reasoning controls)
         extra_model_kwargs: dict[str, Any] = {}
         # Pass GPT-5 reasoning controls only for GPT-5 models
-        if (
-            getattr(settings, "reasoning_effort", None)
-            and isinstance(self.model, str)
-            and self.model.startswith("gpt-5")
-        ):
-            extra_model_kwargs["reasoning"] = {"effort": settings.reasoning_effort}
+        if isinstance(self.model, str) and self.model.startswith("gpt-5"):
+            reasoning_kwargs: dict[str, Any] = {}
+            # Always request a reasoning summary; default to 'auto' if not configured
+            verbosity = getattr(settings, "reasoning_verbosity", None) or "auto"
+            reasoning_kwargs["summary"] = verbosity
+            # Include effort if configured
+            effort = getattr(settings, "reasoning_effort", None)
+            if effort:
+                reasoning_kwargs["effort"] = effort
+            extra_model_kwargs["reasoning"] = reasoning_kwargs
 
         # Determine whether to include temperature (unsupported on some models like gpt-5)
         def _supports_temperature(model_name: str) -> bool:
@@ -98,6 +102,14 @@ class OpenAIProvider(LLMProvider):
         else:
             base_kwargs["max_tokens"] = self.max_tokens
         if extra_model_kwargs:
+            try:
+                agent_logger.debug(
+                    "OpenAI ChatOpenAI model_kwargs",
+                    model=self.model,
+                    model_kwargs=extra_model_kwargs,
+                )
+            except Exception:
+                pass
             base_kwargs["model_kwargs"] = extra_model_kwargs
 
         # Initialize LLM; use explicit API key if provided
@@ -106,8 +118,16 @@ class OpenAIProvider(LLMProvider):
             import os
 
             os.environ.setdefault("OPENAI_API_KEY", str(self.api_key))
+            try:
+                agent_logger.debug("Initializing ChatOpenAI", base_kwargs_keys=list(base_kwargs.keys()))
+            except Exception:
+                pass
             self.llm = ChatOpenAI(**base_kwargs)
         else:
+            try:
+                agent_logger.debug("Initializing ChatOpenAI", base_kwargs_keys=list(base_kwargs.keys()))
+            except Exception:
+                pass
             self.llm = ChatOpenAI(**base_kwargs)
 
     async def agenerate(

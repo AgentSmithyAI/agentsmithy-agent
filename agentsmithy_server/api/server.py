@@ -129,12 +129,16 @@ async def _process_structured_chunk(
     
     Raises StreamAbortError if error event is encountered.
     """
-    if isinstance(chunk, dict) and chunk.get("type") in {"file_edit", "tool_call", "error", "chat"}:
+    if isinstance(chunk, dict) and chunk.get("type") in {"file_edit", "tool_call", "error", "chat", "reasoning"}:
         if chunk["type"] == "chat":
             content = chunk.get("content", "")
             if content:
                 assistant_buffer.append(content)
                 yield _sse_chat(content=content, dialog_id=dialog_id)
+        elif chunk["type"] == "reasoning":
+            content = chunk.get("content", "")
+            if content:
+                yield _sse_reasoning(content=content, dialog_id=dialog_id)
         elif chunk["type"] == "file_edit":
             yield _sse_file_edit(file=chunk.get("file", ""), dialog_id=dialog_id)
         elif chunk["type"] == "tool_call":

@@ -114,6 +114,53 @@ class ToolExecutor:
             current_tool_call: dict | None = None
             
             async for chunk in bound_llm.astream(conversation):
+                # Try to extract reasoning from provider-specific metadata (minimal and robust)
+                try:
+                    additional_kwargs = getattr(chunk, "additional_kwargs", {}) or {}
+                    response_metadata = getattr(chunk, "response_metadata", {}) or {}
+                    reasoning = None
+                    if isinstance(additional_kwargs, dict):
+                        reasoning = additional_kwargs.get("reasoning")
+                    if reasoning is None and isinstance(response_metadata, dict):
+                        reasoning = response_metadata.get("reasoning")
+
+                    reasoning_text = None
+                    if isinstance(reasoning, str):
+                        reasoning_text = reasoning
+                    elif isinstance(reasoning, dict):
+                        summary = reasoning.get("summary")
+                        if isinstance(summary, str):
+                            reasoning_text = summary
+                        elif isinstance(summary, list) and summary:
+                            parts: list[str] = []
+                            for item in summary:
+                                if isinstance(item, dict):
+                                    if isinstance(item.get("text"), str):
+                                        parts.append(item.get("text"))
+                                    elif isinstance(item.get("content"), list):
+                                        for sub in item.get("content"):
+                                            if isinstance(sub, dict) and isinstance(sub.get("text"), str):
+                                                parts.append(sub.get("text"))
+                            if parts:
+                                reasoning_text = "".join(parts)
+                        elif isinstance(summary, dict):
+                            if isinstance(summary.get("text"), str):
+                                reasoning_text = summary.get("text")
+                            elif isinstance(summary.get("content"), list):
+                                parts2: list[str] = []
+                                for sub in summary.get("content"):
+                                    if isinstance(sub, dict) and isinstance(sub.get("text"), str):
+                                        parts2.append(sub.get("text"))
+                                if parts2:
+                                    reasoning_text = "".join(parts2)
+                        if not reasoning_text and isinstance(reasoning.get("content"), str):
+                            reasoning_text = reasoning.get("content")
+
+                    if reasoning_text:
+                        yield {"type": "reasoning", "content": reasoning_text}
+                except Exception:
+                    pass
+
                 # Handle content chunks
                 content = getattr(chunk, "content", None)
                 if content:
