@@ -80,6 +80,94 @@ app.add_middleware(
 orchestrator: AgentOrchestrator | None = None
 
 
+def _get_dialog_id(project_dialog: tuple[Any, str] | None) -> str | None:
+    """Safely extract dialog_id from a `(project, dialog_id)` tuple.
+
+    Returns None when dialog info is not available.
+    """
+    return project_dialog[1] if project_dialog else None
+
+
+def _normalize_content(value: Any) -> str:
+    """Normalize various chunk/content types to a string.
+
+    Supports list-of-dicts, dicts-with-text, plain strings, or any object.
+    Unifies how we convert streamed chunks and non-streaming payloads to text.
+    """
+    try:
+        if isinstance(value, list):
+            text_parts: list[str] = []
+            for item in value:
+                if isinstance(item, dict) and "text" in item:
+                    text_parts.append(str(item["text"]))
+                else:
+                    text_parts.append(str(item))
+            return "".join(text_parts)
+        if isinstance(value, dict):
+            # Prefer common text keys; fallback to stringified dict
+            return str(value.get("content") or value.get("text") or value)
+        if isinstance(value, str):
+            return value
+        return str(value)
+    except Exception:
+        return str(value)
+
+
+def _sse_chat(content: str, dialog_id: str | None) -> dict[str, str]:
+    return SSEEventFactory.chat(content=content, dialog_id=dialog_id).to_sse()
+
+
+def _sse_reasoning(content: str, dialog_id: str | None) -> dict[str, str]:
+    return SSEEventFactory.reasoning(content=content, dialog_id=dialog_id).to_sse()
+
+
+def _sse_tool_call(name: str, args: dict[str, Any], dialog_id: str | None) -> dict[str, str]:
+    return SSEEventFactory.tool_call(name=name, args=args, dialog_id=dialog_id).to_sse()
+
+
+def _sse_file_edit(file: str, dialog_id: str | None) -> dict[str, str]:
+    return SSEEventFactory.file_edit(file=file, dialog_id=dialog_id).to_sse()
+
+
+def _sse_error(message: str, dialog_id: str | None) -> dict[str, str]:
+    return SSEEventFactory.error(message=message, dialog_id=dialog_id).to_sse()
+
+
+def _sse_done(dialog_id: str | None) -> dict[str, str]:
+    return SSEEventFactory.done(dialog_id=dialog_id).to_sse()
+
+
+async def _drain_tool_events_queue(
+    queue: asyncio.Queue[dict[str, Any]], dialog_id: str | None
+) -> list[dict[str, str]]:
+    """Drain queued tool events and convert to SSE dicts.
+
+    Non-blocking with a short timeout per pop; returns a list of SSE events.
+    """
+    sse_events: list[dict[str, str]] = []
+    try:
+        while not queue.empty():
+            tool_event = await asyncio.wait_for(queue.get(), timeout=0.01)
+            if tool_event.get("type") == "tool_call":
+                sse = _sse_tool_call(
+                    name=tool_event.get("name", ""),
+                    args=tool_event.get("args", {}),
+                    dialog_id=dialog_id,
+                )
+            elif tool_event.get("type") == "file_edit":
+                sse = _sse_file_edit(file=tool_event.get("file", ""), dialog_id=dialog_id)
+            elif tool_event.get("type") == "error":
+                sse = _sse_error(message=tool_event.get("error", ""), dialog_id=dialog_id)
+            else:
+                # Fallback: stream as chat event
+                sse = _sse_chat(content=str(tool_event), dialog_id=dialog_id)
+            api_logger.stream_log("tool_event", json.dumps(tool_event)[:100])
+            sse_events.append(sse)
+    except TimeoutError:
+        pass
+    return sse_events
+
+
 @app.on_event("startup")
 async def _init_dialogs_state() -> None:
     """Ensure dialogs state exists; create a default dialog if none present."""
@@ -107,7 +195,15 @@ async def generate_sse_events(
     context: dict[str, Any],
     project_dialog: tuple[Any, str] | None,
 ) -> AsyncIterator[dict[str, Any]]:  # Changed return type
-    """Generate SSE events for streaming response."""
+    """Generate SSE events for streaming response.
+
+    High-level flow:
+    - Set up an internal queue to receive tool events (tool_call, file_edit, error)
+    - Ask the orchestrator to process the request with streaming
+    - For every graph state update, stream content chunks and drain tool events
+    - Persist the final assistant message into dialog history
+    - Emit a final done event (or error when exceptions occur)
+    """
     api_logger.info("Starting SSE event generation", query=query[:100])
 
     # Define SSE callback for tool results
@@ -159,154 +255,28 @@ async def generate_sse_events(
                     chunk_count = 0
                     async for chunk in state["response"]:
                         chunk_count += 1
-                        # Check if chunk contains structured data (diffs/edits)
-                        if isinstance(chunk, dict):
-                            # Handle structured responses (simplified protocol)
-                            if chunk.get("type") in [
-                                "file_edit",
-                                "tool_call",
-                                "error",
-                            ]:
-                                dialog_id = project_dialog[1] if project_dialog else None
-                                
-                                # Create appropriate event based on type
-                                if chunk.get("type") == "file_edit":
-                                    sse_event = SSEEventFactory.file_edit(
-                                        file=chunk.get("file", ""),
-                                        dialog_id=dialog_id,
-                                    )
-                                elif chunk.get("type") == "tool_call":
-                                    sse_event = SSEEventFactory.tool_call(
-                                        name=chunk.get("name", ""),
-                                        args=chunk.get("args", {}),
-                                        dialog_id=dialog_id,
-                                    )
-                                elif chunk.get("type") == "error":
-                                    sse_event = SSEEventFactory.error(
-                                        message=chunk.get("error", ""),
-                                        dialog_id=dialog_id,
-                                    )
-                                    
-                                api_logger.stream_log(
-                                    "structured_event", None, chunk_number=chunk_count
-                                )
-                                yield sse_event.to_sse()
+                        # Support structured tool/file/error events
+                        if isinstance(chunk, dict) and chunk.get("type") in {"file_edit", "tool_call", "error"}:
+                            d_id = _get_dialog_id(project_dialog)
+                            if chunk["type"] == "file_edit":
+                                yield _sse_file_edit(file=chunk.get("file", ""), dialog_id=d_id)
+                            elif chunk["type"] == "tool_call":
+                                yield _sse_tool_call(name=chunk.get("name", ""), args=chunk.get("args", {}), dialog_id=d_id)
                             else:
-                                # Regular content -> chat
-                                content_val = chunk.get(
-                                    "content", chunk.get("data", str(chunk))
-                                )
-                                
-                                # Ensure content_val is a string
-                                if isinstance(content_val, list):
-                                    # Handle list of content items (e.g., from GPT-5)
-                                    text_parts = []
-                                    for item in content_val:
-                                        if isinstance(item, dict) and "text" in item:
-                                            text_parts.append(item["text"])
-                                        else:
-                                            text_parts.append(str(item))
-                                    content_val = "".join(text_parts)
-                                elif isinstance(content_val, dict):
-                                    # Handle dict content
-                                    content_val = content_val.get("text", str(content_val))
-                                elif not isinstance(content_val, str):
-                                    content_val = str(content_val)
-                                
-                                metadata_val = chunk.get("metadata") or {}
-                                content_event = SSEEventFactory.chat(
-                                    content=content_val,
-                                    dialog_id=project_dialog[1] if project_dialog else None,
-                                )
-                                event_dict = content_event.to_sse()
-                                try:
-                                    if metadata_val:
-                                        api_logger.debug(
-                                            "Chunk metadata",
-                                            has_metadata=True,
-                                            metadata_keys=list(metadata_val.keys())
-                                            if isinstance(metadata_val, dict)
-                                            else "n/a",
-                                        )
-                                    else:
-                                        api_logger.debug("Chunk metadata", has_metadata=False)
-                                except Exception:
-                                    pass
-                                api_logger.stream_log(
-                                    "content_chunk",
-                                    content_val,
-                                    chunk_number=chunk_count,
-                                )
-                                # accumulate assistant text
-                                assistant_buffer.append(content_val)
-
-                                yield event_dict
+                                yield _sse_error(message=chunk.get("error", ""), dialog_id=d_id)
+                            api_logger.stream_log("structured_event", None, chunk_number=chunk_count)
                         else:
-                            # Regular text content
-                            # Ensure chunk is a string
-                            if isinstance(chunk, list):
-                                # Handle list format
-                                text_parts = []
-                                for item in chunk:
-                                    if isinstance(item, dict) and "text" in item:
-                                        text_parts.append(item["text"])
-                                    else:
-                                        text_parts.append(str(item))
-                                chunk_str = "".join(text_parts)
-                            elif isinstance(chunk, dict):
-                                chunk_str = chunk.get("text", str(chunk))
-                            else:
-                                chunk_str = str(chunk)
-                            
-                            content_event = SSEEventFactory.chat(
-                                content=chunk_str,
-                                dialog_id=project_dialog[1] if project_dialog else None,
+                            # Treat anything else as content
+                            content_val = _normalize_content(
+                                chunk.get("content") if isinstance(chunk, dict) else chunk
                             )
-                            event_dict = content_event.to_sse()
-                            api_logger.stream_log(
-                                "content_chunk", chunk_str, chunk_number=chunk_count
-                            )
-                            assistant_buffer.append(chunk_str)
-                            yield event_dict
+                            api_logger.stream_log("content_chunk", content_val, chunk_number=chunk_count)
+                            assistant_buffer.append(content_val)
+                            yield _sse_chat(content=content_val, dialog_id=_get_dialog_id(project_dialog))
 
-                        # Check for tool events in queue (non-blocking)
-                        try:
-                            while not sse_events_queue.empty():
-                                tool_event = await asyncio.wait_for(
-                                    sse_events_queue.get(), timeout=0.01
-                                )
-                                
-                                # Create event from dict with proper handling for queue events
-                                dialog_id = project_dialog[1] if project_dialog else None
-                                
-                                # Handle tool_result events from queue
-                                if tool_event.get("type") == "tool_call":
-                                    sse_event = SSEEventFactory.tool_call(
-                                        name=tool_event.get("name", ""),
-                                        args=tool_event.get("args", {}),
-                                        dialog_id=dialog_id,
-                                    )
-                                elif tool_event.get("type") == "file_edit":
-                                    sse_event = SSEEventFactory.file_edit(
-                                        file=tool_event.get("file", ""),
-                                        dialog_id=dialog_id,
-                                    )
-                                elif tool_event.get("type") == "error":
-                                    sse_event = SSEEventFactory.error(
-                                        message=tool_event.get("error", ""),
-                                        dialog_id=dialog_id,
-                                    )
-                                else:
-                                    sse_event = SSEEventFactory.chat(
-                                        content=str(tool_event), dialog_id=dialog_id
-                                    )
-                                    
-                                api_logger.stream_log(
-                                    "tool_event", json.dumps(tool_event)[:100]
-                                )
-                                yield sse_event.to_sse()
-                        except TimeoutError:
-                            pass
+                        # Non-blocking drain of tool events queued by tools
+                        for sse in await _drain_tool_events_queue(sse_events_queue, _get_dialog_id(project_dialog)):
+                            yield sse
                     api_logger.info(f"Finished streaming {chunk_count} chunks")
                 else:
                     # It's a complete response
@@ -315,11 +285,10 @@ async def generate_sse_events(
                         if "file_operations" in state["response"]:
                             # Send explanation first
                             if state["response"].get("explanation"):
-                                explanation_event = SSEEventFactory.reasoning(
+                                explanation_event = _sse_reasoning(
                                     content=state["response"]["explanation"],
-                                    dialog_id=project_dialog[1] if project_dialog else None
+                                    dialog_id=_get_dialog_id(project_dialog)
                                 )
-                                explanation_event = explanation_event.to_sse()
                                 try:
                                     assistant_buffer.append(
                                         str(state["response"].get("explanation", ""))
@@ -331,14 +300,14 @@ async def generate_sse_events(
                             # Send file operations as separate events
                             for operation in state["response"]["file_operations"]:
                                 if operation.get("type") == "edit":
-                                    diff_event = SSEEventFactory.file_edit(
+                                    diff_event = _sse_file_edit(
                                         file=operation["file"],
-                                        dialog_id=project_dialog[1] if project_dialog else None
+                                        dialog_id=_get_dialog_id(project_dialog)
                                     )
                                     api_logger.info(
                                         "Sending diff", file=operation["file"]
                                     )
-                                    yield diff_event.to_sse()
+                                    yield diff_event
                         else:
                             # Regular structured response
                             # Try to extract meaningful text content to log as assistant message
@@ -356,25 +325,19 @@ async def generate_sse_events(
                             except Exception:
                                 content_str = ""  # safe fallback
 
-                            content_event = SSEEventFactory.chat(
-                                content=(
-                                    content_str
-                                    if content_str != ""
-                                    else str(state["response"])
-                                ),
-                                dialog_id=project_dialog[1] if project_dialog else None
+                            event_dict = _sse_chat(
+                                content=(content_str if content_str != "" else str(state["response"])) ,
+                                dialog_id=_get_dialog_id(project_dialog)
                             )
-                            event_dict = content_event.to_sse()
                             if content_str:
                                 assistant_buffer.append(str(content_str))
                             yield event_dict
                     else:
                         # Regular text response
-                        content_event = SSEEventFactory.chat(
-                            content=state["response"],
-                            dialog_id=project_dialog[1] if project_dialog else None
+                        event_dict = _sse_chat(
+                            content=str(state["response"]),
+                            dialog_id=_get_dialog_id(project_dialog)
                         )
-                        event_dict = content_event.to_sse()
                         api_logger.stream_log("content_complete", state["response"])
                         assistant_buffer.append(str(state["response"]))
                         yield event_dict
@@ -390,25 +353,11 @@ async def generate_sse_events(
                             chunk_count = 0
                             async for chunk in response:
                                 chunk_count += 1
-                                # Normalize chunk to string content
-                                if isinstance(chunk, list):
-                                    text_parts = []
-                                    for item in chunk:
-                                        if isinstance(item, dict) and "text" in item:
-                                            text_parts.append(item["text"])
-                                        else:
-                                            text_parts.append(str(item))
-                                    chunk_text = "".join(text_parts)
-                                elif isinstance(chunk, dict):
-                                    chunk_text = chunk.get("content") or chunk.get("text") or str(chunk)
-                                else:
-                                    chunk_text = str(chunk)
-
-                                content_event = SSEEventFactory.chat(
+                                chunk_text = _normalize_content(chunk)
+                                event_dict = _sse_chat(
                                     content=chunk_text,
-                                    dialog_id=project_dialog[1] if project_dialog else None
+                                    dialog_id=_get_dialog_id(project_dialog)
                                 )
-                                event_dict = content_event.to_sse()
                                 # IMPORTANT: accumulate assistant text
                                 assistant_buffer.append(str(chunk_text))
                                 yield event_dict
@@ -423,25 +372,11 @@ async def generate_sse_events(
                                 chunk_count = 0
                                 async for chunk in actual_response:
                                     chunk_count += 1
-                                    # Normalize chunk to string content
-                                    if isinstance(chunk, list):
-                                        text_parts = []
-                                        for item in chunk:
-                                            if isinstance(item, dict) and "text" in item:
-                                                text_parts.append(item["text"])
-                                            else:
-                                                text_parts.append(str(item))
-                                        chunk_text = "".join(text_parts)
-                                    elif isinstance(chunk, dict):
-                                        chunk_text = chunk.get("content") or chunk.get("text") or str(chunk)
-                                    else:
-                                        chunk_text = str(chunk)
-
-                                    content_event = SSEEventFactory.chat(
+                                    chunk_text = _normalize_content(chunk)
+                                    event_dict = _sse_chat(
                                         content=chunk_text,
-                                        dialog_id=project_dialog[1] if project_dialog else None
+                                        dialog_id=_get_dialog_id(project_dialog)
                                     )
-                                    event_dict = content_event.to_sse()
                                     # IMPORTANT: accumulate assistant text
                                     assistant_buffer.append(str(chunk_text))
                                     yield event_dict
@@ -451,17 +386,11 @@ async def generate_sse_events(
                             else:
                                 # Non-streaming response
                                 # Wrap response in proper JSON format (chat)
-                                if isinstance(actual_response, dict):
-                                    ar_text = actual_response.get("content") or actual_response.get("text") or str(actual_response)
-                                elif isinstance(actual_response, list):
-                                    ar_text = "".join(str(x) for x in actual_response)
-                                else:
-                                    ar_text = str(actual_response)
-                                content_event = SSEEventFactory.chat(
+                                ar_text = _normalize_content(actual_response)
+                                event_dict = _sse_chat(
                                     content=ar_text,
-                                    dialog_id=project_dialog[1] if project_dialog else None
+                                    dialog_id=_get_dialog_id(project_dialog)
                                 )
-                                event_dict = content_event.to_sse()
                                 # IMPORTANT: accumulate assistant text
                                 assistant_buffer.append(str(ar_text))
                                 yield event_dict
@@ -486,20 +415,13 @@ async def generate_sse_events(
 
         # Send completion signal
         api_logger.info("SSE generation completed", total_events=event_count)
-        done_event = SSEEventFactory.done(
-            dialog_id=project_dialog[1] if project_dialog else None
-        )
-        yield done_event.to_sse()
+        yield _sse_done(dialog_id=_get_dialog_id(project_dialog))
 
     except Exception as e:
         api_logger.error("Error in SSE generation", exception=e)
         error_msg = f"Error processing request: {str(e)}"
-        error_event = SSEEventFactory.error(
-            message=error_msg,
-            dialog_id=project_dialog[1] if project_dialog else None
-        )
         api_logger.error(f"Yielding error event: {error_msg}")
-        yield error_event.to_sse()
+        yield _sse_error(message=error_msg, dialog_id=_get_dialog_id(project_dialog))
 
 
 @app.post("/api/chat")
