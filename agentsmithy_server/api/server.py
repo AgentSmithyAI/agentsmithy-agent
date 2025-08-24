@@ -88,29 +88,7 @@ def _get_dialog_id(project_dialog: tuple[Any, str] | None) -> str | None:
     return project_dialog[1] if project_dialog else None
 
 
-def _normalize_content(value: Any) -> str:
-    """Normalize various chunk/content types to a string.
 
-    Supports list-of-dicts, dicts-with-text, plain strings, or any object.
-    Unifies how we convert streamed chunks and non-streaming payloads to text.
-    """
-    try:
-        if isinstance(value, list):
-            text_parts: list[str] = []
-            for item in value:
-                if isinstance(item, dict) and "text" in item:
-                    text_parts.append(str(item["text"]))
-                else:
-                    text_parts.append(str(item))
-            return "".join(text_parts)
-        if isinstance(value, dict):
-            # Prefer common text keys; fallback to stringified dict
-            return str(value.get("content") or value.get("text") or value)
-        if isinstance(value, str):
-            return value
-        return str(value)
-    except Exception:
-        return str(value)
 
 
 def _sse_chat(content: str, dialog_id: str | None) -> dict[str, str]:
@@ -135,6 +113,44 @@ def _sse_error(message: str, dialog_id: str | None) -> dict[str, str]:
 
 def _sse_done(dialog_id: str | None) -> dict[str, str]:
     return SSEEventFactory.done(dialog_id=dialog_id).to_sse()
+
+
+class StreamAbortError(Exception):
+    """Signal to abort streaming due to error."""
+    pass
+
+
+async def _process_structured_chunk(
+    chunk: Any,
+    dialog_id: str | None,
+    assistant_buffer: list[str],
+) -> AsyncIterator[dict[str, str]]:
+    """Process a single chunk and yield appropriate SSE events.
+    
+    Raises StreamAbortError if error event is encountered.
+    """
+    if isinstance(chunk, dict) and chunk.get("type") in {"file_edit", "tool_call", "error", "chat"}:
+        if chunk["type"] == "chat":
+            content = chunk.get("content", "")
+            if content:
+                assistant_buffer.append(content)
+                yield _sse_chat(content=content, dialog_id=dialog_id)
+        elif chunk["type"] == "file_edit":
+            yield _sse_file_edit(file=chunk.get("file", ""), dialog_id=dialog_id)
+        elif chunk["type"] == "tool_call":
+            yield _sse_tool_call(name=chunk.get("name", ""), args=chunk.get("args", {}), dialog_id=dialog_id)
+        else:
+            # Emit error and signal abort
+            yield _sse_error(message=chunk.get("error", ""), dialog_id=dialog_id)
+            raise StreamAbortError()  # Signal to abort streaming
+    elif isinstance(chunk, str):
+        assistant_buffer.append(chunk)
+        yield _sse_chat(content=chunk, dialog_id=dialog_id)
+    else:
+        # Unknown type - convert to string as last resort
+        content = str(chunk)
+        assistant_buffer.append(content)
+        yield _sse_chat(content=content, dialog_id=dialog_id)
 
 
 async def _drain_tool_events_queue(
@@ -255,24 +271,15 @@ async def generate_sse_events(
                     chunk_count = 0
                     async for chunk in state["response"]:
                         chunk_count += 1
-                        # Support structured tool/file/error events
-                        if isinstance(chunk, dict) and chunk.get("type") in {"file_edit", "tool_call", "error"}:
-                            d_id = _get_dialog_id(project_dialog)
-                            if chunk["type"] == "file_edit":
-                                yield _sse_file_edit(file=chunk.get("file", ""), dialog_id=d_id)
-                            elif chunk["type"] == "tool_call":
-                                yield _sse_tool_call(name=chunk.get("name", ""), args=chunk.get("args", {}), dialog_id=d_id)
-                            else:
-                                yield _sse_error(message=chunk.get("error", ""), dialog_id=d_id)
-                            api_logger.stream_log("structured_event", None, chunk_number=chunk_count)
-                        else:
-                            # Treat anything else as content
-                            content_val = _normalize_content(
-                                chunk.get("content") if isinstance(chunk, dict) else chunk
-                            )
-                            api_logger.stream_log("content_chunk", content_val, chunk_number=chunk_count)
-                            assistant_buffer.append(content_val)
-                            yield _sse_chat(content=content_val, dialog_id=_get_dialog_id(project_dialog))
+                        try:
+                            async for sse_event in _process_structured_chunk(
+                                chunk, _get_dialog_id(project_dialog), assistant_buffer
+                            ):
+                                yield sse_event
+                            api_logger.stream_log("processed_chunk", None, chunk_number=chunk_count)
+                        except StreamAbortError:
+                            # Error event was emitted, abort streaming
+                            return
 
                         # Non-blocking drain of tool events queued by tools
                         for sse in await _drain_tool_events_queue(sse_events_queue, _get_dialog_id(project_dialog)):
@@ -280,67 +287,14 @@ async def generate_sse_events(
                     api_logger.info(f"Finished streaming {chunk_count} chunks")
                 else:
                     # It's a complete response
-                    if isinstance(state["response"], dict):
-                        # Check if it's structured response with file operations
-                        if "file_operations" in state["response"]:
-                            # Send explanation first
-                            if state["response"].get("explanation"):
-                                explanation_event = _sse_reasoning(
-                                    content=state["response"]["explanation"],
-                                    dialog_id=_get_dialog_id(project_dialog)
-                                )
-                                try:
-                                    assistant_buffer.append(
-                                        str(state["response"].get("explanation", ""))
-                                    )
-                                except Exception:
-                                    pass
-                                yield explanation_event
-
-                            # Send file operations as separate events
-                            for operation in state["response"]["file_operations"]:
-                                if operation.get("type") == "edit":
-                                    diff_event = _sse_file_edit(
-                                        file=operation["file"],
-                                        dialog_id=_get_dialog_id(project_dialog)
-                                    )
-                                    api_logger.info(
-                                        "Sending diff", file=operation["file"]
-                                    )
-                                    yield diff_event
-                        else:
-                            # Regular structured response
-                            # Try to extract meaningful text content to log as assistant message
-                            content_str = ""
-                            try:
-                                resp = state["response"]
-                                if isinstance(resp, dict):
-                                    content_str = (
-                                        resp.get("content")
-                                        or resp.get("explanation")
-                                        or ""
-                                    )
-                                else:
-                                    content_str = str(resp)  # type: ignore  # fallback
-                            except Exception:
-                                content_str = ""  # safe fallback
-
-                            event_dict = _sse_chat(
-                                content=(content_str if content_str != "" else str(state["response"])) ,
-                                dialog_id=_get_dialog_id(project_dialog)
-                            )
-                            if content_str:
-                                assistant_buffer.append(str(content_str))
-                            yield event_dict
-                    else:
-                        # Regular text response
-                        event_dict = _sse_chat(
-                            content=str(state["response"]),
-                            dialog_id=_get_dialog_id(project_dialog)
-                        )
-                        api_logger.stream_log("content_complete", state["response"])
-                        assistant_buffer.append(str(state["response"]))
-                        yield event_dict
+                    try:
+                        async for sse_event in _process_structured_chunk(
+                            state["response"], _get_dialog_id(project_dialog), assistant_buffer
+                        ):
+                            yield sse_event
+                    except StreamAbortError:
+                        # Error event was emitted
+                        pass
 
             # Check for response in agent-specific keys
             for key in state.keys():
@@ -353,14 +307,14 @@ async def generate_sse_events(
                             chunk_count = 0
                             async for chunk in response:
                                 chunk_count += 1
-                                chunk_text = _normalize_content(chunk)
-                                event_dict = _sse_chat(
-                                    content=chunk_text,
-                                    dialog_id=_get_dialog_id(project_dialog)
-                                )
-                                # IMPORTANT: accumulate assistant text
-                                assistant_buffer.append(str(chunk_text))
-                                yield event_dict
+                                try:
+                                    async for sse_event in _process_structured_chunk(
+                                        chunk, _get_dialog_id(project_dialog), assistant_buffer
+                                    ):
+                                        yield sse_event
+                                except StreamAbortError:
+                                    # Error event was emitted, abort streaming
+                                    return
                             api_logger.info(
                                 f"Finished streaming {chunk_count} chunks from {key}"
                             )
@@ -372,28 +326,27 @@ async def generate_sse_events(
                                 chunk_count = 0
                                 async for chunk in actual_response:
                                     chunk_count += 1
-                                    chunk_text = _normalize_content(chunk)
-                                    event_dict = _sse_chat(
-                                        content=chunk_text,
-                                        dialog_id=_get_dialog_id(project_dialog)
-                                    )
-                                    # IMPORTANT: accumulate assistant text
-                                    assistant_buffer.append(str(chunk_text))
-                                    yield event_dict
+                                    try:
+                                        async for sse_event in _process_structured_chunk(
+                                            chunk, _get_dialog_id(project_dialog), assistant_buffer
+                                        ):
+                                            yield sse_event
+                                    except StreamAbortError:
+                                        # Error event was emitted, abort streaming
+                                        return
                                 api_logger.info(
                                     f"Finished streaming {chunk_count} chunks from {key}"
                                 )
                             else:
                                 # Non-streaming response
-                                # Wrap response in proper JSON format (chat)
-                                ar_text = _normalize_content(actual_response)
-                                event_dict = _sse_chat(
-                                    content=ar_text,
-                                    dialog_id=_get_dialog_id(project_dialog)
-                                )
-                                # IMPORTANT: accumulate assistant text
-                                assistant_buffer.append(str(ar_text))
-                                yield event_dict
+                                try:
+                                    async for sse_event in _process_structured_chunk(
+                                        actual_response, _get_dialog_id(project_dialog), assistant_buffer
+                                    ):
+                                        yield sse_event
+                                except StreamAbortError:
+                                    # Error event was emitted
+                                    pass
 
         # Persist assistant response if dialog logging is enabled
         if project_dialog:

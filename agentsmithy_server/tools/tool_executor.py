@@ -23,6 +23,18 @@ class ToolExecutor:
     def __init__(self, tool_manager: ToolManager, llm_provider: LLMProvider) -> None:
         self.tool_manager = tool_manager
         self.llm_provider = llm_provider
+        # Optional SSE callback to emit structured events upstream if needed
+        self._sse_callback = None
+
+    def set_sse_callback(self, callback):
+        self._sse_callback = callback
+
+    async def emit_event(self, event: dict[str, Any]) -> None:
+        if self._sse_callback is not None:
+            try:
+                await self._sse_callback(event)
+            except Exception as e:
+                agent_logger.error("Failed to emit SSE event from ToolExecutor", error=str(e))
 
     def _bind_tools(self):
         # The provider returns an LLM object with tools bound (LangChain style)
@@ -105,46 +117,49 @@ class ToolExecutor:
                 # Handle content chunks
                 content = getattr(chunk, "content", None)
                 if content:
-                    content_str = ""
-                    
-                    # LangChain may return content as a list of dicts for newer models
-                    if isinstance(content, list):
-                        # Extract text from each content item
+                    # Only process actual text content
+                    if isinstance(content, str):
+                        accumulated_content += content
+                        yield {"type": "chat", "content": content}
+                    elif isinstance(content, list):
+                        # LangChain may return content as list of dicts for newer models
+                        text_parts = []
                         for item in content:
                             if isinstance(item, dict) and "text" in item:
-                                content_str += item["text"]
+                                text_parts.append(item["text"])
                             elif isinstance(item, str):
-                                content_str += item
-                            else:
-                                content_str += str(item)
-                    elif isinstance(content, dict):
-                        # Handle structured content
-                        content_str = content.get("text", str(content))
-                    elif isinstance(content, str):
-                        content_str = content
-                    else:
-                        content_str = str(content)
-                    
-                    # Only yield non-empty content
-                    if content_str:
-                        accumulated_content += content_str
-                        # Yield chat chunk in simplified protocol
-                        yield {"type": "chat", "content": content_str}
+                                text_parts.append(item)
+                        if text_parts:
+                            text = "".join(text_parts)
+                            accumulated_content += text
+                            yield {"type": "chat", "content": text}
                 
                 # Handle tool call chunks
                 tool_call_chunks = getattr(chunk, "tool_call_chunks", [])
                 for tc_chunk in tool_call_chunks:
-                    # Start a new tool call
-                    if tc_chunk.get("index") is not None:
-                        if current_tool_call and "name" in current_tool_call:
-                            accumulated_tool_calls.append(current_tool_call)
-                        current_tool_call = {
-                            "index": tc_chunk["index"],
-                            "id": tc_chunk.get("id", ""),
-                            "name": tc_chunk.get("name", ""),
-                            "args": tc_chunk.get("args", ""),
-                        }
-                    # Accumulate tool call data
+                    # Check if we need to start a new tool call or continue existing one
+                    chunk_index = tc_chunk.get("index")
+                    if chunk_index is not None:
+                        # Check if this is a continuation of current tool call
+                        if current_tool_call and current_tool_call.get("index") == chunk_index:
+                            # Continue accumulating the same tool call
+                            if tc_chunk.get("id") and not current_tool_call.get("id"):
+                                current_tool_call["id"] = tc_chunk["id"]
+                            if tc_chunk.get("name"):
+                                current_tool_call["name"] += tc_chunk["name"]
+                            if tc_chunk.get("args"):
+                                current_tool_call["args"] += tc_chunk["args"]
+                        else:
+                            # New tool call
+                            if current_tool_call and "name" in current_tool_call:
+                                accumulated_tool_calls.append(current_tool_call)
+                            current_tool_call = {
+                                "index": chunk_index,
+                                "id": tc_chunk.get("id", ""),
+                                "name": tc_chunk.get("name", ""),
+                                "args": tc_chunk.get("args", ""),
+                            }
+                    # Accumulate tool call data (for chunks without index)
                     elif current_tool_call:
                         if tc_chunk.get("name"):
                             current_tool_call["name"] += tc_chunk["name"]
@@ -152,7 +167,7 @@ class ToolExecutor:
                             current_tool_call["args"] += tc_chunk["args"]
             
             # Add the last tool call if exists
-            if current_tool_call and "name" in current_tool_call:
+            if current_tool_call and "name" in current_tool_call and current_tool_call["name"]:
                 accumulated_tool_calls.append(current_tool_call)
             
             # If no tool calls, we're done
@@ -168,10 +183,16 @@ class ToolExecutor:
             # Execute tools and stream results
             for tool_call in accumulated_tool_calls:
                 try:
-                    # Parse accumulated args string to dict
-                    args = json.loads(tool_call.get("args", "{}"))
                     name = tool_call.get("name", "")
                     tool_id = tool_call.get("id", "")
+                    
+                    # Parse accumulated args string to dict
+                    args_str = tool_call.get("args", "{}") or "{}"
+                    # Ensure it's a string; providers stream arguments as a JSON string
+                    if not isinstance(args_str, str):
+                        args_str = str(args_str)
+                    
+                    args = json.loads(args_str)
                     
                     if not name:
                         continue
@@ -183,23 +204,15 @@ class ToolExecutor:
                         "id": tool_id
                     })
                     
-                    # Emit tool_call event for SSE
-                    if self._sse_callback is not None:
-                        await self.emit_event({
-                            "type": "tool_call",
-                            "name": name,
-                            "args": args,
-                        })
+                    # Emit tool_call as a structured chunk
+                    yield {"type": "tool_call", "name": name, "args": args}
 
                     # Execute tool
                     result = await self.tool_manager.run_tool(name, **args)
                     
                     # Optionally emit file_edit when result includes file path
                     if isinstance(result, dict) and "path" in result:
-                        await self.emit_event({
-                            "type": "file_edit",
-                            "file": result.get("path"),
-                        })
+                        yield {"type": "file_edit", "file": result.get("path")}
                     
                     # Add tool message to conversation
                     tool_message = ToolMessage(
@@ -208,10 +221,16 @@ class ToolExecutor:
                     )
                     conversation.append(tool_message)
                     
-                except json.JSONDecodeError:
-                    agent_logger.error("Failed to parse tool args", args=tool_call.get("args"))
+                except json.JSONDecodeError as e:
+                    error_msg = f"Failed to parse tool arguments: {str(e)}"
+                    agent_logger.error(error_msg, tool_name=name, args_str=args_str)
+                    yield {"type": "error", "error": error_msg}
+                    return
                 except Exception as e:
-                    agent_logger.error("Tool execution failed", error=str(e))
+                    error_msg = f"Tool '{name}' failed: {str(e)}"
+                    agent_logger.error(error_msg, tool_name=name)
+                    yield {"type": "error", "error": error_msg}
+                    return
             
             # Add AI message with tool calls to conversation
             conversation.append(ai_message)
