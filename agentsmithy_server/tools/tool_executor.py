@@ -257,9 +257,7 @@ class ToolExecutor:
                     # Execute tool
                     result = await self.tool_manager.run_tool(name, **args)
                     
-                    # Optionally emit file_edit when result includes file path
-                    if isinstance(result, dict) and "path" in result:
-                        yield {"type": "file_edit", "file": result.get("path")}
+                    # Do not emit file_edit here. Mutating tools should emit their own events.
                     
                     # Add tool message to conversation
                     tool_message = ToolMessage(
