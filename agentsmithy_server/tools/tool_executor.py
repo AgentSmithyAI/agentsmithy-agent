@@ -128,8 +128,8 @@ class ToolExecutor:
                     # Only yield non-empty content
                     if content_str:
                         accumulated_content += content_str
-                        # Yield content chunk immediately for real-time streaming
-                        yield {"content": content_str}
+                        # Yield chat chunk in simplified protocol
+                        yield {"type": "chat", "content": content_str}
                 
                 # Handle tool call chunks
                 tool_call_chunks = getattr(chunk, "tool_call_chunks", [])
@@ -183,11 +183,23 @@ class ToolExecutor:
                         "id": tool_id
                     })
                     
+                    # Emit tool_call event for SSE
+                    if self._sse_callback is not None:
+                        await self.emit_event({
+                            "type": "tool_call",
+                            "name": name,
+                            "args": args,
+                        })
+
                     # Execute tool
                     result = await self.tool_manager.run_tool(name, **args)
                     
-                    # Yield tool result
-                    yield {"type": "tool_result", "name": name, "result": result}
+                    # Optionally emit file_edit when result includes file path
+                    if isinstance(result, dict) and "path" in result:
+                        await self.emit_event({
+                            "type": "file_edit",
+                            "file": result.get("path"),
+                        })
                     
                     # Add tool message to conversation
                     tool_message = ToolMessage(

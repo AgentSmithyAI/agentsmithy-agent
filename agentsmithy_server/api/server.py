@@ -11,6 +11,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
+from agentsmithy_server.api.sse_protocol import (
+    EventFactory as SSEEventFactory,
+)
 from agentsmithy_server.core.agent_graph import AgentOrchestrator
 from agentsmithy_server.core.project import get_current_project
 from agentsmithy_server.utils.logger import api_logger
@@ -142,40 +145,7 @@ async def generate_sse_events(
                 f"Processing state #{event_count}", state_keys=list(state.keys())
             )
 
-            # Send task type when classified
-            if state.get("task_type") and not state.get("response"):
-                event_dict = {
-                    "data": json.dumps(
-                        {
-                            "type": "classification",
-                            "task_type": state["task_type"],
-                            "dialog_id": project_dialog[1] if project_dialog else None,
-                        }
-                    )
-                }
-
-                api_logger.stream_log(
-                    "classification", state["task_type"], event_number=event_count
-                )
-                yield event_dict
-
-            # Check for task_type in classifier state
-            if "classifier" in state and isinstance(state["classifier"], dict):
-                classifier_data = state["classifier"]
-                if "task_type" in classifier_data and classifier_data["task_type"]:
-                    event_dict = {
-                        "data": json.dumps(
-                            {
-                                "type": "classification",
-                                "task_type": classifier_data["task_type"],
-                                "dialog_id": (
-                                    project_dialog[1] if project_dialog else None
-                                ),
-                            }
-                        )
-                    }
-
-                    yield event_dict
+            # Simplified protocol: no classification events
 
             # Stream the response if it's an async generator
             if state.get("response"):
@@ -191,27 +161,38 @@ async def generate_sse_events(
                         chunk_count += 1
                         # Check if chunk contains structured data (diffs/edits)
                         if isinstance(chunk, dict):
-                            # Handle structured responses (file operations/tool results)
+                            # Handle structured responses (simplified protocol)
                             if chunk.get("type") in [
-                                "diff",
-                                "file_change",
-                                "edit",
-                                "change_applied",
-                                "file_patched",
-                                "tool_result",
+                                "file_edit",
+                                "tool_call",
+                                "error",
                             ]:
-                                payload = dict(chunk)
-                                payload["dialog_id"] = (
-                                    project_dialog[1] if project_dialog else None
-                                )
-                                event_dict = {"data": json.dumps(payload)}
+                                dialog_id = project_dialog[1] if project_dialog else None
+                                
+                                # Create appropriate event based on type
+                                if chunk.get("type") == "file_edit":
+                                    sse_event = SSEEventFactory.file_edit(
+                                        file=chunk.get("file", ""),
+                                        dialog_id=dialog_id,
+                                    )
+                                elif chunk.get("type") == "tool_call":
+                                    sse_event = SSEEventFactory.tool_call(
+                                        name=chunk.get("name", ""),
+                                        args=chunk.get("args", {}),
+                                        dialog_id=dialog_id,
+                                    )
+                                elif chunk.get("type") == "error":
+                                    sse_event = SSEEventFactory.error(
+                                        message=chunk.get("error", ""),
+                                        dialog_id=dialog_id,
+                                    )
+                                    
                                 api_logger.stream_log(
-                                    "file_operation", None, chunk_number=chunk_count
+                                    "structured_event", None, chunk_number=chunk_count
                                 )
-
-                                yield event_dict
+                                yield sse_event.to_sse()
                             else:
-                                # Regular content
+                                # Regular content -> chat
                                 content_val = chunk.get(
                                     "content", chunk.get("data", str(chunk))
                                 )
@@ -233,20 +214,11 @@ async def generate_sse_events(
                                     content_val = str(content_val)
                                 
                                 metadata_val = chunk.get("metadata") or {}
-                                event_dict = {
-                                    "data": json.dumps(
-                                        {
-                                            "content": content_val,
-                                            "metadata": metadata_val,
-                                            "dialog_id": (
-                                                project_dialog[1]
-                                                if project_dialog
-                                                else None
-                                            ),
-                                            "_log_meta": {"event": "content_chunk"},
-                                        }
-                                    )
-                                }
+                                content_event = SSEEventFactory.chat(
+                                    content=content_val,
+                                    dialog_id=project_dialog[1] if project_dialog else None,
+                                )
+                                event_dict = content_event.to_sse()
                                 try:
                                     if metadata_val:
                                         api_logger.debug(
@@ -286,19 +258,11 @@ async def generate_sse_events(
                             else:
                                 chunk_str = str(chunk)
                             
-                            event_dict = {
-                                "data": json.dumps(
-                                    {
-                                        "content": chunk_str,
-                                        "dialog_id": (
-                                            project_dialog[1]
-                                            if project_dialog
-                                            else None
-                                        ),
-                                        "_log_meta": {"event": "content_chunk"},
-                                    }
-                                )
-                            }
+                            content_event = SSEEventFactory.chat(
+                                content=chunk_str,
+                                dialog_id=project_dialog[1] if project_dialog else None,
+                            )
+                            event_dict = content_event.to_sse()
                             api_logger.stream_log(
                                 "content_chunk", chunk_str, chunk_number=chunk_count
                             )
@@ -311,28 +275,36 @@ async def generate_sse_events(
                                 tool_event = await asyncio.wait_for(
                                     sse_events_queue.get(), timeout=0.01
                                 )
-                                # Attach dialog_id to tool events as metadata
-                                te = dict(tool_event)
-                                if project_dialog:
-                                    te.setdefault("metadata", {})
-                                    if isinstance(te["metadata"], dict):
-                                        te["metadata"]["dialog_id"] = project_dialog[1]
-                                # Also add a small log meta to make it obvious in JSON logs
-                                te_with_meta = dict(te)
-                                try:
-                                    if isinstance(te_with_meta, dict):
-                                        te_with_meta.setdefault("_log_meta", {})
-                                        if isinstance(te_with_meta["_log_meta"], dict):
-                                            te_with_meta["_log_meta"].update(
-                                                {"event": "tool_event"}
-                                            )
-                                except Exception:
-                                    pass
-                                event_dict = {"data": json.dumps(te_with_meta)}
+                                
+                                # Create event from dict with proper handling for queue events
+                                dialog_id = project_dialog[1] if project_dialog else None
+                                
+                                # Handle tool_result events from queue
+                                if tool_event.get("type") == "tool_call":
+                                    sse_event = SSEEventFactory.tool_call(
+                                        name=tool_event.get("name", ""),
+                                        args=tool_event.get("args", {}),
+                                        dialog_id=dialog_id,
+                                    )
+                                elif tool_event.get("type") == "file_edit":
+                                    sse_event = SSEEventFactory.file_edit(
+                                        file=tool_event.get("file", ""),
+                                        dialog_id=dialog_id,
+                                    )
+                                elif tool_event.get("type") == "error":
+                                    sse_event = SSEEventFactory.error(
+                                        message=tool_event.get("error", ""),
+                                        dialog_id=dialog_id,
+                                    )
+                                else:
+                                    sse_event = SSEEventFactory.chat(
+                                        content=str(tool_event), dialog_id=dialog_id
+                                    )
+                                    
                                 api_logger.stream_log(
                                     "tool_event", json.dumps(tool_event)[:100]
                                 )
-                                yield event_dict
+                                yield sse_event.to_sse()
                         except TimeoutError:
                             pass
                     api_logger.info(f"Finished streaming {chunk_count} chunks")
@@ -343,18 +315,11 @@ async def generate_sse_events(
                         if "file_operations" in state["response"]:
                             # Send explanation first
                             if state["response"].get("explanation"):
-                                explanation_event = {
-                                    "data": json.dumps(
-                                        {
-                                            "content": state["response"]["explanation"],
-                                            "dialog_id": (
-                                                project_dialog[1]
-                                                if project_dialog
-                                                else None
-                                            ),
-                                        }
-                                    )
-                                }
+                                explanation_event = SSEEventFactory.reasoning(
+                                    content=state["response"]["explanation"],
+                                    dialog_id=project_dialog[1] if project_dialog else None
+                                )
+                                explanation_event = explanation_event.to_sse()
                                 try:
                                     assistant_buffer.append(
                                         str(state["response"].get("explanation", ""))
@@ -366,29 +331,14 @@ async def generate_sse_events(
                             # Send file operations as separate events
                             for operation in state["response"]["file_operations"]:
                                 if operation.get("type") == "edit":
-                                    diff_event = {
-                                        "data": json.dumps(
-                                            {
-                                                "type": "diff",
-                                                "file": operation["file"],
-                                                "diff": operation["diff"],
-                                                "line_start": operation.get(
-                                                    "line_start"
-                                                ),
-                                                "line_end": operation.get("line_end"),
-                                                "reason": operation.get("reason"),
-                                                "dialog_id": (
-                                                    project_dialog[1]
-                                                    if project_dialog
-                                                    else None
-                                                ),
-                                            }
-                                        )
-                                    }
+                                    diff_event = SSEEventFactory.file_edit(
+                                        file=operation["file"],
+                                        dialog_id=project_dialog[1] if project_dialog else None
+                                    )
                                     api_logger.info(
                                         "Sending diff", file=operation["file"]
                                     )
-                                    yield diff_event
+                                    yield diff_event.to_sse()
                         else:
                             # Regular structured response
                             # Try to extract meaningful text content to log as assistant message
@@ -406,37 +356,25 @@ async def generate_sse_events(
                             except Exception:
                                 content_str = ""  # safe fallback
 
-                            event_dict = {
-                                "data": json.dumps(
-                                    {
-                                        "content": (
-                                            content_str
-                                            if content_str != ""
-                                            else str(state["response"])
-                                        ),
-                                        "dialog_id": (
-                                            project_dialog[1]
-                                            if project_dialog
-                                            else None
-                                        ),
-                                    }
-                                )
-                            }
+                            content_event = SSEEventFactory.chat(
+                                content=(
+                                    content_str
+                                    if content_str != ""
+                                    else str(state["response"])
+                                ),
+                                dialog_id=project_dialog[1] if project_dialog else None
+                            )
+                            event_dict = content_event.to_sse()
                             if content_str:
                                 assistant_buffer.append(str(content_str))
                             yield event_dict
                     else:
                         # Regular text response
-                        event_dict = {
-                            "data": json.dumps(
-                                {
-                                    "content": state["response"],
-                                    "dialog_id": (
-                                        project_dialog[1] if project_dialog else None
-                                    ),
-                                }
-                            )
-                        }
+                        content_event = SSEEventFactory.chat(
+                            content=state["response"],
+                            dialog_id=project_dialog[1] if project_dialog else None
+                        )
+                        event_dict = content_event.to_sse()
                         api_logger.stream_log("content_complete", state["response"])
                         assistant_buffer.append(str(state["response"]))
                         yield event_dict
@@ -452,19 +390,12 @@ async def generate_sse_events(
                             chunk_count = 0
                             async for chunk in response:
                                 chunk_count += 1
-                                # Wrap chunk in proper JSON format
-                                event_dict = {
-                                    "data": json.dumps(
-                                        {
-                                            "content": chunk,
-                                            "dialog_id": (
-                                                project_dialog[1]
-                                                if project_dialog
-                                                else None
-                                            ),
-                                        }
-                                    )
-                                }
+                                # Wrap chunk in proper JSON format (chat)
+                                content_event = SSEEventFactory.chat(
+                                    content=chunk,
+                                    dialog_id=project_dialog[1] if project_dialog else None
+                                )
+                                event_dict = content_event.to_sse()
                                 # IMPORTANT: accumulate assistant text
                                 assistant_buffer.append(str(chunk))
                                 yield event_dict
@@ -479,19 +410,12 @@ async def generate_sse_events(
                                 chunk_count = 0
                                 async for chunk in actual_response:
                                     chunk_count += 1
-                                    # Wrap chunk in proper JSON format
-                                    event_dict = {
-                                        "data": json.dumps(
-                                            {
-                                                "content": chunk,
-                                                "dialog_id": (
-                                                    project_dialog[1]
-                                                    if project_dialog
-                                                    else None
-                                                ),
-                                            }
-                                        )
-                                    }
+                                    # Wrap chunk in proper JSON format (chat)
+                                    content_event = SSEEventFactory.chat(
+                                        content=chunk,
+                                        dialog_id=project_dialog[1] if project_dialog else None
+                                    )
+                                    event_dict = content_event.to_sse()
                                     # IMPORTANT: accumulate assistant text
                                     assistant_buffer.append(str(chunk))
                                     yield event_dict
@@ -500,19 +424,12 @@ async def generate_sse_events(
                                 )
                             else:
                                 # Non-streaming response
-                                # Wrap response in proper JSON format
-                                event_dict = {
-                                    "data": json.dumps(
-                                        {
-                                            "content": actual_response,
-                                            "dialog_id": (
-                                                project_dialog[1]
-                                                if project_dialog
-                                                else None
-                                            ),
-                                        }
-                                    )
-                                }
+                                # Wrap response in proper JSON format (chat)
+                                content_event = SSEEventFactory.chat(
+                                    content=actual_response,
+                                    dialog_id=project_dialog[1] if project_dialog else None
+                                )
+                                event_dict = content_event.to_sse()
                                 # IMPORTANT: accumulate assistant text
                                 assistant_buffer.append(str(actual_response))
                                 yield event_dict
@@ -537,22 +454,20 @@ async def generate_sse_events(
 
         # Send completion signal
         api_logger.info("SSE generation completed", total_events=event_count)
-        completion_dict = {
-            "data": json.dumps(
-                {
-                    "done": True,
-                    "dialog_id": project_dialog[1] if project_dialog else None,
-                }
-            )
-        }
-        yield completion_dict
+        done_event = SSEEventFactory.done(
+            dialog_id=project_dialog[1] if project_dialog else None
+        )
+        yield done_event.to_sse()
 
     except Exception as e:
         api_logger.error("Error in SSE generation", exception=e)
         error_msg = f"Error processing request: {str(e)}"
-        error_dict = {"data": json.dumps({"error": error_msg})}
-        api_logger.error(f"Yielding error event: {error_dict}")
-        yield error_dict
+        error_event = SSEEventFactory.error(
+            message=error_msg,
+            dialog_id=project_dialog[1] if project_dialog else None
+        )
+        api_logger.error(f"Yielding error event: {error_msg}")
+        yield error_event.to_sse()
 
 
 @app.post("/api/chat")

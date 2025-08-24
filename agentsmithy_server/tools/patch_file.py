@@ -79,20 +79,17 @@ class PatchFileTool(BaseTool):
             )
         )
 
-        # Emit diff event compatible with SSE protocol
+        # Emit file_edit event in simplified SSE protocol
         if self._sse_callback is not None:
             await self.emit_event(
                 {
-                    "type": "diff",
+                    "type": "file_edit",
                     "file": str(file_path),
-                    "diff": unified,
-                    "reason": "; ".join([c.reason for c in parsed_changes if c.reason]),
                 }
             )
 
         return {
             "type": "patch_result",
             "file": str(file_path),
-            "diff": unified,
             "applied_changes": [c.__dict__ for c in parsed_changes],
         }
