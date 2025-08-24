@@ -1,16 +1,21 @@
-"""Simplified SSE Protocol: chat, reasoning, tool_call, file_edit, error, done."""
+"""Simplified SSE Protocol: chat, reasoning, chat_start, chat_end, reasoning_start,
+reasoning_end, tool_call, file_edit, error, done."""
 
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, asdict, field
+from dataclasses import asdict, dataclass, field
 from enum import Enum
-from typing import Any, Dict, Optional, Union, Literal
+from typing import Any, Literal
 
 
 class EventType(str, Enum):
     CHAT = "chat"
     REASONING = "reasoning"
+    CHAT_START = "chat_start"
+    CHAT_END = "chat_end"
+    REASONING_START = "reasoning_start"
+    REASONING_END = "reasoning_end"
     TOOL_CALL = "tool_call"
     FILE_EDIT = "file_edit"
     ERROR = "error"
@@ -19,16 +24,16 @@ class EventType(str, Enum):
 
 @dataclass
 class BaseEvent:
-    dialog_id: Optional[str] = None
+    dialog_id: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         for k, v in list(data.items()):
             if isinstance(v, Enum):
                 data[k] = v.value
         return {k: v for k, v in data.items() if v is not None}
 
-    def to_sse(self) -> Dict[str, str]:
+    def to_sse(self) -> dict[str, str]:
         return {"data": json.dumps(self.to_dict(), ensure_ascii=False)}
 
 
@@ -45,10 +50,30 @@ class ReasoningEvent(BaseEvent):
 
 
 @dataclass
+class ChatStartEvent(BaseEvent):
+    type: Literal[EventType.CHAT_START] = EventType.CHAT_START
+
+
+@dataclass
+class ChatEndEvent(BaseEvent):
+    type: Literal[EventType.CHAT_END] = EventType.CHAT_END
+
+
+@dataclass
+class ReasoningStartEvent(BaseEvent):
+    type: Literal[EventType.REASONING_START] = EventType.REASONING_START
+
+
+@dataclass
+class ReasoningEndEvent(BaseEvent):
+    type: Literal[EventType.REASONING_END] = EventType.REASONING_END
+
+
+@dataclass
 class ToolCallEvent(BaseEvent):
     type: Literal[EventType.TOOL_CALL] = EventType.TOOL_CALL
     name: str = ""
-    args: Dict[str, Any] = field(default_factory=dict)
+    args: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -71,31 +96,47 @@ class DoneEvent(BaseEvent):
 
 class EventFactory:
     @staticmethod
-    def chat(content: str, dialog_id: Optional[str] = None) -> ChatEvent:
+    def chat(content: str, dialog_id: str | None = None) -> ChatEvent:
         return ChatEvent(content=content, dialog_id=dialog_id)
 
     @staticmethod
-    def reasoning(content: str, dialog_id: Optional[str] = None) -> ReasoningEvent:
+    def reasoning(content: str, dialog_id: str | None = None) -> ReasoningEvent:
         return ReasoningEvent(content=content, dialog_id=dialog_id)
 
     @staticmethod
-    def tool_call(name: str, args: Dict[str, Any], dialog_id: Optional[str] = None) -> ToolCallEvent:
+    def chat_start(dialog_id: str | None = None) -> ChatStartEvent:
+        return ChatStartEvent(dialog_id=dialog_id)
+
+    @staticmethod
+    def chat_end(dialog_id: str | None = None) -> ChatEndEvent:
+        return ChatEndEvent(dialog_id=dialog_id)
+
+    @staticmethod
+    def reasoning_start(dialog_id: str | None = None) -> ReasoningStartEvent:
+        return ReasoningStartEvent(dialog_id=dialog_id)
+
+    @staticmethod
+    def reasoning_end(dialog_id: str | None = None) -> ReasoningEndEvent:
+        return ReasoningEndEvent(dialog_id=dialog_id)
+
+    @staticmethod
+    def tool_call(name: str, args: dict[str, Any], dialog_id: str | None = None) -> ToolCallEvent:
         return ToolCallEvent(name=name, args=args, dialog_id=dialog_id)
 
     @staticmethod
-    def file_edit(file: str, dialog_id: Optional[str] = None) -> FileEditEvent:
+    def file_edit(file: str, dialog_id: str | None = None) -> FileEditEvent:
         return FileEditEvent(file=file, dialog_id=dialog_id)
 
     @staticmethod
-    def error(message: str, dialog_id: Optional[str] = None) -> ErrorEvent:
+    def error(message: str, dialog_id: str | None = None) -> ErrorEvent:
         return ErrorEvent(error=message, dialog_id=dialog_id)
 
     @staticmethod
-    def done(dialog_id: Optional[str] = None) -> DoneEvent:
+    def done(dialog_id: str | None = None) -> DoneEvent:
         return DoneEvent(dialog_id=dialog_id)
 
     @staticmethod
-    def from_dict(data: Dict[str, Any], dialog_id: Optional[str] = None) -> BaseEvent:
+    def from_dict(data: dict[str, Any], dialog_id: str | None = None) -> BaseEvent:
         et = data.get("type")
         if dialog_id and "dialog_id" not in data:
             data["dialog_id"] = dialog_id
@@ -103,6 +144,14 @@ class EventFactory:
             return ChatEvent(**data)
         if et == EventType.REASONING:
             return ReasoningEvent(**data)
+        if et == EventType.CHAT_START:
+            return ChatStartEvent(**data)
+        if et == EventType.CHAT_END:
+            return ChatEndEvent(**data)
+        if et == EventType.REASONING_START:
+            return ReasoningStartEvent(**data)
+        if et == EventType.REASONING_END:
+            return ReasoningEndEvent(**data)
         if et == EventType.TOOL_CALL:
             return ToolCallEvent(**data)
         if et == EventType.FILE_EDIT:

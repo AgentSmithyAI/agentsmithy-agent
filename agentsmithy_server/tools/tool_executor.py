@@ -113,6 +113,10 @@ class ToolExecutor:
             accumulated_tool_calls: list[dict] = []
             current_tool_call: dict | None = None
             
+            # Boundary markers for chat and reasoning
+            chat_started = False
+            reasoning_started = False
+
             async for chunk in bound_llm.astream(conversation):
                 # Try to extract reasoning from provider-specific metadata (minimal and robust)
                 try:
@@ -157,6 +161,9 @@ class ToolExecutor:
                             reasoning_text = reasoning.get("content")
 
                     if reasoning_text:
+                        if not reasoning_started:
+                            reasoning_started = True
+                            yield {"type": "reasoning_start"}
                         yield {"type": "reasoning", "content": reasoning_text}
                 except Exception:
                     pass
@@ -166,6 +173,9 @@ class ToolExecutor:
                 if content:
                     # Only process actual text content
                     if isinstance(content, str):
+                        if not chat_started:
+                            chat_started = True
+                            yield {"type": "chat_start"}
                         accumulated_content += content
                         yield {"type": "chat", "content": content}
                     elif isinstance(content, list):
@@ -177,6 +187,9 @@ class ToolExecutor:
                             elif isinstance(item, str):
                                 text_parts.append(item)
                         if text_parts:
+                            if not chat_started:
+                                chat_started = True
+                                yield {"type": "chat_start"}
                             text = "".join(text_parts)
                             accumulated_content += text
                             yield {"type": "chat", "content": text}
@@ -213,6 +226,12 @@ class ToolExecutor:
                         if tc_chunk.get("args"):
                             current_tool_call["args"] += tc_chunk["args"]
             
+            # Close boundary markers at the end of this streaming chunk
+            if reasoning_started:
+                yield {"type": "reasoning_end"}
+            if chat_started and accumulated_content:
+                yield {"type": "chat_end"}
+
             # Add the last tool call if exists
             if current_tool_call and "name" in current_tool_call and current_tool_call["name"]:
                 accumulated_tool_calls.append(current_tool_call)

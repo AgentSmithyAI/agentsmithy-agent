@@ -107,6 +107,22 @@ def _sse_file_edit(file: str, dialog_id: str | None) -> dict[str, str]:
     return SSEEventFactory.file_edit(file=file, dialog_id=dialog_id).to_sse()
 
 
+def _sse_chat_start(dialog_id: str | None) -> dict[str, str]:
+    return SSEEventFactory.chat_start(dialog_id=dialog_id).to_sse()
+
+
+def _sse_chat_end(dialog_id: str | None) -> dict[str, str]:
+    return SSEEventFactory.chat_end(dialog_id=dialog_id).to_sse()
+
+
+def _sse_reasoning_start(dialog_id: str | None) -> dict[str, str]:
+    return SSEEventFactory.reasoning_start(dialog_id=dialog_id).to_sse()
+
+
+def _sse_reasoning_end(dialog_id: str | None) -> dict[str, str]:
+    return SSEEventFactory.reasoning_end(dialog_id=dialog_id).to_sse()
+
+
 def _sse_error(message: str, dialog_id: str | None) -> dict[str, str]:
     return SSEEventFactory.error(message=message, dialog_id=dialog_id).to_sse()
 
@@ -129,7 +145,7 @@ async def _process_structured_chunk(
     
     Raises StreamAbortError if error event is encountered.
     """
-    if isinstance(chunk, dict) and chunk.get("type") in {"file_edit", "tool_call", "error", "chat", "reasoning"}:
+    if isinstance(chunk, dict) and chunk.get("type") in {"file_edit", "tool_call", "error", "chat", "reasoning", "chat_start", "chat_end", "reasoning_start", "reasoning_end"}:
         if chunk["type"] == "chat":
             content = chunk.get("content", "")
             if content:
@@ -139,6 +155,14 @@ async def _process_structured_chunk(
             content = chunk.get("content", "")
             if content:
                 yield _sse_reasoning(content=content, dialog_id=dialog_id)
+        elif chunk["type"] == "chat_start":
+            yield _sse_chat_start(dialog_id=dialog_id)
+        elif chunk["type"] == "chat_end":
+            yield _sse_chat_end(dialog_id=dialog_id)
+        elif chunk["type"] == "reasoning_start":
+            yield _sse_reasoning_start(dialog_id=dialog_id)
+        elif chunk["type"] == "reasoning_end":
+            yield _sse_reasoning_end(dialog_id=dialog_id)
         elif chunk["type"] == "file_edit":
             yield _sse_file_edit(file=chunk.get("file", ""), dialog_id=dialog_id)
         elif chunk["type"] == "tool_call":
