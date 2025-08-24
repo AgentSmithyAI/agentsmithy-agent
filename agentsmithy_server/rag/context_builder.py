@@ -61,6 +61,15 @@ class ContextBuilder:
                 "metadata": metadata,
             }
 
+        # Add dialog context (if supplied by caller)
+        if file_context and file_context.get("dialog"):
+            dialog_info = file_context["dialog"]
+            # expect: {"id": str, "messages": list[{role, content}]}
+            context["dialog"] = {
+                "id": dialog_info.get("id"),
+                "messages": dialog_info.get("messages", []),
+            }
+
         # Add current file context
         if file_context and file_context.get("current_file"):
             current_file = file_context["current_file"]
@@ -139,6 +148,8 @@ class ContextBuilder:
     def format_context_for_prompt(self, context: dict[str, Any]) -> str:
         """Format context into a string for LLM prompt."""
         formatted_parts = []
+
+        # Note: Dialog history is now handled as actual messages in agents, not as context text
 
         # Project info
         if context.get("project"):

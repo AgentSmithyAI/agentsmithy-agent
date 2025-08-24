@@ -33,6 +33,15 @@ if __name__ == "__main__":
             ".env file not found! Please create it from .env.example and add your OPENAI_API_KEY"
         )
         sys.exit(1)
+    
+    # Validate required settings
+    from agentsmithy_server.config import settings
+    
+    if not settings.default_model:
+        startup_logger.error(
+            "DEFAULT_MODEL not set in .env file! Please specify the LLM model to use."
+        )
+        sys.exit(1)
 
     try:
         # Parse required --workdir before importing the server
@@ -118,7 +127,7 @@ if __name__ == "__main__":
 
         import uvicorn
 
-        from agentsmithy_server.api.server import settings
+        from agentsmithy_server.config import settings
 
         startup_logger.info(
             "Starting AgentSmithy Server",
@@ -131,11 +140,15 @@ if __name__ == "__main__":
         # Use custom logging configuration for consistent JSON output
         from agentsmithy_server.config import LOGGING_CONFIG
 
+        # Allow reload to be controlled via env (default False for prod)
+        reload_enabled_env = os.getenv("SERVER_RELOAD", "false").lower()
+        reload_enabled = reload_enabled_env in {"1", "true", "yes", "on"}
+
         uvicorn.run(
             "agentsmithy_server.api.server:app",
             host=settings.server_host,
             port=settings.server_port,
-            reload=True,
+            reload=reload_enabled,
             log_config=LOGGING_CONFIG,
             env_file=".env",
         )

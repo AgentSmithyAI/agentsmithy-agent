@@ -32,11 +32,37 @@ class Settings(BaseSettings):
     )
 
     # LLM Configuration
-    default_model: str = Field(default="gpt-4o", description="Default LLM model")
-    default_temperature: float = Field(
-        default=0.7, description="Default temperature for LLM"
+    default_model: str = Field(
+        ..., 
+        description="Default LLM model",
+        validation_alias="DEFAULT_MODEL"
     )
-    max_tokens: int = Field(default=4000, description="Maximum tokens for LLM response")
+    default_temperature: float = Field(
+        default=0.7, 
+        description="Default temperature for LLM",
+        validation_alias="DEFAULT_TEMPERATURE"
+    )
+    # Reasoning controls (GPT-5)
+    reasoning_effort: str | None = Field(
+        default=None,
+        description="Reasoning depth effort for GPT-5 (e.g., 'low', 'medium', 'high')",
+        validation_alias="REASONING_EFFORT",
+    )
+    reasoning_verbosity: str | None = Field(
+        default=None,
+        description="Verbosity level for GPT-5 outputs (e.g., 'low', 'medium', 'high')",
+        validation_alias="REASONING_VERBOSITY",
+    )
+    default_embedding_model: str = Field(
+        default="text-embedding-3-small",
+        description="Default embedding model",
+        validation_alias="DEFAULT_EMBEDDING_MODEL"
+    )
+    max_tokens: int = Field(
+        default=4000, 
+        description="Maximum tokens for LLM response",
+        validation_alias="MAX_TOKENS"
+    )
     streaming_enabled: bool = Field(
         default=True, description="Enable streaming responses"
     )

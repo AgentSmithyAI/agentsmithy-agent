@@ -86,12 +86,34 @@ class BaseAgent(ABC):
         """Prepare messages for LLM."""
         messages: list[BaseMessage] = [SystemMessage(content=self.system_prompt)]
 
-        # Add context if available
+        # Add dialog history as actual messages (not as context text)
+        if context and context.get("dialog") and context["dialog"].get("messages"):
+            from langchain_core.messages import AIMessage
+
+            dialog_messages = context["dialog"]["messages"]
+
+            # Add historical messages
+            for msg in dialog_messages:
+                # If it's already a BaseMessage object, just add it
+                if hasattr(msg, "content") and hasattr(msg, "type"):
+                    messages.append(msg)
+                # Otherwise convert from dict (backward compatibility)
+                elif isinstance(msg, dict):
+                    if msg.get("role") == "user":
+                        messages.append(HumanMessage(content=msg["content"]))
+                    elif msg.get("role") == "assistant":
+                        messages.append(AIMessage(content=msg["content"]))
+
+            # Remove dialog from context to avoid duplication
+            context = dict(context)
+            context.pop("dialog", None)
+
+        # Add remaining context if available
         formatted_context = self.context_builder.format_context_for_prompt(context)
         if formatted_context:
             messages.append(SystemMessage(content=f"Context:\n{formatted_context}"))
 
-        # Add user query
+        # Add current user query
         messages.append(HumanMessage(content=query))
 
         return messages

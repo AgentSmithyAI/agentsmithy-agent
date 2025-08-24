@@ -1,10 +1,10 @@
 # AgentSmithy SSE Protocol
 
-This document describes the Server-Sent Events (SSE) protocol used by AgentSmithy to stream responses and structured file operations to the client (editor).
+This document describes the simplified Server-Sent Events (SSE) protocol used by AgentSmithy to stream assistant responses and actions to the client.
 
 ## Overview
 
-AgentSmithy streams both plain text content and structured events (diffs, tool results). Each SSE message is a single JSON object.
+AgentSmithy streams events: `chat_start`, `chat`, `chat_end`, `reasoning_start`, `reasoning`, `reasoning_end`, `tool_call`, `file_edit`, `error`. A final `done` event signals end of stream. Each SSE message is a single JSON object. If an `error` event is emitted, it is immediately followed by a `done` event so clients can reliably finalize the stream.
 
 ## Connection
 
@@ -33,7 +33,8 @@ Request Body example:
       "selection": "def old_function():\n    return 'old'"
     }
   },
-  "stream": true
+  "stream": true,
+  "dialog_id": "01J..."
 }
 ```
 
@@ -48,81 +49,84 @@ data: {"type": "...", ...}
 
 ## Event Types
 
-### 1) Classification
+### 1) chat_start
 
-Optional early signal about the detected task type.
+Marks the beginning of a chat content segment.
 
 ```json
-{ "type": "classification", "task_type": "refactor" }
+{ "type": "chat_start", "dialog_id": "01J..." }
 ```
 
-### 2) Content
+### 2) chat
 
 Plain assistant text content.
 
 ```json
-{ "content": "I'll refactor this function to improve readability..." }
+{ "type": "chat", "content": "I'll refactor this function to improve readability...", "dialog_id": "01J..." }
 ```
 
-### 3) Diff
+### 3) chat_end
 
-Structured file modification with unified diff that clients can apply.
+Marks the end of the chat content segment.
 
 ```json
-{
-  "type": "diff",
-  "file": "src/example.py",
-  "diff": "--- a/src/example.py\n+++ b/src/example.py\n@@ -1,2 +1,4 @@\n-def old_function():\n-    return 'old'\n+def improved_function():\n+    \"\"\"Better function with documentation.\"\"\"\n+    return 'improved'",
-  "line_start": 1,
-  "line_end": 2,
-  "reason": "Improved function naming and added documentation"
-}
+{ "type": "chat_end", "dialog_id": "01J..." }
 ```
 
-Fields:
+### 4) reasoning_start
 
-- `type`: Always `diff`
-- `file`: Target file path
-- `diff`: Unified diff string
-- `line_start`: Starting line (1-indexed)
-- `line_end`: Ending line (inclusive)
-- `reason`: Human-readable reason
-
-### 4) Tool Result
-
-Emitted when a tool finishes execution. The `result` field is the tool's structured JSON output.
+Marks the beginning of a reasoning segment.
 
 ```json
-{
-  "type": "tool_result",
-  "name": "read_file",
-  "result": {
-    "type": "read_file_result",
-    "path": "/abs/path/to/file.py",
-    "content": "...file content..."
-  }
-}
-``;
+{ "type": "reasoning_start", "dialog_id": "01J..." }
+```
 
-Notes:
+### 5) reasoning
 
-- Tool outputs are serialized JSON; clients can safely parse `result`.
-- Additional tool events may also be queued directly by tools (e.g., `diff`).
+Reasoning trace chunks (optional). Use to show model thoughts/steps.
 
-### 5) Completion
+```json
+{ "type": "reasoning", "content": "Analyzing functions to update...", "dialog_id": "01J..." }
+```
+
+### 6) reasoning_end
+
+Marks the end of the reasoning segment.
+
+```json
+{ "type": "reasoning_end", "dialog_id": "01J..." }
+```
+
+### 7) tool_call
+
+Emitted when a tool is invoked by the agent.
+
+```json
+{ "type": "tool_call", "name": "read_file", "args": {"path": "src/example.py"}, "dialog_id": "01J..." }
+```
+
+### 8) file_edit
+
+Notification that a file was edited/created by a tool. Minimal; clients fetch content separately if needed.
+
+```json
+{ "type": "file_edit", "file": "/abs/path/to/file.py", "dialog_id": "01J..." }
+```
+
+### 9) error
+
+Errors encountered during processing. Always followed by a `done` event.
+
+```json
+{ "type": "error", "error": "Error message describing what went wrong", "dialog_id": "01J..." }
+```
+
+### done
 
 Signals the end of the stream.
 
 ```json
-{ "done": true }
-```
-
-### 6) Error
-
-Errors encountered during processing.
-
-```json
-{ "error": "Error message describing what went wrong" }
+{ "type": "done", "done": true, "dialog_id": "01J..." }
 ```
 
 ## Client Handling Skeleton
@@ -132,42 +136,74 @@ const es = new EventSource('/api/chat');
 
 es.onmessage = (event) => {
   const data = JSON.parse(event.data);
-  if (data.type === 'diff') {
-    handleDiff(data);
-  } else if (data.type === 'tool_result') {
-    handleToolResult(data);
-  } else if (data.content) {
-    handleContent(data);
-  } else if (data.done) {
-    handleDone();
-  } else if (data.error) {
-    handleError(data);
+  switch (data.type) {
+    case 'chat_start':
+      handleChatStart(data);
+      break;
+    case 'chat':
+      handleChat(data);
+      break;
+    case 'chat_end':
+      handleChatEnd(data);
+      break;
+    case 'reasoning_start':
+      handleReasoningStart(data);
+      break;
+    case 'reasoning':
+      handleReasoning(data);
+      break;
+    case 'reasoning_end':
+      handleReasoningEnd(data);
+      break;
+    case 'tool_call':
+      handleToolCall(data);
+      break;
+    case 'file_edit':
+      handleFileEdit(data);
+      break;
+    case 'error':
+      handleError(data);
+      break;
+    case 'done':
+      handleDone();
+      break;
+    default:
+      handleChat(data);
   }
 };
 ```
 
-## Diff Application Guidance
-
-1. Parse unified diff with a library
-2. Validate the target file content
-3. Optionally show a preview
-4. Apply diff and update editor buffer
-
 ## Example Stream
 
 ```
-data: {"content": "I'll refactor this function for better readability:"}
+data: {"type": "reasoning_start", "dialog_id": "01J..."}
 
-data: {"type": "diff", "file": "utils.py", "diff": "--- a/utils.py\n+++ b/utils.py\n@@ -1,2 +1,4 @@\n-def calc(x, y):\n-    return x + y\n+def calculate_sum(x: int, y: int) -> int:\n+    \"\"\"Calculate the sum of two integers.\"\"\"\n+    return x + y", "line_start": 1, "line_end": 2, "reason": "Add type hints and docs"}
+data: {"type": "reasoning", "content": "Analyzing functions to update...", "dialog_id": "01J..."}
 
-data: {"type": "tool_result", "name": "read_file", "result": {"type": "read_file_result", "path": "/abs/path/utils.py", "content": "..."}}
+data: {"type": "reasoning_end", "dialog_id": "01J..."}
 
-data: {"done": true}
+data: {"type": "chat_start", "dialog_id": "01J..."}
+
+data: {"type": "chat", "content": "I'll refactor this function for better readability:", "dialog_id": "01J..."}
+
+data: {"type": "chat_end", "dialog_id": "01J..."}
+
+data: {"type": "tool_call", "name": "read_file", "args": {"path": "utils.py"}, "dialog_id": "01J..."}
+
+data: {"type": "done", "done": true, "dialog_id": "01J..."}
+```
+
+If an error occurs, the stream will include:
+
+```
+data: {"type": "error", "error": "...", "dialog_id": "01J..."}
+
+data: {"type": "done", "done": true, "dialog_id": "01J..."}
 ```
 
 ## Security Notes
 
-- Validate file paths and diff content
+- Validate file paths
 - Rate limit connections
 - Authenticate endpoints appropriately
 

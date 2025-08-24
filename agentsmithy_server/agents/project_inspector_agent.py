@@ -49,7 +49,7 @@ class ProjectInspectorAgent(BaseAgent):
                 "- Use available tools (list_files, read_file, search_files).\n"
                 "- STRICT: When you are DONE, you MUST call the tool `return_inspection` with the final JSON object. Do not print JSON directly.\n"
                 "- Prefer scanning top-level files (package manifests, build files) and representative source directories.\n"
-                "- The `return_inspection` tool enforces the exact schema: language_stats, dominant_languages, frameworks, package_managers, build_tools, has_tests, test_frameworks, architecture_hints.\n"
+                ""
                 "- Keep file reads minimal and targeted.\n"
             )
         )

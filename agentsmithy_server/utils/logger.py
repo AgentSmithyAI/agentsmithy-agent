@@ -170,7 +170,7 @@ class StructuredLogger:
         self.debug(
             f"SSE Event: {event_type}",
             event_type=event_type,
-            content=content[:100] if content else None,  # Truncate long content
+            content=content[:300] if content else None,  # Truncate long content
             **kwargs,
         )
 
