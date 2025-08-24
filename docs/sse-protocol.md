@@ -4,7 +4,7 @@ This document describes the simplified Server-Sent Events (SSE) protocol used by
 
 ## Overview
 
-AgentSmithy streams events: `chat_start`, `chat`, `chat_end`, `reasoning_start`, `reasoning`, `reasoning_end`, `tool_call`, `file_edit`, `error`. A final `done` event signals end of stream. Each SSE message is a single JSON object.
+AgentSmithy streams events: `chat_start`, `chat`, `chat_end`, `reasoning_start`, `reasoning`, `reasoning_end`, `tool_call`, `file_edit`, `error`. A final `done` event signals end of stream. Each SSE message is a single JSON object. If an `error` event is emitted, it is immediately followed by a `done` event so clients can reliably finalize the stream.
 
 ## Connection
 
@@ -115,7 +115,7 @@ Notification that a file was edited/created by a tool. Minimal; clients fetch co
 
 ### 9) error
 
-Errors encountered during processing.
+Errors encountered during processing. Always followed by a `done` event.
 
 ```json
 { "type": "error", "error": "Error message describing what went wrong", "dialog_id": "01J..." }
@@ -189,6 +189,14 @@ data: {"type": "chat", "content": "I'll refactor this function for better readab
 data: {"type": "chat_end", "dialog_id": "01J..."}
 
 data: {"type": "tool_call", "name": "read_file", "args": {"path": "utils.py"}, "dialog_id": "01J..."}
+
+data: {"type": "done", "done": true, "dialog_id": "01J..."}
+```
+
+If an error occurs, the stream will include:
+
+```
+data: {"type": "error", "error": "...", "dialog_id": "01J..."}
 
 data: {"type": "done", "done": true, "dialog_id": "01J..."}
 ```

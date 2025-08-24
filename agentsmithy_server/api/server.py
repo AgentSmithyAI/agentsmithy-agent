@@ -306,7 +306,8 @@ async def generate_sse_events(
                                 yield sse_event
                             api_logger.stream_log("processed_chunk", None, chunk_number=chunk_count)
                         except StreamAbortError:
-                            # Error event was emitted, abort streaming
+                            # Error event was emitted, abort streaming and finalize
+                            yield _sse_done(dialog_id=_get_dialog_id(project_dialog))
                             return
 
                         # Non-blocking drain of tool events queued by tools
@@ -341,7 +342,8 @@ async def generate_sse_events(
                                     ):
                                         yield sse_event
                                 except StreamAbortError:
-                                    # Error event was emitted, abort streaming
+                                    # Error event was emitted, abort streaming and finalize
+                                    yield _sse_done(dialog_id=_get_dialog_id(project_dialog))
                                     return
                             api_logger.info(
                                 f"Finished streaming {chunk_count} chunks from {key}"
@@ -360,7 +362,8 @@ async def generate_sse_events(
                                         ):
                                             yield sse_event
                                     except StreamAbortError:
-                                        # Error event was emitted, abort streaming
+                                        # Error event was emitted, abort streaming and finalize
+                                        yield _sse_done(dialog_id=_get_dialog_id(project_dialog))
                                         return
                                 api_logger.info(
                                     f"Finished streaming {chunk_count} chunks from {key}"
@@ -403,6 +406,8 @@ async def generate_sse_events(
         error_msg = f"Error processing request: {str(e)}"
         api_logger.error(f"Yielding error event: {error_msg}")
         yield _sse_error(message=error_msg, dialog_id=_get_dialog_id(project_dialog))
+        # Always finalize the SSE stream after an error
+        yield _sse_done(dialog_id=_get_dialog_id(project_dialog))
 
 
 @app.post("/api/chat")
