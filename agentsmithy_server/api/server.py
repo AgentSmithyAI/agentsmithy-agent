@@ -215,6 +215,23 @@ async def generate_sse_events(
                                 content_val = chunk.get(
                                     "content", chunk.get("data", str(chunk))
                                 )
+                                
+                                # Ensure content_val is a string
+                                if isinstance(content_val, list):
+                                    # Handle list of content items (e.g., from GPT-5)
+                                    text_parts = []
+                                    for item in content_val:
+                                        if isinstance(item, dict) and "text" in item:
+                                            text_parts.append(item["text"])
+                                        else:
+                                            text_parts.append(str(item))
+                                    content_val = "".join(text_parts)
+                                elif isinstance(content_val, dict):
+                                    # Handle dict content
+                                    content_val = content_val.get("text", str(content_val))
+                                elif not isinstance(content_val, str):
+                                    content_val = str(content_val)
+                                
                                 metadata_val = chunk.get("metadata") or {}
                                 event_dict = {
                                     "data": json.dumps(
@@ -245,19 +262,34 @@ async def generate_sse_events(
                                     pass
                                 api_logger.stream_log(
                                     "content_chunk",
-                                    str(content_val),
+                                    content_val,
                                     chunk_number=chunk_count,
                                 )
                                 # accumulate assistant text
-                                assistant_buffer.append(str(content_val))
+                                assistant_buffer.append(content_val)
 
                                 yield event_dict
                         else:
                             # Regular text content
+                            # Ensure chunk is a string
+                            if isinstance(chunk, list):
+                                # Handle list format
+                                text_parts = []
+                                for item in chunk:
+                                    if isinstance(item, dict) and "text" in item:
+                                        text_parts.append(item["text"])
+                                    else:
+                                        text_parts.append(str(item))
+                                chunk_str = "".join(text_parts)
+                            elif isinstance(chunk, dict):
+                                chunk_str = chunk.get("text", str(chunk))
+                            else:
+                                chunk_str = str(chunk)
+                            
                             event_dict = {
                                 "data": json.dumps(
                                     {
-                                        "content": chunk,
+                                        "content": chunk_str,
                                         "dialog_id": (
                                             project_dialog[1]
                                             if project_dialog
@@ -268,9 +300,9 @@ async def generate_sse_events(
                                 )
                             }
                             api_logger.stream_log(
-                                "content_chunk", chunk, chunk_number=chunk_count
+                                "content_chunk", chunk_str, chunk_number=chunk_count
                             )
-                            assistant_buffer.append(str(chunk))
+                            assistant_buffer.append(chunk_str)
                             yield event_dict
 
                         # Check for tool events in queue (non-blocking)

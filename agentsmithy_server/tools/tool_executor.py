@@ -89,57 +89,117 @@ class ToolExecutor:
     async def _process_streaming(
         self, messages: list[BaseMessage]
     ) -> AsyncGenerator[Any, None]:
-        """Streaming loop: emit tool_result events as they happen, then final content."""
+        """Streaming loop: emit content chunks and tool results as they happen."""
         bound_llm = self._bind_tools()
         conversation: list[BaseMessage] = list(messages)
 
         while True:
-            # For simplicity, do non-chunked model call per iteration
-            agent_logger.info("LLM invoke", messages=len(conversation))
-            response = await bound_llm.ainvoke(conversation)
-            tool_calls = getattr(response, "tool_calls", [])
-            # Capture any model-provided metadata (if available)
-            try:
-                response_meta = {
-                    "response_metadata": getattr(response, "response_metadata", {}) or {},
-                    "additional_kwargs": getattr(response, "additional_kwargs", {}) or {},
-                }
-            except Exception:
-                response_meta = {}
-            if not tool_calls:
-                final_text = getattr(response, "content", "")
-                if final_text:
-                    # Yield content along with metadata so SSE can surface it
-                    payload = {"content": final_text}
-                    if response_meta:
-                        payload["metadata"] = response_meta
-                        try:
-                            agent_logger.debug(
-                                "Model response metadata",
-                                has_metadata=True,
-                                metadata_keys=list(response_meta.keys()),
-                            )
-                        except Exception:
-                            pass
+            agent_logger.info("LLM streaming", messages=len(conversation))
+            
+            # Use astream for true streaming
+            accumulated_content = ""
+            accumulated_tool_calls: list[dict] = []
+            current_tool_call: dict | None = None
+            
+            async for chunk in bound_llm.astream(conversation):
+                # Handle content chunks
+                content = getattr(chunk, "content", None)
+                if content:
+                    content_str = ""
+                    
+                    # LangChain may return content as a list of dicts for newer models
+                    if isinstance(content, list):
+                        # Extract text from each content item
+                        for item in content:
+                            if isinstance(item, dict) and "text" in item:
+                                content_str += item["text"]
+                            elif isinstance(item, str):
+                                content_str += item
+                            else:
+                                content_str += str(item)
+                    elif isinstance(content, dict):
+                        # Handle structured content
+                        content_str = content.get("text", str(content))
+                    elif isinstance(content, str):
+                        content_str = content
                     else:
-                        try:
-                            agent_logger.debug("Model response metadata", has_metadata=False)
-                        except Exception:
-                            pass
-                    yield payload
+                        content_str = str(content)
+                    
+                    # Only yield non-empty content
+                    if content_str:
+                        accumulated_content += content_str
+                        # Yield content chunk immediately for real-time streaming
+                        yield {"content": content_str}
+                
+                # Handle tool call chunks
+                tool_call_chunks = getattr(chunk, "tool_call_chunks", [])
+                for tc_chunk in tool_call_chunks:
+                    # Start a new tool call
+                    if tc_chunk.get("index") is not None:
+                        if current_tool_call and "name" in current_tool_call:
+                            accumulated_tool_calls.append(current_tool_call)
+                        current_tool_call = {
+                            "index": tc_chunk["index"],
+                            "id": tc_chunk.get("id", ""),
+                            "name": tc_chunk.get("name", ""),
+                            "args": tc_chunk.get("args", ""),
+                        }
+                    # Accumulate tool call data
+                    elif current_tool_call:
+                        if tc_chunk.get("name"):
+                            current_tool_call["name"] += tc_chunk["name"]
+                        if tc_chunk.get("args"):
+                            current_tool_call["args"] += tc_chunk["args"]
+            
+            # Add the last tool call if exists
+            if current_tool_call and "name" in current_tool_call:
+                accumulated_tool_calls.append(current_tool_call)
+            
+            # If no tool calls, we're done
+            if not accumulated_tool_calls:
+                # Stream might have already yielded all content chunks
                 break
-
-            # Append the AI response with tool_calls before sending tool results
-            conversation.append(response)
-            for call in tool_calls:
-                name = call.get("name") or call.get("tool", {}).get("name")
-                args = call.get("args") or call.get("tool", {}).get("args") or {}
-                if not name:
-                    continue
-                result = await self.tool_manager.run_tool(name, **args)
-                yield {"type": "tool_result", "name": name, "result": result}
-                tool_message = ToolMessage(
-                    content=json.dumps(result, ensure_ascii=False),
-                    tool_call_id=call.get("id", ""),
-                )
-                conversation.append(tool_message)
+            
+            # Create AI message with tool calls for conversation history
+            from langchain_core.messages import AIMessage
+            ai_message = AIMessage(content=accumulated_content or "")
+            ai_message.tool_calls = []
+            
+            # Execute tools and stream results
+            for tool_call in accumulated_tool_calls:
+                try:
+                    # Parse accumulated args string to dict
+                    args = json.loads(tool_call.get("args", "{}"))
+                    name = tool_call.get("name", "")
+                    tool_id = tool_call.get("id", "")
+                    
+                    if not name:
+                        continue
+                    
+                    # Add to AI message for history
+                    ai_message.tool_calls.append({
+                        "name": name,
+                        "args": args,
+                        "id": tool_id
+                    })
+                    
+                    # Execute tool
+                    result = await self.tool_manager.run_tool(name, **args)
+                    
+                    # Yield tool result
+                    yield {"type": "tool_result", "name": name, "result": result}
+                    
+                    # Add tool message to conversation
+                    tool_message = ToolMessage(
+                        content=json.dumps(result, ensure_ascii=False),
+                        tool_call_id=tool_id,
+                    )
+                    conversation.append(tool_message)
+                    
+                except json.JSONDecodeError:
+                    agent_logger.error("Failed to parse tool args", args=tool_call.get("args"))
+                except Exception as e:
+                    agent_logger.error("Tool execution failed", error=str(e))
+            
+            # Add AI message with tool calls to conversation
+            conversation.append(ai_message)
