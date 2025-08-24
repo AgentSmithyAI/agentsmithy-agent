@@ -390,14 +390,27 @@ async def generate_sse_events(
                             chunk_count = 0
                             async for chunk in response:
                                 chunk_count += 1
-                                # Wrap chunk in proper JSON format (chat)
+                                # Normalize chunk to string content
+                                if isinstance(chunk, list):
+                                    text_parts = []
+                                    for item in chunk:
+                                        if isinstance(item, dict) and "text" in item:
+                                            text_parts.append(item["text"])
+                                        else:
+                                            text_parts.append(str(item))
+                                    chunk_text = "".join(text_parts)
+                                elif isinstance(chunk, dict):
+                                    chunk_text = chunk.get("content") or chunk.get("text") or str(chunk)
+                                else:
+                                    chunk_text = str(chunk)
+
                                 content_event = SSEEventFactory.chat(
-                                    content=chunk,
+                                    content=chunk_text,
                                     dialog_id=project_dialog[1] if project_dialog else None
                                 )
                                 event_dict = content_event.to_sse()
                                 # IMPORTANT: accumulate assistant text
-                                assistant_buffer.append(str(chunk))
+                                assistant_buffer.append(str(chunk_text))
                                 yield event_dict
                             api_logger.info(
                                 f"Finished streaming {chunk_count} chunks from {key}"
@@ -410,14 +423,27 @@ async def generate_sse_events(
                                 chunk_count = 0
                                 async for chunk in actual_response:
                                     chunk_count += 1
-                                    # Wrap chunk in proper JSON format (chat)
+                                    # Normalize chunk to string content
+                                    if isinstance(chunk, list):
+                                        text_parts = []
+                                        for item in chunk:
+                                            if isinstance(item, dict) and "text" in item:
+                                                text_parts.append(item["text"])
+                                            else:
+                                                text_parts.append(str(item))
+                                        chunk_text = "".join(text_parts)
+                                    elif isinstance(chunk, dict):
+                                        chunk_text = chunk.get("content") or chunk.get("text") or str(chunk)
+                                    else:
+                                        chunk_text = str(chunk)
+
                                     content_event = SSEEventFactory.chat(
-                                        content=chunk,
+                                        content=chunk_text,
                                         dialog_id=project_dialog[1] if project_dialog else None
                                     )
                                     event_dict = content_event.to_sse()
                                     # IMPORTANT: accumulate assistant text
-                                    assistant_buffer.append(str(chunk))
+                                    assistant_buffer.append(str(chunk_text))
                                     yield event_dict
                                 api_logger.info(
                                     f"Finished streaming {chunk_count} chunks from {key}"
@@ -425,13 +451,19 @@ async def generate_sse_events(
                             else:
                                 # Non-streaming response
                                 # Wrap response in proper JSON format (chat)
+                                if isinstance(actual_response, dict):
+                                    ar_text = actual_response.get("content") or actual_response.get("text") or str(actual_response)
+                                elif isinstance(actual_response, list):
+                                    ar_text = "".join(str(x) for x in actual_response)
+                                else:
+                                    ar_text = str(actual_response)
                                 content_event = SSEEventFactory.chat(
-                                    content=actual_response,
+                                    content=ar_text,
                                     dialog_id=project_dialog[1] if project_dialog else None
                                 )
                                 event_dict = content_event.to_sse()
                                 # IMPORTANT: accumulate assistant text
-                                assistant_buffer.append(str(actual_response))
+                                assistant_buffer.append(str(ar_text))
                                 yield event_dict
 
         # Persist assistant response if dialog logging is enabled
