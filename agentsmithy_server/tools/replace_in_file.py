@@ -176,9 +176,10 @@ def _trimmed_line_fallback(
                 break
         if match:
             # compute char indices
-            start_char = sum(len(l) + 1 for l in orig_lines[:i])
+            start_char = sum(len(line_text) + 1 for line_text in orig_lines[:i])
             end_char = start_char + sum(
-                len(l) + 1 for l in orig_lines[i : i + len(search_lines)]
+                len(line_text) + 1
+                for line_text in orig_lines[i : i + len(search_lines)]
             )
             return (start_char, end_char)
     return None
