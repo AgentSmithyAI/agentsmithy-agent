@@ -9,7 +9,7 @@ from langchain_core.tools import BaseTool as LCBaseTool
 SseCallback = Callable[[dict[str, Any]], Awaitable[None]]
 
 
-class BaseTool(LCBaseTool, ABC):
+class BaseTool(LCBaseTool, ABC):  # type: ignore[override]
     """Base class for server-side tools.
 
     Tools receive validated arguments and can emit SSE-compatible events via

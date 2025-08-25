@@ -16,10 +16,10 @@ class ListFilesArgs(BaseModel):
     )
 
 
-class ListFilesTool(BaseTool):
+class ListFilesTool(BaseTool):  # type: ignore[override]
     name: str = "list_files"
     description: str = "List files and directories under a path."
-    args_schema: type[BaseModel] = ListFilesArgs
+    args_schema: type[BaseModel] | dict[str, Any] | None = ListFilesArgs
 
     async def _arun(self, **kwargs: Any) -> dict[str, Any]:
         base = Path(kwargs["path"]).resolve()

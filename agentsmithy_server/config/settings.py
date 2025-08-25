@@ -33,7 +33,7 @@ class Settings(BaseSettings):
 
     # LLM Configuration
     default_model: str = Field(
-        ..., description="Default LLM model", validation_alias="DEFAULT_MODEL"
+        default="", description="Default LLM model", validation_alias="DEFAULT_MODEL"
     )
     default_temperature: float = Field(
         default=0.7,

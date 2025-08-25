@@ -31,7 +31,7 @@ class ToolExecutor:
 
     async def emit_event(self, event: dict[str, Any]) -> None:
         if self._sse_callback is not None:
-            try:
+            try:  # type: ignore[unreachable]
                 await self._sse_callback(event)
             except Exception as e:
                 agent_logger.error(
@@ -141,26 +141,30 @@ class ToolExecutor:
                             parts: list[str] = []
                             for item in summary:
                                 if isinstance(item, dict):
-                                    if isinstance(item.get("text"), str):
-                                        parts.append(item.get("text"))
-                                    elif isinstance(item.get("content"), list):
-                                        for sub in item.get("content"):
-                                            if isinstance(sub, dict) and isinstance(
-                                                sub.get("text"), str
-                                            ):
-                                                parts.append(sub.get("text"))
+                                    text_value = item.get("text")
+                                    if isinstance(text_value, str):
+                                        parts.append(text_value)
+                                    content_value = item.get("content")
+                                    if isinstance(content_value, list):
+                                        for sub in content_value:
+                                            if isinstance(sub, dict):
+                                                text_value = sub.get("text")
+                                                if isinstance(text_value, str):
+                                                    parts.append(text_value)
                             if parts:
                                 reasoning_text = "".join(parts)
                         elif isinstance(summary, dict):
-                            if isinstance(summary.get("text"), str):
-                                reasoning_text = summary.get("text")
-                            elif isinstance(summary.get("content"), list):
+                            text_value = summary.get("text")
+                            if isinstance(text_value, str):
+                                reasoning_text = text_value
+                            content_value = summary.get("content")
+                            if isinstance(content_value, list):
                                 parts2: list[str] = []
-                                for sub in summary.get("content"):
-                                    if isinstance(sub, dict) and isinstance(
-                                        sub.get("text"), str
-                                    ):
-                                        parts2.append(sub.get("text"))
+                                for sub in content_value:
+                                    if isinstance(sub, dict):
+                                        text_value = sub.get("text")
+                                        if isinstance(text_value, str):
+                                            parts2.append(text_value)
                                 if parts2:
                                     reasoning_text = "".join(parts2)
                         if not reasoning_text and isinstance(

@@ -13,10 +13,10 @@ class WriteFileArgs(BaseModel):
     content: str = Field(..., description="Complete file content to write")
 
 
-class WriteFileTool(BaseTool):
+class WriteFileTool(BaseTool):  # type: ignore[override]
     name: str = "write_to_file"
     description: str = "Write complete content to a file (create or overwrite)."
-    args_schema: type[BaseModel] = WriteFileArgs
+    args_schema: type[BaseModel] | dict[str, Any] | None = WriteFileArgs
 
     async def _arun(self, **kwargs: Any) -> dict[str, Any]:
         file_path = Path(kwargs["path"]).resolve()

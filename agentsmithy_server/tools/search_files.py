@@ -15,12 +15,12 @@ class SearchFilesArgs(BaseModel):
     file_pattern: str | None = Field(None, description="Glob to filter files")
 
 
-class SearchFilesTool(BaseTool):
+class SearchFilesTool(BaseTool):  # type: ignore[override]
     name: str = "search_files"
     description: str = (
         "Regex search across files in a directory, returning context lines."
     )
-    args_schema: type[BaseModel] = SearchFilesArgs
+    args_schema: type[BaseModel] | dict[str, Any] | None = SearchFilesArgs
 
     async def _arun(self, **kwargs: Any) -> dict[str, Any]:
         base = Path(kwargs["path"]).resolve()

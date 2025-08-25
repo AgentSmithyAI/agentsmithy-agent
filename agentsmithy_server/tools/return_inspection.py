@@ -19,12 +19,12 @@ class ReturnInspectionArgs(BaseModel):
     )
 
 
-class ReturnInspectionTool(BaseTool):
+class ReturnInspectionTool(BaseTool):  # type: ignore[override]
     name: str = "return_inspection"
     description: str = (
         "Finalize and return the strict JSON analysis of the project. MUST be called once."
     )
-    args_schema: type[BaseModel] = ReturnInspectionArgs
+    args_schema: type[BaseModel] | dict[str, Any] | None = ReturnInspectionArgs
 
     async def _arun(self, **kwargs: Any) -> dict[str, Any]:
         # Pydantic validated kwargs match ReturnInspectionArgs
