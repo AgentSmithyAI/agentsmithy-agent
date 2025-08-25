@@ -16,10 +16,10 @@ class ReplaceArgs(BaseModel):
     )
 
 
-class ReplaceInFileTool(BaseTool):
+class ReplaceInFileTool(BaseTool):  # type: ignore[override]
     name: str = "replace_in_file"
     description: str = "Apply targeted edits to a file using SEARCH/REPLACE blocks."
-    args_schema: type[BaseModel] = ReplaceArgs
+    args_schema: type[BaseModel] | dict[str, Any] | None = ReplaceArgs
 
     async def _arun(self, **kwargs: Any) -> dict[str, Any]:
         # Minimal placeholder implementation: returns request; real parser can be added later

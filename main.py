@@ -33,10 +33,10 @@ if __name__ == "__main__":
             ".env file not found! Please create it from .env.example and add your OPENAI_API_KEY"
         )
         sys.exit(1)
-    
+
     # Validate required settings
     from agentsmithy_server.config import settings
-    
+
     if not settings.default_model:
         startup_logger.error(
             "DEFAULT_MODEL not set in .env file! Please specify the LLM model to use."
@@ -73,8 +73,7 @@ if __name__ == "__main__":
             startup_logger.error("Failed to initialize workspace", error=str(e))
             sys.exit(1)
 
-        # Expose to the process for later access
-        os.environ["AGENTSMITHY_WORKDIR"] = str(workdir_path)
+        # Workspace is now held in-process via set_workspace(); no env var needed
 
         # Delegate port selection and status.json management to project runtime
         from agentsmithy_server.core.project import get_current_project

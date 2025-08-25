@@ -12,10 +12,10 @@ class ReadFileArgs(BaseModel):
     path: str = Field(..., description="Path to file to read")
 
 
-class ReadFileTool(BaseTool):
+class ReadFileTool(BaseTool):  # type: ignore[override]
     name: str = "read_file"
     description: str = "Read the contents of a file at the specified path."
-    args_schema: type[BaseModel] = ReadFileArgs
+    args_schema: type[BaseModel] | dict[str, Any] | None = ReadFileArgs
 
     async def _arun(self, **kwargs: Any) -> dict[str, Any]:
         file_path = Path(kwargs["path"]).resolve()

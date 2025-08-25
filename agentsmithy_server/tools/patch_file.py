@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import difflib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -24,12 +23,12 @@ class PatchArgs(BaseModel):
     changes: list[dict] = Field(..., description="List of change objects")
 
 
-class PatchFileTool(BaseTool):
+class PatchFileTool(BaseTool):  # type: ignore[override]
     name: str = "patch_file"
     description: str = (
         "Apply multiple line-range changes to a file and emit diff events."
     )
-    args_schema: type[BaseModel] = PatchArgs
+    args_schema: type[BaseModel] | dict[str, Any] | None = PatchArgs
 
     async def _arun(self, **kwargs: Any) -> dict[str, Any]:
         file_path = Path(kwargs["file_path"]).resolve()
@@ -67,17 +66,6 @@ class PatchFileTool(BaseTool):
             "\n" if original_text.endswith("\n") else ""
         )
         file_path.write_text(new_text, encoding="utf-8")
-
-        # Compute diff for entire file
-        unified = "\n".join(
-            difflib.unified_diff(
-                original_text.splitlines(),
-                new_text.splitlines(),
-                fromfile=str(file_path),
-                tofile=str(file_path),
-                lineterm="",
-            )
-        )
 
         # Emit file_edit event in simplified SSE protocol
         if self._sse_callback is not None:

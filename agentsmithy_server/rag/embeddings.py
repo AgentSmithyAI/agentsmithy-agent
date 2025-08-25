@@ -9,7 +9,7 @@ class EmbeddingsManager:
 
     def __init__(self, provider: str = "openai", model: str | None = None):
         from agentsmithy_server.config import settings
-        
+
         self.provider = provider
         self.model = model or settings.default_embedding_model
         self._embeddings: Embeddings | None = None

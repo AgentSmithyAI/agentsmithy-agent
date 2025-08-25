@@ -18,7 +18,7 @@ class LLMProvider(ABC):
     @abstractmethod
     async def agenerate(
         self, messages: list[BaseMessage], stream: bool = False, **kwargs
-    ) -> AsyncIterator[str] | str:
+    ) -> AsyncIterator[str | dict[str, Any]] | str:
         """Generate response from messages."""
         pass
 
@@ -119,20 +119,24 @@ class OpenAIProvider(LLMProvider):
 
             os.environ.setdefault("OPENAI_API_KEY", str(self.api_key))
             try:
-                agent_logger.debug("Initializing ChatOpenAI", base_kwargs_keys=list(base_kwargs.keys()))
+                agent_logger.debug(
+                    "Initializing ChatOpenAI", base_kwargs_keys=list(base_kwargs.keys())
+                )
             except Exception:
                 pass
             self.llm = ChatOpenAI(**base_kwargs)
         else:
             try:
-                agent_logger.debug("Initializing ChatOpenAI", base_kwargs_keys=list(base_kwargs.keys()))
+                agent_logger.debug(
+                    "Initializing ChatOpenAI", base_kwargs_keys=list(base_kwargs.keys())
+                )
             except Exception:
                 pass
             self.llm = ChatOpenAI(**base_kwargs)
 
     async def agenerate(
         self, messages: list[BaseMessage], stream: bool = False, **kwargs
-    ) -> AsyncIterator[str] | str:
+    ) -> AsyncIterator[str | dict[str, Any]] | str:
         """Generate response from messages."""
         if stream:
             return self._agenerate_stream(messages, **kwargs)
@@ -146,7 +150,7 @@ class OpenAIProvider(LLMProvider):
 
     async def _agenerate_stream(
         self, messages: list[BaseMessage], **kwargs
-    ) -> AsyncIterator[str]:
+    ) -> AsyncIterator[str | dict[str, Any]]:
         """Generate streaming response."""
         async for chunk in self.llm.astream(messages, **kwargs):
             content = getattr(chunk, "content", None)
