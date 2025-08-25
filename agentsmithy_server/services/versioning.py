@@ -143,7 +143,7 @@ class VersioningTracker:
             commit_bytes = porcelain.commit(repo, bytes(message, "utf-8"))
             commit_id = (
                 commit_bytes.decode()
-                if isinstance(commit_bytes, (bytes, bytearray))
+                if isinstance(commit_bytes, (bytes | bytearray))
                 else str(commit_bytes)
             )
             self._record_metadata(commit_id, message)
@@ -163,7 +163,7 @@ class VersioningTracker:
         # Build index of all blobs in target commit
         for entry in tree.walk():
             _, _, files = entry
-            for name, mode, sha in files:
+            for name, _mode, sha in files:
                 rel = Path(name.decode())
                 target = self.project_root / rel
                 target.parent.mkdir(parents=True, exist_ok=True)
