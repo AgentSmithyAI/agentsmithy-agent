@@ -16,13 +16,28 @@ class ReplaceArgs(BaseModel):
     path: str = Field(..., description="Path to file to modify")
     diff: str = Field(
         ...,
-        description="One or more SEARCH/REPLACE blocks as specified by Cline format",
+        description=(
+            "Diff content in MARKER style:\n"
+            "------- SEARCH\n"
+            "[exact lines to find] (full lines)\n"
+            "=======\n"
+            "[replacement lines] (full lines)\n"
+            "+++++++ REPLACE\n"
+            "Rules: keep markers exactly as shown (7+ dashes/equals/pluses accepted);"
+            " provide blocks in file order; empty SEARCH means replace whole file;"
+            " do not include any extra text outside the blocks."
+        ),
     )
 
 
 class ReplaceInFileTool(BaseTool):  # type: ignore[override]
     name: str = "replace_in_file"
-    description: str = "Apply targeted edits to a file using SEARCH/REPLACE blocks."
+    description: str = (
+        "Edit a file by applying a MARKER-style diff. Format:\n"
+        "------- SEARCH\n[exact lines to find]\n=======\n[replacement lines]\n+++++++ REPLACE\n"
+        "Use exact full-line matches; keep markers unmodified (7+ symbols allowed);"
+        " provide blocks strictly in file order; empty SEARCH replaces whole file."
+    )
     args_schema: type[BaseModel] | dict[str, Any] | None = ReplaceArgs
 
     async def _arun(self, **kwargs: Any) -> dict[str, Any]:
@@ -35,6 +50,8 @@ class ReplaceInFileTool(BaseTool):  # type: ignore[override]
         try:
             if diff_text.lstrip().startswith("*** Begin Patch"):
                 new_text = _apply_unified_patch_to_file(diff_text, file_path)
+            elif _looks_like_marker_style(diff_text):
+                new_text = _apply_marker_style_blocks(diff_text, file_path)
             else:
                 new_text = _apply_search_replace_blocks(diff_text, file_path)
             file_path.parent.mkdir(parents=True, exist_ok=True)
@@ -91,18 +108,139 @@ def _apply_search_replace_blocks(diff_text: str, file_path: Path) -> str:
     return text
 
 
+def _looks_like_marker_style(diff_text: str) -> bool:
+    # Detect generic marker-style blocks: ------- SEARCH / ======= / +++++++ REPLACE
+    return (
+        re.search(r"^[-]{3,}\\s*SEARCH", diff_text, re.MULTILINE) is not None
+        or re.search(r"^[=]{3,}$", diff_text, re.MULTILINE) is not None
+        or re.search(r"^[+]{3,}\\s*REPLACE", diff_text, re.MULTILINE) is not None
+    )
+
+
+def _trimmed_line_fallback(original: str, search: str, start_index: int) -> tuple[int, int] | None:
+    orig_lines = original.split("\n")
+    search_lines = search.split("\n")
+    if search_lines and search_lines[-1] == "":
+        search_lines.pop()
+
+    # locate starting line index from start_index
+    current = 0
+    start_line = 0
+    while current < start_index and start_line < len(orig_lines):
+        current += len(orig_lines[start_line]) + 1
+        start_line += 1
+
+    for i in range(start_line, len(orig_lines) - len(search_lines) + 1):
+        match = True
+        for j in range(len(search_lines)):
+            if orig_lines[i + j].strip() != search_lines[j].strip():
+                match = False
+                break
+        if match:
+            # compute char indices
+            start_char = sum(len(l) + 1 for l in orig_lines[:i])
+            end_char = start_char + sum(len(l) + 1 for l in orig_lines[i : i + len(search_lines)])
+            return (start_char, end_char)
+    return None
+
+
+def _apply_marker_style_blocks(diff_text: str, file_path: Path) -> str:
+    original = file_path.read_text(encoding="utf-8")
+    result_parts: list[str] = []
+    last_processed = 0
+
+    search_start_re = re.compile(r"^[-]{3,}\\s*SEARCH>?$")
+    middle_re = re.compile(r"^[=]{3,}$")
+    replace_end_re = re.compile(r"^[+]{3,}\\s*REPLACE>?$")
+
+    lines = diff_text.splitlines()
+    state = "idle"
+    search_buf: list[str] = []
+    replace_buf: list[str] = []
+
+    def apply_one(search_block: str, replace_block: str):
+        nonlocal original, result_parts, last_processed
+        # Empty SEARCH => full file replacement
+        if search_block == "":
+            result_parts = [replace_block]
+            original = ""
+            last_processed = 0
+            return
+
+        # Exact match from last_processed
+        idx = original.find(search_block, last_processed)
+        if idx == -1:
+            # Trimmed fallback
+            fallback = _trimmed_line_fallback(original, search_block, last_processed)
+            if fallback is None:
+                # fallback: search from beginning
+                idx = original.find(search_block)
+                if idx == -1:
+                    fb2 = _trimmed_line_fallback(original, search_block, 0)
+                    if fb2 is None:
+                        raise ValueError(
+                            "The SEARCH block does not match anything in the file"
+                        )
+                    start, end = fb2
+                else:
+                    start, end = idx, idx + len(search_block)
+            else:
+                start, end = fallback
+        else:
+            start, end = idx, idx + len(search_block)
+
+        # Append up to match, then replacement
+        result_parts.append(original[last_processed:start])
+        result_parts.append(replace_block)
+        last_processed = end
+
+    for line in lines:
+        if search_start_re.match(line):
+            state = "search"
+            search_buf = []
+            replace_buf = []
+            continue
+        if middle_re.match(line):
+            if state != "search":
+                # ignore malformed
+                continue
+            state = "replace"
+            continue
+        if replace_end_re.match(line):
+            if state != "replace":
+                continue
+            search_block = "\n".join(search_buf)
+            replace_block = "\n".join(replace_buf)
+            # Ensure trailing newline behavior is exact: keep as-is
+            apply_one(search_block, replace_block)
+            state = "idle"
+            search_buf = []
+            replace_buf = []
+            continue
+
+        if state == "search":
+            search_buf.append(line)
+        elif state == "replace":
+            replace_buf.append(line)
+
+    # Append remaining original content
+    result_parts.append(original[last_processed:])
+    return "".join(result_parts)
 def _apply_unified_patch_to_file(patch: str, file_path: Path) -> str:
     original = file_path.read_text(encoding="utf-8")
     orig_lines = original.splitlines(keepends=True)
 
     file_block_re = re.compile(r"\*\*\*\s+Update File:\s*(?P<path>.+)")
     lines = patch.splitlines()
-    apply_block = False
+    # By default, collect hunks; if specific Update File blocks are present and
+    # do not match this file, we'll skip those blocks.
+    apply_block = True
     hunk_lines: list[str] = []
     for line in lines:
         m = file_block_re.match(line)
         if m:
             p = m.group("path").strip()
+            # Switch to only applying hunks for matching file blocks
             apply_block = (Path(p).resolve() == file_path.resolve())
             continue
         if not apply_block:
