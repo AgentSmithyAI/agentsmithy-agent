@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import difflib
 import os
 from dataclasses import dataclass
-import difflib
 from pathlib import Path
 from typing import Any
 

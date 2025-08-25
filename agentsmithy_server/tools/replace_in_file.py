@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import difflib
 import os
 import re
 from pathlib import Path
-import difflib
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -55,20 +55,24 @@ class ReplaceInFileTool(BaseTool):  # type: ignore[override]
         tracker.start_edit([str(file_path)])
 
         try:
-            original_text = file_path.read_text(encoding="utf-8") if file_path.exists() else ""
-            
+            original_text = (
+                file_path.read_text(encoding="utf-8") if file_path.exists() else ""
+            )
+
             if diff_text.lstrip().startswith("*** Begin Patch"):
                 new_text = _apply_unified_patch_to_file(diff_text, file_path)
             elif _looks_like_marker_style(diff_text):
                 new_text = _apply_marker_style_blocks(diff_text, file_path)
             else:
                 new_text = _apply_search_replace_blocks(diff_text, file_path)
-            
+
             # Check if anything actually changed
             if new_text == original_text and file_path.exists():
                 tracker.abort_edit()
-                raise ValueError("No changes were made - diff pattern not found in file")
-                
+                raise ValueError(
+                    "No changes were made - diff pattern not found in file"
+                )
+
             file_path.parent.mkdir(parents=True, exist_ok=True)
             file_path.write_text(new_text, encoding="utf-8")
         except Exception:
@@ -149,7 +153,9 @@ def _looks_like_marker_style(diff_text: str) -> bool:
     )
 
 
-def _trimmed_line_fallback(original: str, search: str, start_index: int) -> tuple[int, int] | None:
+def _trimmed_line_fallback(
+    original: str, search: str, start_index: int
+) -> tuple[int, int] | None:
     orig_lines = original.split("\n")
     search_lines = search.split("\n")
     if search_lines and search_lines[-1] == "":
@@ -171,7 +177,9 @@ def _trimmed_line_fallback(original: str, search: str, start_index: int) -> tupl
         if match:
             # compute char indices
             start_char = sum(len(l) + 1 for l in orig_lines[:i])
-            end_char = start_char + sum(len(l) + 1 for l in orig_lines[i : i + len(search_lines)])
+            end_char = start_char + sum(
+                len(l) + 1 for l in orig_lines[i : i + len(search_lines)]
+            )
             return (start_char, end_char)
     return None
 
@@ -281,6 +289,8 @@ def _apply_marker_style_blocks(diff_text: str, file_path: Path) -> str:
     # Append remaining original content
     result_parts.append(original[last_processed:])
     return "".join(result_parts)
+
+
 def _apply_unified_patch_to_file(patch: str, file_path: Path) -> str:
     original = file_path.read_text(encoding="utf-8")
     orig_lines = original.splitlines(keepends=True)
@@ -296,7 +306,7 @@ def _apply_unified_patch_to_file(patch: str, file_path: Path) -> str:
         if m:
             p = m.group("path").strip()
             # Switch to only applying hunks for matching file blocks
-            apply_block = (Path(p).resolve() == file_path.resolve())
+            apply_block = Path(p).resolve() == file_path.resolve()
             continue
         if not apply_block:
             continue
@@ -314,7 +324,9 @@ def _apply_unified_patch_to_file(patch: str, file_path: Path) -> str:
         if not line.startswith("@@"):
             i += 1
             continue
-        m = re.match(r"@@\s*-([0-9]+)(?:,([0-9]+))?\s*\+([0-9]+)(?:,([0-9]+))?\s*@@", line)
+        m = re.match(
+            r"@@\s*-([0-9]+)(?:,([0-9]+))?\s*\+([0-9]+)(?:,([0-9]+))?\s*@@", line
+        )
         if not m:
             i += 1
             continue

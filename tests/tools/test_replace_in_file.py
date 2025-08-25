@@ -19,12 +19,14 @@ async def test_replace_in_file_search_replace_applies(tmp_path: Path, monkeypatc
     f.write_text("abc", encoding="utf-8")
     t = ReplaceInFileTool()
     res = await _run(
-        t, path=str(f), diff="""------- SEARCH
+        t,
+        path=str(f),
+        diff="""------- SEARCH
 abc
 =======
 def
 +++++++ REPLACE
-"""
+""",
     )
     assert res["type"] == "replace_file_result"
     assert f.read_text(encoding="utf-8") == "def"
@@ -33,12 +35,16 @@ def
 @pytest.mark.parametrize(
     ("initial", "diff_text", "expected"),
     [
-        ("foo", """------- SEARCH
+        (
+            "foo",
+            """------- SEARCH
 foo
 =======
 bar
 +++++++ REPLACE
-""", "bar"),
+""",
+            "bar",
+        ),
         (
             "A\nC\n",
             """------- SEARCH
@@ -89,7 +95,7 @@ console.log('y')
             "```ts\nconsole.log('y')\n```\n",
         ),
         (
-            "<node attr=\"1\">\n</node>\n",
+            '<node attr="1">\n</node>\n',
             """------- SEARCH
 <node attr=\"1\">
 </node>
@@ -97,7 +103,7 @@ console.log('y')
 <node attr=\"2\"/>
 +++++++ REPLACE
 """,
-            "<node attr=\"2\"/>\n",
+            '<node attr="2"/>\n',
         ),
         (
             "edge",
@@ -111,7 +117,9 @@ EDGE
         ),
     ],
 )
-async def test_replace_in_file_applies_various_blocks(tmp_path: Path, monkeypatch, initial: str, diff_text: str, expected: str):
+async def test_replace_in_file_applies_various_blocks(
+    tmp_path: Path, monkeypatch, initial: str, diff_text: str, expected: str
+):
     monkeypatch.setenv("HOME", str(tmp_path))
     f = tmp_path / "e.txt"
     f.write_text(initial, encoding="utf-8")
@@ -127,15 +135,17 @@ async def test_replace_in_file_marker_with_angle_brackets(tmp_path: Path, monkey
     f = tmp_path / "angle.txt"
     f.write_text("hello world", encoding="utf-8")
     t = ReplaceInFileTool()
-    
+
     # Test with angle brackets format (<<<<<<< instead of -------)
     res = await _run(
-        t, path=str(f), diff="""<<<<<<< SEARCH
+        t,
+        path=str(f),
+        diff="""<<<<<<< SEARCH
 hello world
 =======
 goodbye world
 +++++++ REPLACE
-"""
+""",
     )
     assert res["type"] == "replace_file_result"
     # We now support <<<<<<< format too!
@@ -148,16 +158,18 @@ async def test_replace_in_file_no_separator_format(tmp_path: Path, monkeypatch):
     f = tmp_path / "nosep.txt"
     f.write_text("hello world\ngoodbye moon", encoding="utf-8")
     t = ReplaceInFileTool()
-    
+
     # Test format without ======= separator
     res = await _run(
-        t, path=str(f), diff="""------- SEARCH
+        t,
+        path=str(f),
+        diff="""------- SEARCH
 hello world
 goodbye moon
 +++++++ REPLACE
 hello universe
 goodbye sun
-"""
+""",
     )
     assert res["type"] == "replace_file_result"
     assert f.read_text(encoding="utf-8") == "hello universe\ngoodbye sun"

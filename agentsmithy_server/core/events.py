@@ -137,7 +137,9 @@ class EventFactory:
         checkpoint: str | None = None,
         dialog_id: str | None = None,
     ) -> FileEditEvent:
-        return FileEditEvent(file=file, diff=diff, checkpoint=checkpoint, dialog_id=dialog_id)
+        return FileEditEvent(
+            file=file, diff=diff, checkpoint=checkpoint, dialog_id=dialog_id
+        )
 
     @staticmethod
     def error(message: str, dialog_id: str | None = None) -> ErrorEvent:
