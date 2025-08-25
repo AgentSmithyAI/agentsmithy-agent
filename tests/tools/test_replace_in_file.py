@@ -142,6 +142,27 @@ goodbye world
     assert f.read_text(encoding="utf-8") == "goodbye world"
 
 
+async def test_replace_in_file_no_separator_format(tmp_path: Path, monkeypatch):
+    """Test marker format without ======= separator (like LLM sometimes sends)"""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    f = tmp_path / "nosep.txt"
+    f.write_text("hello world\ngoodbye moon", encoding="utf-8")
+    t = ReplaceInFileTool()
+    
+    # Test format without ======= separator
+    res = await _run(
+        t, path=str(f), diff="""------- SEARCH
+hello world
+goodbye moon
++++++++ REPLACE
+hello universe
+goodbye sun
+"""
+    )
+    assert res["type"] == "replace_file_result"
+    assert f.read_text(encoding="utf-8") == "hello universe\ngoodbye sun"
+
+
 async def test_replace_in_file_apply_patch_style(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     f = tmp_path / "p.txt"

@@ -172,6 +172,7 @@ def _apply_marker_style_blocks(diff_text: str, file_path: Path) -> str:
     state = "idle"
     search_buf: list[str] = []
     replace_buf: list[str] = []
+    pending_search: str = ""  # For alternative format
 
     def apply_one(search_block: str, replace_block: str):
         nonlocal original, result_parts, last_processed
@@ -222,23 +223,43 @@ def _apply_marker_style_blocks(diff_text: str, file_path: Path) -> str:
             state = "replace"
             continue
         if replace_end_re.match(line):
-            if state != "replace":
+            if state == "replace":
+                # Normal case: ------- SEARCH ... ======= ... +++++++ REPLACE
+                search_block = "\n".join(search_buf)
+                # Normalize common regex-escaped punctuation to literal characters
+                search_block = re.sub(r"\\([\\|().{}\[\]^$*+?])", r"\1", search_block)
+                replace_block = "\n".join(replace_buf)
+                # Ensure trailing newline behavior is exact: keep as-is
+                apply_one(search_block, replace_block)
+                state = "idle"
+                search_buf = []
+                replace_buf = []
                 continue
-            search_block = "\n".join(search_buf)
-            # Normalize common regex-escaped punctuation to literal characters
-            search_block = re.sub(r"\\([\\|().{}\[\]^$*+?])", r"\1", search_block)
-            replace_block = "\n".join(replace_buf)
-            # Ensure trailing newline behavior is exact: keep as-is
-            apply_one(search_block, replace_block)
-            state = "idle"
-            search_buf = []
-            replace_buf = []
-            continue
+            elif state == "search":
+                # Alternative format: ------- SEARCH ... +++++++ REPLACE (no =======)
+                # In this case, everything after +++++++ REPLACE is the replacement
+                search_block = "\n".join(search_buf)
+                search_block = re.sub(r"\\([\\|().{}\[\]^$*+?])", r"\1", search_block)
+                pending_search = search_block
+                # Start collecting replacement content from next line
+                state = "replace_after_marker"
+                search_buf = []
+                replace_buf = []
+                continue
 
         if state == "search":
             search_buf.append(line)
         elif state == "replace":
             replace_buf.append(line)
+        elif state == "replace_after_marker":
+            # Collecting replacement content after +++++++ REPLACE marker
+            # This is the rest of the diff content
+            replace_buf.append(line)
+
+    # Handle case where diff ends in replace_after_marker state
+    if state == "replace_after_marker" and pending_search:
+        replace_block = "\n".join(replace_buf)
+        apply_one(pending_search, replace_block)
 
     # Append remaining original content
     result_parts.append(original[last_processed:])
