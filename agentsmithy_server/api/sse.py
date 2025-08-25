@@ -16,9 +16,10 @@ def stream_response(
     event_stream: AsyncIterator[dict[str, Any]], dialog_id: str | None = None
 ) -> EventSourceResponse:
     async def guarded_stream() -> AsyncIterator[dict[str, Any]]:
+        import json as _json
+
         from agentsmithy_server.api.sse_protocol import EventFactory as SSEEventFactory
         from agentsmithy_server.utils.logger import api_logger
-        import json as _json
 
         done_sent = False
         try:

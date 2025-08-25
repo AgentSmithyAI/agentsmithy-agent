@@ -5,7 +5,6 @@ This module is a thin ASGI entrypoint that delegates to create_app().
 
 from fastapi import FastAPI
 
-
 try:
     from agentsmithy_server.api.app import create_app as _create_app
 

@@ -9,9 +9,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from agentsmithy_server.api.routes.chat import router as chat_router
 from agentsmithy_server.api.routes.dialogs import router as dialogs_router
 from agentsmithy_server.api.routes.health import router as health_router
+from agentsmithy_server.api.routes.meta import router as meta_router
 from agentsmithy_server.core.project import get_current_project
 from agentsmithy_server.utils.logger import api_logger
-from agentsmithy_server.api.routes.meta import router as meta_router
 
 
 @asynccontextmanager
