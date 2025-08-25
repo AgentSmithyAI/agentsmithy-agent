@@ -19,11 +19,11 @@ async def test_replace_in_file_search_replace_applies(tmp_path: Path, monkeypatc
     f.write_text("abc", encoding="utf-8")
     t = ReplaceInFileTool()
     res = await _run(
-        t, path=str(f), diff="""<<<<<<< SEARCH
+        t, path=str(f), diff="""------- SEARCH
 abc
-+++++++ REPLACE
+=======
 def
->>>>>>>
++++++++ REPLACE
 """
     )
     assert res["type"] == "replace_file_result"
@@ -33,79 +33,79 @@ def
 @pytest.mark.parametrize(
     ("initial", "diff_text", "expected"),
     [
-        ("foo", """<<<<<<< SEARCH
+        ("foo", """------- SEARCH
 foo
-+++++++ REPLACE
+=======
 bar
->>>>>>>
++++++++ REPLACE
 """, "bar"),
         (
             "A\nC\n",
-            """<<<<<<< SEARCH
+            """------- SEARCH
 A
-+++++++ REPLACE
+=======
 B
->>>>>>>
-<<<<<<< SEARCH
-C
 +++++++ REPLACE
+------- SEARCH
+C
+=======
 D
->>>>>>>
++++++++ REPLACE
 """,
             "B\nD\n",
         ),
         (
             "^start.*(group)?\\b|alt\n",
-            r"""<<<<<<< SEARCH
+            r"""------- SEARCH
 ^start.*(group)?\b|alt
-+++++++ REPLACE
+=======
 (re)placed
->>>>>>>
++++++++ REPLACE
 """,
             "(re)placed\n",
         ),
         (
             "(?<=foo)bar and foo(?=bar) and foo|bar\n",
-            r"""<<<<<<< SEARCH
+            r"""------- SEARCH
 (?<=foo)bar and foo(?=bar) and foo\|bar
-+++++++ REPLACE
+=======
 <<ok>>
->>>>>>>
++++++++ REPLACE
 """,
             "<<ok>>\n",
         ),
         (
             "```js\nconsole.log('x')\n```\n",
-            """<<<<<<< SEARCH
+            """------- SEARCH
 ```js
 console.log('x')
 ```
-+++++++ REPLACE
+=======
 ```ts
 console.log('y')
 ```
->>>>>>>
++++++++ REPLACE
 """,
             "```ts\nconsole.log('y')\n```\n",
         ),
         (
             "<node attr=\"1\">\n</node>\n",
-            """<<<<<<< SEARCH
+            """------- SEARCH
 <node attr=\"1\">
 </node>
-+++++++ REPLACE
+=======
 <node attr=\"2\"/>
->>>>>>>
++++++++ REPLACE
 """,
             "<node attr=\"2\"/>\n",
         ),
         (
             "edge",
-            """<<<<<<< SEARCH
+            """------- SEARCH
 edge
-++++++ REPLACE
+=======
 EDGE
->>>>>>>
++++++++ REPLACE
 """,
             "EDGE",
         ),
@@ -119,6 +119,27 @@ async def test_replace_in_file_applies_various_blocks(tmp_path: Path, monkeypatc
     res = await t.arun({"path": str(f), "diff": diff_text})
     assert res["type"] == "replace_file_result"
     assert f.read_text(encoding="utf-8") == expected
+
+
+async def test_replace_in_file_marker_with_angle_brackets(tmp_path: Path, monkeypatch):
+    """Test marker format with <<<<<<< SEARCH / ======= / +++++++ REPLACE"""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    f = tmp_path / "angle.txt"
+    f.write_text("hello world", encoding="utf-8")
+    t = ReplaceInFileTool()
+    
+    # Test with angle brackets format (<<<<<<< instead of -------)
+    res = await _run(
+        t, path=str(f), diff="""<<<<<<< SEARCH
+hello world
+=======
+goodbye world
++++++++ REPLACE
+"""
+    )
+    assert res["type"] == "replace_file_result"
+    # We now support <<<<<<< format too!
+    assert f.read_text(encoding="utf-8") == "goodbye world"
 
 
 async def test_replace_in_file_apply_patch_style(tmp_path: Path, monkeypatch):

@@ -33,10 +33,16 @@ class ReplaceArgs(BaseModel):
 class ReplaceInFileTool(BaseTool):  # type: ignore[override]
     name: str = "replace_in_file"
     description: str = (
-        "Edit a file by applying a MARKER-style diff. Format:\n"
-        "------- SEARCH\n[exact lines to find]\n=======\n[replacement lines]\n+++++++ REPLACE\n"
-        "Use exact full-line matches; keep markers unmodified (7+ symbols allowed);"
-        " provide blocks strictly in file order; empty SEARCH replaces whole file."
+        "Edit a file by applying a diff. Required format:\n"
+        "```\n"
+        "------- SEARCH\n"
+        "[exact lines to find]\n"
+        "=======\n"
+        "[replacement lines]\n"
+        "+++++++ REPLACE\n"
+        "```\n"
+        "Rules: exact line matches including whitespace; multiple blocks allowed in order;\n"
+        "empty SEARCH replaces whole file; common escaped chars (\\|, \\(, etc) are auto-unescaped."
     )
     args_schema: type[BaseModel] | dict[str, Any] | None = ReplaceArgs
 
@@ -48,12 +54,20 @@ class ReplaceInFileTool(BaseTool):  # type: ignore[override]
         tracker.start_edit([str(file_path)])
 
         try:
+            original_text = file_path.read_text(encoding="utf-8") if file_path.exists() else ""
+            
             if diff_text.lstrip().startswith("*** Begin Patch"):
                 new_text = _apply_unified_patch_to_file(diff_text, file_path)
             elif _looks_like_marker_style(diff_text):
                 new_text = _apply_marker_style_blocks(diff_text, file_path)
             else:
                 new_text = _apply_search_replace_blocks(diff_text, file_path)
+            
+            # Check if anything actually changed
+            if new_text == original_text and file_path.exists():
+                tracker.abort_edit()
+                raise ValueError("No changes were made - diff pattern not found in file")
+                
             file_path.parent.mkdir(parents=True, exist_ok=True)
             file_path.write_text(new_text, encoding="utf-8")
         except Exception:
@@ -110,10 +124,11 @@ def _apply_search_replace_blocks(diff_text: str, file_path: Path) -> str:
 
 def _looks_like_marker_style(diff_text: str) -> bool:
     # Detect generic marker-style blocks: ------- SEARCH / ======= / +++++++ REPLACE
+    # Also supports <<<<<<< SEARCH / ======= / +++++++ REPLACE
     return (
-        re.search(r"^[-]{3,}\\s*SEARCH", diff_text, re.MULTILINE) is not None
+        re.search(r"^[-<]{3,}\s*SEARCH", diff_text, re.MULTILINE) is not None
         or re.search(r"^[=]{3,}$", diff_text, re.MULTILINE) is not None
-        or re.search(r"^[+]{3,}\\s*REPLACE", diff_text, re.MULTILINE) is not None
+        or re.search(r"^[+]{3,}\s*REPLACE", diff_text, re.MULTILINE) is not None
     )
 
 
@@ -149,9 +164,9 @@ def _apply_marker_style_blocks(diff_text: str, file_path: Path) -> str:
     result_parts: list[str] = []
     last_processed = 0
 
-    search_start_re = re.compile(r"^[-]{3,}\\s*SEARCH>?$")
+    search_start_re = re.compile(r"^[-<]{3,}\s*SEARCH>?$")
     middle_re = re.compile(r"^[=]{3,}$")
-    replace_end_re = re.compile(r"^[+]{3,}\\s*REPLACE>?$")
+    replace_end_re = re.compile(r"^[+>]{3,}\s*(REPLACE>?)?$")
 
     lines = diff_text.splitlines()
     state = "idle"
@@ -210,6 +225,8 @@ def _apply_marker_style_blocks(diff_text: str, file_path: Path) -> str:
             if state != "replace":
                 continue
             search_block = "\n".join(search_buf)
+            # Normalize common regex-escaped punctuation to literal characters
+            search_block = re.sub(r"\\([\\|().{}\[\]^$*+?])", r"\1", search_block)
             replace_block = "\n".join(replace_buf)
             # Ensure trailing newline behavior is exact: keep as-is
             apply_one(search_block, replace_block)

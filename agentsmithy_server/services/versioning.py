@@ -36,7 +36,7 @@ class CheckpointInfo:
 class VersioningTracker:
     """Shadow-repo versioning isolated from project's own Git.
 
-    - Shadow repo path: ~/.agentsmithy/checkpoints/{cwd_hash}/.git
+    - Shadow repo path: {project_root}/.agentsmithy/checkpoints/.git
     - Worktree points to real project directory
     - Only used to create checkpoints and restore files
     - Does not touch user's main .git in the project
@@ -44,10 +44,8 @@ class VersioningTracker:
 
     def __init__(self, project_root: str) -> None:
         self.project_root = Path(project_root).resolve()
-        self.cwd_hash = stable_hash(str(self.project_root))
-        self.shadow_root = (
-            Path(os.path.expanduser("~/.agentsmithy/checkpoints")) / self.cwd_hash
-        )
+        # Use project's .agentsmithy directory for checkpoints
+        self.shadow_root = self.project_root / ".agentsmithy" / "checkpoints"
         self.shadow_root.mkdir(parents=True, exist_ok=True)
         self.repo_path = self.shadow_root / ".git"
         self._tmp_dir: Path | None = None
