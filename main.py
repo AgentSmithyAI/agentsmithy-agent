@@ -73,8 +73,7 @@ if __name__ == "__main__":
             startup_logger.error("Failed to initialize workspace", error=str(e))
             sys.exit(1)
 
-        # Expose to the process for later access
-        os.environ["AGENTSMITHY_WORKDIR"] = str(workdir_path)
+        # Workspace is now held in-process via set_workspace(); no env var needed
 
         # Delegate port selection and status.json management to project runtime
         from agentsmithy_server.core.project import get_current_project

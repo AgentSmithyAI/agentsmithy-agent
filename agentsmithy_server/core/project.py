@@ -8,7 +8,6 @@ configuration, indexing, and other project-level behaviors.
 from __future__ import annotations
 
 import json
-import os
 import shutil
 import uuid
 from dataclasses import dataclass
@@ -340,34 +339,22 @@ def set_workspace(workdir: Path) -> ProjectWorkspace:
 def get_workspace() -> ProjectWorkspace:
     """Get the global workspace, initializing from env if needed.
 
-    Requires AGENTSMITHY_WORKDIR to be set if not explicitly initialized via
-    set_workspace().
+    Requires set_workspace() to be called at startup.
     """
     global _workspace_singleton
-    if _workspace_singleton is not None:
-        return _workspace_singleton
-
-    workdir_env = os.getenv("AGENTSMITHY_WORKDIR")
-    if not workdir_env:
+    if _workspace_singleton is None:
         raise RuntimeError(
-            "AGENTSMITHY_WORKDIR is not set. Initialize workspace at startup."
+            "Workspace is not initialized. Call set_workspace() at startup."
         )
-    workspace = ProjectWorkspace(Path(workdir_env))
-    workspace.ensure_root_state()
-    _workspace_singleton = workspace
-    return workspace
+    return _workspace_singleton
 
 
 def get_current_project() -> Project:
-    """Return the active Project inferred from AGENTSMITHY_WORKDIR.
+    """Return the active Project inferred from the current workspace.
 
     In setups where the working directory is the project directory, this
     provides a direct Project instance rooted at that path.
     """
-    workdir_env = os.getenv("AGENTSMITHY_WORKDIR")
-    if not workdir_env:
-        raise RuntimeError(
-            "AGENTSMITHY_WORKDIR is not set. Initialize workspace at startup."
-        )
-    root = Path(workdir_env).expanduser().resolve()
+    workspace = get_workspace()
+    root = workspace.workdir
     return Project(name=root.name, root=root, state_dir=root / ".agentsmithy")

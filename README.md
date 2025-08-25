@@ -5,14 +5,14 @@ A local AI server similar to Cursor, built using LangGraph for orchestration, RA
 ## Documentation
 
 - See the documentation in [docs/](./docs).
-- SSE protocol details: [docs/sse-protocol.md](./docs/sse-protocol.md)
+- SSE protocol details (current): [docs/sse-protocol.md](./docs/sse-protocol.md)
 
 ## Features
 
 - 🤖 **Universal agent** orchestrated with LangGraph
 - 📚 **RAG (Retrieval-Augmented Generation)** for context handling
 - 🔄 **Streaming responses** via Server-Sent Events (SSE)
-- 🧰 **Tool-aware workflow** with structured edit/diff events for code changes
+- 🧰 **Tool-aware workflow** with structured SSE events (chat/reasoning/tool_call/file_edit)
 - 🔌 **Flexible LLM provider interface** (OpenAI supported out of the box)
 - 🗄️ **ChromaDB** vector store for context persistence
 
@@ -28,7 +28,7 @@ graph TD
     U --> T[Tools<br/>ToolExecutor/ToolManager]
     U --> M[LLM<br/>OpenAI]
     M --> N[Response]
-    T --> O1[Structured Events<br/>diff/tool_result]
+    T --> O1[SSE Events<br/>chat/reasoning/tool_call/file_edit]
     N --> O[SSE Stream]
     O1 --> O
     O --> P[Client]
@@ -53,13 +53,21 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-4. Create a `.env` file and set your API key:
+4. Create a `.env` file with required model and API key (minimum):
 ```env
 OPENAI_API_KEY=your_openai_api_key_here
+DEFAULT_MODEL=gpt-5  # required
+
 # Optional overrides
+# DEFAULT_TEMPERATURE=0.7
+# DEFAULT_EMBEDDING_MODEL=text-embedding-3-small
+# MAX_TOKENS=4000
+# REASONING_EFFORT=medium       # only for gpt-5 models
+# REASONING_VERBOSITY=auto      # only for gpt-5 models
 # SERVER_HOST=localhost
-# SERVER_PORT=11434
-# LOG_FORMAT=pretty  # or json
+# SERVER_PORT=11434             # base port; actual port may auto-increment
+# LOG_FORMAT=pretty             # or json
+# SERVER_RELOAD=false           # enable hot-reload in dev with true
 ```
 
 ## Usage
@@ -71,13 +79,11 @@ OPENAI_API_KEY=your_openai_api_key_here
 python main.py --workdir /abs/path/to/workspace
 ```
 
-The server will be available at: `http://localhost:11434`
+The server starts at base port `11434` (auto-increments if busy). Check startup logs for the actual URL, e.g., `http://localhost:11434`.
 
 ### Startup Parameters
 
-- `--workdir` (required when using `main.py`): absolute path to the workspace directory. On startup, the server will ensure a hidden directory `/abs/path/to/workspace/.agentsmithy` exists. Project-specific data (e.g., RAG index) will be stored under each project's own `.agentsmithy` directory inside the workspace.
-
-Environment alternative for advanced setups: set `AGENTSMITHY_WORKDIR=/abs/path/to/workspace` before starting the process.
+- `--workdir` (required): absolute path to the workspace directory. On startup, the server ensures `/abs/path/to/workspace/.agentsmithy` exists. Project-specific data (e.g., RAG index) is stored under each project's `.agentsmithy` directory inside the workspace. The server keeps this path in-process; no env var is used.
 
 ### Projects and RAG Storage
 
@@ -151,13 +157,17 @@ Main chat endpoint.
 
 **Response (streaming):**
 ```
-data: {"type": "classification", "task_type": "universal"}
+data: {"type": "chat_start", "dialog_id": "01J..."}
 
-data: {"content": "I'll help you refactor "}
+data: {"type": "chat", "content": "I'll help you refactor ", "dialog_id": "01J..."}
 
-data: {"type": "diff", "file": "example.py", "diff": "...", "line_start": 1, "line_end": 2, "reason": "..."}
+data: {"type": "tool_call", "name": "read_file", "args": {"path": "example.py"}, "dialog_id": "01J..."}
 
-data: {"done": true}
+data: {"type": "file_edit", "file": "/abs/path/to/example.py", "dialog_id": "01J..."}
+
+data: {"type": "chat_end", "dialog_id": "01J..."}
+
+data: {"type": "done", "done": true, "dialog_id": "01J..."}
 ```
 
 ### GET /health
@@ -195,10 +205,6 @@ make typecheck
 
 # run tests
 make test
-
-# run server
-make run
-
 ```
 
 ## Extending Functionality
@@ -267,16 +273,3 @@ Example log output:
 {"timestamp": "2024-01-01T12:00:01", "level": "DEBUG", "logger": "agentsmithy.agents", "message": "Classifying task", "query_preview": "Help me refactor this code"}
 {"timestamp": "2024-01-01T12:00:02", "level": "INFO", "logger": "agentsmithy.agents", "message": "Task classified", "task_type": "refactor"}
 ```
-
-### Common Issues
-
-1. **No response in client**: Check logs for SSE event generation. Look for `SSE Event` entries.
-2. **Streaming issues**: Look for `content_chunk` and `file_operation` events in the logs.
-
-## License
-
-MIT License
-
-## Contributing
-
-Pull requests are welcome. For major changes, please open an issue first to discuss what you would like to change. 
