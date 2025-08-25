@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 from .base_tool import BaseTool
+from agentsmithy_server.services.versioning import VersioningTracker
 
 
 class WriteFileArgs(BaseModel):
@@ -20,8 +22,19 @@ class WriteFileTool(BaseTool):  # type: ignore[override]
 
     async def _arun(self, **kwargs: Any) -> dict[str, Any]:
         file_path = Path(kwargs["path"]).resolve()
+        tracker = VersioningTracker(os.getcwd())
+        tracker.ensure_repo()
+        tracker.start_edit([str(file_path)])
         file_path.parent.mkdir(parents=True, exist_ok=True)
-        file_path.write_text(kwargs["content"], encoding="utf-8")
+        try:
+            file_path.write_text(kwargs["content"], encoding="utf-8")
+        except Exception:
+            # revert attempt
+            tracker.abort_edit()
+            raise
+        else:
+            tracker.finalize_edit()
+            tracker.create_checkpoint(f"write_to_file: {str(file_path)}")
         # Emit file_edit event in simplified SSE protocol
         if self._sse_callback is not None:
             await self.emit_event(

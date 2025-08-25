@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 from .base_tool import BaseTool
+from agentsmithy_server.services.versioning import VersioningTracker
 
 
 @dataclass
@@ -33,6 +35,10 @@ class PatchFileTool(BaseTool):  # type: ignore[override]
     async def _arun(self, **kwargs: Any) -> dict[str, Any]:
         file_path = Path(kwargs["file_path"]).resolve()
         changes: list[dict[str, Any]] = kwargs.get("changes", [])
+
+        tracker = VersioningTracker(os.getcwd())
+        tracker.ensure_repo()
+        tracker.start_edit([str(file_path)])
 
         # Read original file content
         original_text = file_path.read_text(encoding="utf-8")
@@ -65,7 +71,14 @@ class PatchFileTool(BaseTool):  # type: ignore[override]
         new_text = "\n".join(modified_lines) + (
             "\n" if original_text.endswith("\n") else ""
         )
-        file_path.write_text(new_text, encoding="utf-8")
+        try:
+            file_path.write_text(new_text, encoding="utf-8")
+        except Exception:
+            tracker.abort_edit()
+            raise
+        else:
+            tracker.finalize_edit()
+            tracker.create_checkpoint(f"patch_file: {str(file_path)}")
 
         # Emit file_edit event in simplified SSE protocol
         if self._sse_callback is not None:
