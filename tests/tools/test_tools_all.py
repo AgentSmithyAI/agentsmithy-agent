@@ -59,7 +59,7 @@ async def test_patch_file_changes_lines(tmp_path: Path, monkeypatch):
     assert f.read_text(encoding="utf-8").splitlines()[1] == "B"
 
 
-async def test_replace_in_file_placeholder(tmp_path: Path, monkeypatch):
+async def test_replace_in_file_basic(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     f = tmp_path / "d.txt"
     f.write_text("abc", encoding="utf-8")
@@ -67,8 +67,8 @@ async def test_replace_in_file_placeholder(tmp_path: Path, monkeypatch):
     res = await _run(
         t, path=str(f), diff="""<<<<<<< SEARCH\nabc\n+++++++ REPLACE\ndef\n>>>>>>>\n"""
     )
-    assert res["type"] == "replace_file_request"
-    assert res["path"].endswith("d.txt")
+    assert res["type"] == "replace_file_result"
+    assert f.read_text(encoding="utf-8") == "def"
 
 
 async def test_list_files_hidden_flag(tmp_path: Path):

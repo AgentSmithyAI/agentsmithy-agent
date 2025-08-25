@@ -13,46 +13,127 @@ async def _run(tool, **kwargs):
     return await tool.arun(kwargs)
 
 
-async def test_replace_in_file_placeholder_returns_request(tmp_path: Path, monkeypatch):
+async def test_replace_in_file_search_replace_applies(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     f = tmp_path / "d.txt"
     f.write_text("abc", encoding="utf-8")
     t = ReplaceInFileTool()
     res = await _run(
-        t, path=str(f), diff="""<<<<<<< SEARCH\nabc\n+++++++ REPLACE\ndef\n>>>>>>>\n"""
+        t, path=str(f), diff="""<<<<<<< SEARCH
+abc
++++++++ REPLACE
+def
+>>>>>>>
+"""
     )
-    assert res["type"] == "replace_file_request"
-    assert res["path"].endswith("d.txt")
+    assert res["type"] == "replace_file_result"
+    assert f.read_text(encoding="utf-8") == "def"
 
 
 @pytest.mark.parametrize(
-    "diff_text",
+    ("initial", "diff_text", "expected"),
     [
-        # Simple one block
-        """<<<<<<< SEARCH\nfoo\n+++++++ REPLACE\nbar\n>>>>>>>\n""",
-        # Multiple blocks
-        """<<<<<<< SEARCH\nA\n+++++++ REPLACE\nB\n>>>>>>>\n<<<<<<< SEARCH\nC\n+++++++ REPLACE\nD\n>>>>>>>\n""",
-        # Content with regex metachars (should be treated literally by our pipeline)
-        r"""<<<<<<< SEARCH\n^start.*(group)?\b|alt\n+++++++ REPLACE\n(re)placed\n>>>>>>>\n""",
-        # Lookarounds and escapes
-        r"""<<<<<<< SEARCH\n(?<=foo)bar and foo(?=bar) and foo\|bar\n+++++++ REPLACE\n<<ok>>\n>>>>>>>\n""",
-        # Triple backticks fenced content
-        """<<<<<<< SEARCH\n```js\nconsole.log('x')\n```\n+++++++ REPLACE\n```ts\nconsole.log('y')\n```\n>>>>>>>\n""",
-        # XML-like tags inside content
-        """<<<<<<< SEARCH\n<node attr="1">\n</node>\n+++++++ REPLACE\n<node attr="2"/>\n>>>>>>>\n""",
-        # Markers at file edges (no trailing newline)
-        """<<<<<<< SEARCH\nedge\n+++++++ REPLACE\nEDGE\n>>>>>>>""",
+        ("foo", """<<<<<<< SEARCH
+foo
++++++++ REPLACE
+bar
+>>>>>>>
+""", "bar"),
+        (
+            "A\nC\n",
+            """<<<<<<< SEARCH
+A
++++++++ REPLACE
+B
+>>>>>>>
+<<<<<<< SEARCH
+C
++++++++ REPLACE
+D
+>>>>>>>
+""",
+            "B\nD\n",
+        ),
+        (
+            "^start.*(group)?\\b|alt\n",
+            r"""<<<<<<< SEARCH
+^start.*(group)?\b|alt
++++++++ REPLACE
+(re)placed
+>>>>>>>
+""",
+            "(re)placed\n",
+        ),
+        (
+            "(?<=foo)bar and foo(?=bar) and foo|bar\n",
+            r"""<<<<<<< SEARCH
+(?<=foo)bar and foo(?=bar) and foo\|bar
++++++++ REPLACE
+<<ok>>
+>>>>>>>
+""",
+            "<<ok>>\n",
+        ),
+        (
+            "```js\nconsole.log('x')\n```\n",
+            """<<<<<<< SEARCH
+```js
+console.log('x')
+```
++++++++ REPLACE
+```ts
+console.log('y')
+```
+>>>>>>>
+""",
+            "```ts\nconsole.log('y')\n```\n",
+        ),
+        (
+            "<node attr=\"1\">\n</node>\n",
+            """<<<<<<< SEARCH
+<node attr=\"1\">
+</node>
++++++++ REPLACE
+<node attr=\"2\"/>
+>>>>>>>
+""",
+            "<node attr=\"2\"/>\n",
+        ),
+        (
+            "edge",
+            """<<<<<<< SEARCH
+edge
+++++++ REPLACE
+EDGE
+>>>>>>>
+""",
+            "EDGE",
+        ),
     ],
 )
-async def test_replace_in_file_diff_is_preserved(
-    tmp_path: Path, monkeypatch, diff_text: str
-):
+async def test_replace_in_file_applies_various_blocks(tmp_path: Path, monkeypatch, initial: str, diff_text: str, expected: str):
     monkeypatch.setenv("HOME", str(tmp_path))
     f = tmp_path / "e.txt"
-    f.write_text("seed", encoding="utf-8")
+    f.write_text(initial, encoding="utf-8")
     t = ReplaceInFileTool()
     res = await t.arun({"path": str(f), "diff": diff_text})
-    assert res["type"] == "replace_file_request"
-    assert res["path"].endswith("e.txt")
-    # Ensure we don't mangle diff payload
-    assert res["diff"] == diff_text
+    assert res["type"] == "replace_file_result"
+    assert f.read_text(encoding="utf-8") == expected
+
+
+async def test_replace_in_file_apply_patch_style(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    f = tmp_path / "p.txt"
+    f.write_text("line1\nline2\n", encoding="utf-8")
+    patch = f"""*** Begin Patch
+*** Update File: {f.resolve()}
+@@ -1,2 +1,2 @@
+ line1
+-line2
++LINE2
+*** End Patch
+"""
+    t = ReplaceInFileTool()
+    res = await t.arun({"path": str(f), "diff": patch})
+    assert res["type"] == "replace_file_result"
+    assert f.read_text(encoding="utf-8").splitlines() == ["line1", "LINE2"]
