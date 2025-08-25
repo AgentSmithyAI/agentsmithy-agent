@@ -6,7 +6,6 @@ import pytest
 
 from agentsmithy_server.tools.list_files import ListFilesTool
 
-
 pytestmark = pytest.mark.asyncio
 
 
@@ -29,5 +28,3 @@ async def test_list_files_hidden_flag(tmp_path: Path):
     res2 = await _run(t, path=str(tmp_path), recursive=True, hidden_files=True)
     items2 = res2["items"]
     assert any("/.hidden" in p for p in items2)
-
-

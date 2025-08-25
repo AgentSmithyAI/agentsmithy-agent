@@ -6,7 +6,6 @@ import pytest
 
 from agentsmithy_server.tools.write_file import WriteFileTool
 
-
 pytestmark = pytest.mark.asyncio
 
 
@@ -22,5 +21,3 @@ async def test_write_file_create_and_overwrite(tmp_path: Path, monkeypatch):
     assert f.read_text(encoding="utf-8") == "one"
     await _run(t, path=str(f), content="two")
     assert f.read_text(encoding="utf-8") == "two"
-
-

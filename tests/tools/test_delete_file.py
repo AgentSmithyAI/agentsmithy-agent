@@ -6,7 +6,6 @@ import pytest
 
 from agentsmithy_server.tools.delete_file import DeleteFileTool
 
-
 pytestmark = pytest.mark.asyncio
 
 
@@ -22,5 +21,3 @@ async def test_delete_file_removes_file(tmp_path: Path, monkeypatch):
     res = await _run(t, path=str(f))
     assert res["type"] == "delete_file_result"
     assert not f.exists()
-
-

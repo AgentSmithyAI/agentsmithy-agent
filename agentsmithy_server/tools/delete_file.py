@@ -6,8 +6,9 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from .base_tool import BaseTool
 from agentsmithy_server.services.versioning import VersioningTracker
+
+from .base_tool import BaseTool
 
 
 class DeleteFileArgs(BaseModel):
@@ -31,7 +32,9 @@ class DeleteFileTool(BaseTool):  # type: ignore[override]
                 if file_path.is_file():
                     file_path.unlink()
                 else:
-                    raise ValueError("Path is not a file. Use a directory removal tool if intended.")
+                    raise ValueError(
+                        "Path is not a file. Use a directory removal tool if intended."
+                    )
             # else: no-op if already absent
         except Exception:
             tracker.abort_edit()
@@ -41,14 +44,14 @@ class DeleteFileTool(BaseTool):  # type: ignore[override]
             tracker.create_checkpoint(f"delete_file: {str(file_path)}")
 
         if self._sse_callback is not None:
-            await self.emit_event({
-                "type": "file_edit",
-                "file": str(file_path),
-            })
+            await self.emit_event(
+                {
+                    "type": "file_edit",
+                    "file": str(file_path),
+                }
+            )
 
         return {
             "type": "delete_file_result",
             "path": str(file_path),
         }
-
-

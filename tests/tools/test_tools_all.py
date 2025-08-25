@@ -4,14 +4,13 @@ from pathlib import Path
 
 import pytest
 
-from agentsmithy_server.tools.read_file import ReadFileTool
-from agentsmithy_server.tools.write_file import WriteFileTool
-from agentsmithy_server.tools.patch_file import PatchFileTool
-from agentsmithy_server.tools.replace_in_file import ReplaceInFileTool
-from agentsmithy_server.tools.list_files import ListFilesTool
-from agentsmithy_server.tools.search_files import SearchFilesTool
 from agentsmithy_server.tools.delete_file import DeleteFileTool
-
+from agentsmithy_server.tools.list_files import ListFilesTool
+from agentsmithy_server.tools.patch_file import PatchFileTool
+from agentsmithy_server.tools.read_file import ReadFileTool
+from agentsmithy_server.tools.replace_in_file import ReplaceInFileTool
+from agentsmithy_server.tools.search_files import SearchFilesTool
+from agentsmithy_server.tools.write_file import WriteFileTool
 
 pytestmark = pytest.mark.asyncio
 
@@ -47,7 +46,15 @@ async def test_patch_file_changes_lines(tmp_path: Path, monkeypatch):
     await _run(
         t,
         file_path=str(f),
-        changes=[{"line_start": 2, "line_end": 2, "old_content": "b", "new_content": "B", "reason": ""}],
+        changes=[
+            {
+                "line_start": 2,
+                "line_end": 2,
+                "old_content": "b",
+                "new_content": "B",
+                "reason": "",
+            }
+        ],
     )
     assert f.read_text(encoding="utf-8").splitlines()[1] == "B"
 
@@ -57,7 +64,9 @@ async def test_replace_in_file_placeholder(tmp_path: Path, monkeypatch):
     f = tmp_path / "d.txt"
     f.write_text("abc", encoding="utf-8")
     t = ReplaceInFileTool()
-    res = await _run(t, path=str(f), diff="""<<<<<<< SEARCH\nabc\n+++++++ REPLACE\ndef\n>>>>>>>\n""")
+    res = await _run(
+        t, path=str(f), diff="""<<<<<<< SEARCH\nabc\n+++++++ REPLACE\ndef\n>>>>>>>\n"""
+    )
     assert res["type"] == "replace_file_request"
     assert res["path"].endswith("d.txt")
 
@@ -91,5 +100,3 @@ async def test_delete_file(tmp_path: Path, monkeypatch):
     res = await _run(t, path=str(f))
     assert res["type"] == "delete_file_result"
     assert not f.exists()
-
-

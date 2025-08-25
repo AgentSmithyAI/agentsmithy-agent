@@ -6,7 +6,6 @@ import pytest
 
 from agentsmithy_server.tools.patch_file import PatchFileTool
 
-
 pytestmark = pytest.mark.asyncio
 
 
@@ -22,8 +21,14 @@ async def test_patch_file_changes_lines(tmp_path: Path, monkeypatch):
     await _run(
         t,
         file_path=str(f),
-        changes=[{"line_start": 2, "line_end": 2, "old_content": "b", "new_content": "B", "reason": ""}],
+        changes=[
+            {
+                "line_start": 2,
+                "line_end": 2,
+                "old_content": "b",
+                "new_content": "B",
+                "reason": "",
+            }
+        ],
     )
     assert f.read_text(encoding="utf-8").splitlines()[1] == "B"
-
-

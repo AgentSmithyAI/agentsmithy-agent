@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from .delete_file import DeleteFileTool
 from .list_files import ListFilesTool
 from .patch_file import PatchFileTool
 from .read_file import ReadFileTool
@@ -8,7 +9,6 @@ from .return_inspection import ReturnInspectionTool
 from .search_files import SearchFilesTool
 from .tool_manager import ToolManager
 from .write_file import WriteFileTool
-from .delete_file import DeleteFileTool
 
 
 class ToolFactory:

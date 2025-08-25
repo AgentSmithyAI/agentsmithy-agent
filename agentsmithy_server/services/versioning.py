@@ -5,13 +5,12 @@ import json
 import os
 import shutil
 import tempfile
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
 
 from dulwich import porcelain
 from dulwich.repo import Repo
-
 
 DEFAULT_EXCLUDES = [
     ".git/",
@@ -46,7 +45,9 @@ class VersioningTracker:
     def __init__(self, project_root: str) -> None:
         self.project_root = Path(project_root).resolve()
         self.cwd_hash = stable_hash(str(self.project_root))
-        self.shadow_root = Path(os.path.expanduser("~/.agentsmithy/checkpoints")) / self.cwd_hash
+        self.shadow_root = (
+            Path(os.path.expanduser("~/.agentsmithy/checkpoints")) / self.cwd_hash
+        )
         self.shadow_root.mkdir(parents=True, exist_ok=True)
         self.repo_path = self.shadow_root / ".git"
         self._tmp_dir: Path | None = None
@@ -96,7 +97,13 @@ class VersioningTracker:
         patterns: list[str] = []
         gitignore = self.project_root / ".gitignore"
         if gitignore.exists():
-            patterns.extend([line.strip() for line in gitignore.read_text().splitlines() if line.strip()])
+            patterns.extend(
+                [
+                    line.strip()
+                    for line in gitignore.read_text().splitlines()
+                    if line.strip()
+                ]
+            )
         patterns.extend(DEFAULT_EXCLUDES)
         exclude_file.write_text("\n".join(sorted(set(patterns))) + "\n")
 
@@ -134,7 +141,11 @@ class VersioningTracker:
             pass
         try:
             commit_bytes = porcelain.commit(repo, bytes(message, "utf-8"))
-            commit_id = commit_bytes.decode() if isinstance(commit_bytes, (bytes, bytearray)) else str(commit_bytes)
+            commit_id = (
+                commit_bytes.decode()
+                if isinstance(commit_bytes, (bytes, bytearray))
+                else str(commit_bytes)
+            )
             self._record_metadata(commit_id, message)
             return CheckpointInfo(commit_id=commit_id, message=message)
         except Exception:
@@ -169,5 +180,3 @@ class VersioningTracker:
                 data = {}
         data[commit_id] = {"message": message}
         meta_file.write_text(json.dumps(data, indent=2))
-
-

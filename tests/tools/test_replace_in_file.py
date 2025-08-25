@@ -6,7 +6,6 @@ import pytest
 
 from agentsmithy_server.tools.replace_in_file import ReplaceInFileTool
 
-
 pytestmark = pytest.mark.asyncio
 
 
@@ -19,7 +18,9 @@ async def test_replace_in_file_placeholder_returns_request(tmp_path: Path, monke
     f = tmp_path / "d.txt"
     f.write_text("abc", encoding="utf-8")
     t = ReplaceInFileTool()
-    res = await _run(t, path=str(f), diff="""<<<<<<< SEARCH\nabc\n+++++++ REPLACE\ndef\n>>>>>>>\n""")
+    res = await _run(
+        t, path=str(f), diff="""<<<<<<< SEARCH\nabc\n+++++++ REPLACE\ndef\n>>>>>>>\n"""
+    )
     assert res["type"] == "replace_file_request"
     assert res["path"].endswith("d.txt")
 
@@ -43,7 +44,9 @@ async def test_replace_in_file_placeholder_returns_request(tmp_path: Path, monke
         """<<<<<<< SEARCH\nedge\n+++++++ REPLACE\nEDGE\n>>>>>>>""",
     ],
 )
-async def test_replace_in_file_diff_is_preserved(tmp_path: Path, monkeypatch, diff_text: str):
+async def test_replace_in_file_diff_is_preserved(
+    tmp_path: Path, monkeypatch, diff_text: str
+):
     monkeypatch.setenv("HOME", str(tmp_path))
     f = tmp_path / "e.txt"
     f.write_text("seed", encoding="utf-8")
@@ -53,5 +56,3 @@ async def test_replace_in_file_diff_is_preserved(tmp_path: Path, monkeypatch, di
     assert res["path"].endswith("e.txt")
     # Ensure we don't mangle diff payload
     assert res["diff"] == diff_text
-
-
