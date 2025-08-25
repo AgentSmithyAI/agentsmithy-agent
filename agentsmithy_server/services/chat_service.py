@@ -67,7 +67,10 @@ class ChatService:
                 yield SSEEventFactory.reasoning_end(dialog_id=dialog_id).to_sse()
             elif chunk["type"] == "file_edit":
                 yield SSEEventFactory.file_edit(
-                    file=chunk.get("file", ""), dialog_id=dialog_id
+                    file=chunk.get("file", ""),
+                    diff=chunk.get("diff"),
+                    checkpoint=chunk.get("checkpoint"),
+                    dialog_id=dialog_id,
                 ).to_sse()
             elif chunk["type"] == "tool_call":
                 yield SSEEventFactory.tool_call(
@@ -104,7 +107,10 @@ class ChatService:
                     ).to_sse()
                 elif tool_event.get("type") == "file_edit":
                     sse = SSEEventFactory.file_edit(
-                        file=tool_event.get("file", ""), dialog_id=dialog_id
+                        file=tool_event.get("file", ""),
+                        diff=tool_event.get("diff"),
+                        checkpoint=tool_event.get("checkpoint"),
+                        dialog_id=dialog_id,
                     ).to_sse()
                 elif tool_event.get("type") == "error":
                     sse = SSEEventFactory.error(

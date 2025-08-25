@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+import difflib
 from pathlib import Path
 from typing import Any
 
@@ -79,14 +80,24 @@ class PatchFileTool(BaseTool):  # type: ignore[override]
             raise
         else:
             tracker.finalize_edit()
-            tracker.create_checkpoint(f"patch_file: {str(file_path)}")
+            checkpoint = tracker.create_checkpoint(f"patch_file: {str(file_path)}")
 
-        # Emit file_edit event in simplified SSE protocol
+        # Emit file_edit event with diff and checkpoint
         if self._sse_callback is not None:
+            unified = difflib.unified_diff(
+                original_text.splitlines(keepends=True),
+                new_text.splitlines(keepends=True),
+                fromfile=f"a/{file_path}",
+                tofile=f"b/{file_path}",
+                lineterm="",
+            )
+            diff_str = "\n".join(unified)
             await self.emit_event(
                 {
                     "type": "file_edit",
                     "file": str(file_path),
+                    "diff": diff_str,
+                    "checkpoint": getattr(checkpoint, "commit_id", None),
                 }
             )
 

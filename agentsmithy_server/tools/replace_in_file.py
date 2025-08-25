@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
+import difflib
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -75,10 +76,26 @@ class ReplaceInFileTool(BaseTool):  # type: ignore[override]
             raise
         else:
             tracker.finalize_edit()
-            tracker.create_checkpoint(f"replace_in_file: {str(file_path)}")
+            checkpoint = tracker.create_checkpoint(f"replace_in_file: {str(file_path)}")
 
         if self._sse_callback is not None:
-            await self.emit_event({"type": "file_edit", "file": str(file_path)})
+            # Build unified diff between original and new content
+            unified = difflib.unified_diff(
+                original_text.splitlines(keepends=True),
+                new_text.splitlines(keepends=True),
+                fromfile=f"a/{file_path}",
+                tofile=f"b/{file_path}",
+                lineterm="",
+            )
+            diff_str = "\n".join(unified)
+            await self.emit_event(
+                {
+                    "type": "file_edit",
+                    "file": str(file_path),
+                    "diff": diff_str,
+                    "checkpoint": getattr(checkpoint, "commit_id", None),
+                }
+            )
 
         return {"type": "replace_file_result", "path": str(file_path)}
 

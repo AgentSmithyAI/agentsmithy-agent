@@ -107,10 +107,20 @@ Emitted when a tool is invoked by the agent.
 
 ### 8) file_edit
 
-Notification that a file was edited/created by a tool. Minimal; clients fetch content separately if needed.
+Notification that a file was edited/created by a tool. Includes minimal path plus change metadata.
+
+- `file` (string): absolute path to the edited file
+- `diff` (string, optional): unified diff (a/…, b/…, @@ hunks, +/- lines)
+- `checkpoint` (string, optional): shadow-repo commit id created for this edit
 
 ```json
-{ "type": "file_edit", "file": "/abs/path/to/file.py", "dialog_id": "01J..." }
+{
+  "type": "file_edit",
+  "file": "/abs/path/to/file.py",
+  "diff": "--- a//abs/path/to/file.py\n+++ b//abs/path/to/file.py\n@@ -1,2 +1,2 @@\n line1\n-line2\n+LINE2",
+  "checkpoint": "a1b2c3d4e5f67",
+  "dialog_id": "01J..."
+}
 ```
 
 ### 9) error

@@ -83,6 +83,8 @@ class ToolCallEvent(BaseEvent):
 class FileEditEvent(BaseEvent):
     type: Literal[EventType.FILE_EDIT] = EventType.FILE_EDIT
     file: str = ""
+    diff: str | None = None
+    checkpoint: str | None = None
 
 
 @dataclass
@@ -129,8 +131,13 @@ class EventFactory:
         return ToolCallEvent(name=name, args=args, dialog_id=dialog_id)
 
     @staticmethod
-    def file_edit(file: str, dialog_id: str | None = None) -> FileEditEvent:
-        return FileEditEvent(file=file, dialog_id=dialog_id)
+    def file_edit(
+        file: str,
+        diff: str | None = None,
+        checkpoint: str | None = None,
+        dialog_id: str | None = None,
+    ) -> FileEditEvent:
+        return FileEditEvent(file=file, diff=diff, checkpoint=checkpoint, dialog_id=dialog_id)
 
     @staticmethod
     def error(message: str, dialog_id: str | None = None) -> ErrorEvent:
