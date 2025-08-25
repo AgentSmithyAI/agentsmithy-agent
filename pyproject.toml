@@ -1,12 +1,14 @@
+
 [tool.black]
 line-length = 88
-target-version = ["py311"]
+target-version = ["py313"]
 
 [tool.ruff]
 line-length = 88
-target-version = "py311"
+target-version = "py313"
 extend-exclude = [
     ".venv",
+    "venv",
     "build",
     "dist",
     "node_modules",
@@ -26,6 +28,21 @@ select = [
 ignore = [
     "E501",  # line length handled by formatter (black)
 ]
+fixable = [
+    "ALL",
+]
+unfixable = [
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tgbot/locales/*.py" = ["E501"]
+
+[tool.ruff.lint.flake8-annotations]
+mypy-init-return = true
+suppress-none-returning = true
+suppress-dummy-args = false
+allow-star-arg-any = false
+ignore-fully-untyped = false
 
 [tool.ruff.format]
 quote-style = "double"
@@ -34,9 +51,10 @@ indent-style = "space"
 [tool.isort]
 profile = "black"
 line_length = 88
+multi_line_output = 3
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.13"
 warn_unused_ignores = true
 warn_redundant_casts = true
 warn_unreachable = true
@@ -46,15 +64,19 @@ ignore_missing_imports = true
 exclude = [
     "^tests/",
     "^chroma_db/",
+    "^venv/",
 ]
 
 [tool.pytest.ini_options]
 minversion = "8.0"
 addopts = "-ra -q"
+
 testpaths = [
     "tests",
 ]
 asyncio_mode = "auto"
+pythonpath = ["."]
+asyncio_default_fixture_loop_scope = "function"
 log_cli = true
 filterwarnings = [
     "ignore::DeprecationWarning",
