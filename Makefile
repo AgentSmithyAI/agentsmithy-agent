@@ -19,10 +19,13 @@ update-reqs:
 	$(PIP) install -r requirements.txt -r requirements-dev.txt --upgrade
 
 lint:
-	$(VENV)/bin/ruff check .
-	$(VENV)/bin/black --check .
-	$(VENV)/bin/isort --check-only .
-	$(VENV)/bin/mypy agentsmithy_server
+	@bash -c '\
+	ec=0; \
+	$(VENV)/bin/ruff check . || ec=1; \
+	$(VENV)/bin/black --check . || ec=1; \
+	$(VENV)/bin/isort --check-only . || ec=1; \
+	$(VENV)/bin/mypy agentsmithy_server || ec=1; \
+	exit $$ec'
 
 format:
 	$(VENV)/bin/ruff check . --fix --exit-zero
