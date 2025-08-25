@@ -33,10 +33,10 @@ if __name__ == "__main__":
             ".env file not found! Please create it from .env.example and add your OPENAI_API_KEY"
         )
         sys.exit(1)
-    
+
     # Validate required settings
     from agentsmithy_server.config import settings
-    
+
     if not settings.default_model:
         startup_logger.error(
             "DEFAULT_MODEL not set in .env file! Please specify the LLM model to use."

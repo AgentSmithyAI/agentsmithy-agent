@@ -26,13 +26,14 @@ class ListFilesTool(BaseTool):
         recursive = bool(kwargs.get("recursive", False))
         include_hidden = bool(kwargs.get("hidden_files", False))
         items: list[str] = []
-        
+
         def is_hidden(path: Path) -> bool:
             try:
                 relative_parts = path.relative_to(base).parts
             except Exception:
                 relative_parts = path.parts
             return any(part.startswith(".") for part in relative_parts)
+
         if recursive:
             for p in base.rglob("*"):
                 if not include_hidden and is_hidden(p):

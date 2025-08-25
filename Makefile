@@ -19,12 +19,15 @@ update-reqs:
 	$(PIP) install -r requirements.txt -r requirements-dev.txt --upgrade
 
 lint:
-	$(VENV)/bin/ruff check . --fix
-	$(VENV)/bin/black .
-	$(VENV)/bin/mypy agentsmithy_server || true
+	$(VENV)/bin/ruff check .
+	$(VENV)/bin/black --check .
+	$(VENV)/bin/isort --check-only .
+	$(VENV)/bin/mypy agentsmithy_server
 
 format:
-	$(MAKE) lint
+	$(VENV)/bin/ruff check . --fix --exit-zero
+	$(VENV)/bin/black .
+	$(VENV)/bin/isort .
 
 typecheck:
 	$(VENV)/bin/mypy agentsmithy_server

@@ -11,9 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
-from agentsmithy_server.api.sse_protocol import (
-    EventFactory as SSEEventFactory,
-)
+from agentsmithy_server.api.sse_protocol import EventFactory as SSEEventFactory
 from agentsmithy_server.core.agent_graph import AgentOrchestrator
 from agentsmithy_server.core.project import get_current_project
 from agentsmithy_server.utils.logger import api_logger
@@ -88,9 +86,6 @@ def _get_dialog_id(project_dialog: tuple[Any, str] | None) -> str | None:
     return project_dialog[1] if project_dialog else None
 
 
-
-
-
 def _sse_chat(content: str, dialog_id: str | None) -> dict[str, str]:
     return SSEEventFactory.chat(content=content, dialog_id=dialog_id).to_sse()
 
@@ -99,7 +94,9 @@ def _sse_reasoning(content: str, dialog_id: str | None) -> dict[str, str]:
     return SSEEventFactory.reasoning(content=content, dialog_id=dialog_id).to_sse()
 
 
-def _sse_tool_call(name: str, args: dict[str, Any], dialog_id: str | None) -> dict[str, str]:
+def _sse_tool_call(
+    name: str, args: dict[str, Any], dialog_id: str | None
+) -> dict[str, str]:
     return SSEEventFactory.tool_call(name=name, args=args, dialog_id=dialog_id).to_sse()
 
 
@@ -133,6 +130,7 @@ def _sse_done(dialog_id: str | None) -> dict[str, str]:
 
 class StreamAbortError(Exception):
     """Signal to abort streaming due to error."""
+
     pass
 
 
@@ -142,10 +140,20 @@ async def _process_structured_chunk(
     assistant_buffer: list[str],
 ) -> AsyncIterator[dict[str, str]]:
     """Process a single chunk and yield appropriate SSE events.
-    
+
     Raises StreamAbortError if error event is encountered.
     """
-    if isinstance(chunk, dict) and chunk.get("type") in {"file_edit", "tool_call", "error", "chat", "reasoning", "chat_start", "chat_end", "reasoning_start", "reasoning_end"}:
+    if isinstance(chunk, dict) and chunk.get("type") in {
+        "file_edit",
+        "tool_call",
+        "error",
+        "chat",
+        "reasoning",
+        "chat_start",
+        "chat_end",
+        "reasoning_start",
+        "reasoning_end",
+    }:
         if chunk["type"] == "chat":
             content = chunk.get("content", "")
             if content:
@@ -166,7 +174,11 @@ async def _process_structured_chunk(
         elif chunk["type"] == "file_edit":
             yield _sse_file_edit(file=chunk.get("file", ""), dialog_id=dialog_id)
         elif chunk["type"] == "tool_call":
-            yield _sse_tool_call(name=chunk.get("name", ""), args=chunk.get("args", {}), dialog_id=dialog_id)
+            yield _sse_tool_call(
+                name=chunk.get("name", ""),
+                args=chunk.get("args", {}),
+                dialog_id=dialog_id,
+            )
         else:
             # Emit error and signal abort
             yield _sse_error(message=chunk.get("error", ""), dialog_id=dialog_id)
@@ -199,9 +211,13 @@ async def _drain_tool_events_queue(
                     dialog_id=dialog_id,
                 )
             elif tool_event.get("type") == "file_edit":
-                sse = _sse_file_edit(file=tool_event.get("file", ""), dialog_id=dialog_id)
+                sse = _sse_file_edit(
+                    file=tool_event.get("file", ""), dialog_id=dialog_id
+                )
             elif tool_event.get("type") == "error":
-                sse = _sse_error(message=tool_event.get("error", ""), dialog_id=dialog_id)
+                sse = _sse_error(
+                    message=tool_event.get("error", ""), dialog_id=dialog_id
+                )
             else:
                 # Fallback: stream as chat event
                 sse = _sse_chat(content=str(tool_event), dialog_id=dialog_id)
@@ -304,21 +320,27 @@ async def generate_sse_events(
                                 chunk, _get_dialog_id(project_dialog), assistant_buffer
                             ):
                                 yield sse_event
-                            api_logger.stream_log("processed_chunk", None, chunk_number=chunk_count)
+                            api_logger.stream_log(
+                                "processed_chunk", None, chunk_number=chunk_count
+                            )
                         except StreamAbortError:
                             # Error event was emitted, abort streaming and finalize
                             yield _sse_done(dialog_id=_get_dialog_id(project_dialog))
                             return
 
                         # Non-blocking drain of tool events queued by tools
-                        for sse in await _drain_tool_events_queue(sse_events_queue, _get_dialog_id(project_dialog)):
+                        for sse in await _drain_tool_events_queue(
+                            sse_events_queue, _get_dialog_id(project_dialog)
+                        ):
                             yield sse
                     api_logger.info(f"Finished streaming {chunk_count} chunks")
                 else:
                     # It's a complete response
                     try:
                         async for sse_event in _process_structured_chunk(
-                            state["response"], _get_dialog_id(project_dialog), assistant_buffer
+                            state["response"],
+                            _get_dialog_id(project_dialog),
+                            assistant_buffer,
                         ):
                             yield sse_event
                     except StreamAbortError:
@@ -338,12 +360,16 @@ async def generate_sse_events(
                                 chunk_count += 1
                                 try:
                                     async for sse_event in _process_structured_chunk(
-                                        chunk, _get_dialog_id(project_dialog), assistant_buffer
+                                        chunk,
+                                        _get_dialog_id(project_dialog),
+                                        assistant_buffer,
                                     ):
                                         yield sse_event
                                 except StreamAbortError:
                                     # Error event was emitted, abort streaming and finalize
-                                    yield _sse_done(dialog_id=_get_dialog_id(project_dialog))
+                                    yield _sse_done(
+                                        dialog_id=_get_dialog_id(project_dialog)
+                                    )
                                     return
                             api_logger.info(
                                 f"Finished streaming {chunk_count} chunks from {key}"
@@ -357,13 +383,19 @@ async def generate_sse_events(
                                 async for chunk in actual_response:
                                     chunk_count += 1
                                     try:
-                                        async for sse_event in _process_structured_chunk(
-                                            chunk, _get_dialog_id(project_dialog), assistant_buffer
+                                        async for (
+                                            sse_event
+                                        ) in _process_structured_chunk(
+                                            chunk,
+                                            _get_dialog_id(project_dialog),
+                                            assistant_buffer,
                                         ):
                                             yield sse_event
                                     except StreamAbortError:
                                         # Error event was emitted, abort streaming and finalize
-                                        yield _sse_done(dialog_id=_get_dialog_id(project_dialog))
+                                        yield _sse_done(
+                                            dialog_id=_get_dialog_id(project_dialog)
+                                        )
                                         return
                                 api_logger.info(
                                     f"Finished streaming {chunk_count} chunks from {key}"
@@ -372,7 +404,9 @@ async def generate_sse_events(
                                 # Non-streaming response
                                 try:
                                     async for sse_event in _process_structured_chunk(
-                                        actual_response, _get_dialog_id(project_dialog), assistant_buffer
+                                        actual_response,
+                                        _get_dialog_id(project_dialog),
+                                        assistant_buffer,
                                     ):
                                         yield sse_event
                                 except StreamAbortError:

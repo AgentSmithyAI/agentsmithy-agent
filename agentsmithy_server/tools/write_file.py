@@ -24,8 +24,10 @@ class WriteFileTool(BaseTool):
         file_path.write_text(kwargs["content"], encoding="utf-8")
         # Emit file_edit event in simplified SSE protocol
         if self._sse_callback is not None:
-            await self.emit_event({
-                "type": "file_edit",
-                "file": str(file_path),
-            })
+            await self.emit_event(
+                {
+                    "type": "file_edit",
+                    "file": str(file_path),
+                }
+            )
         return {"type": "write_file_result", "path": str(file_path)}

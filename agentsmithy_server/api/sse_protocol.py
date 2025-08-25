@@ -120,7 +120,9 @@ class EventFactory:
         return ReasoningEndEvent(dialog_id=dialog_id)
 
     @staticmethod
-    def tool_call(name: str, args: dict[str, Any], dialog_id: str | None = None) -> ToolCallEvent:
+    def tool_call(
+        name: str, args: dict[str, Any], dialog_id: str | None = None
+    ) -> ToolCallEvent:
         return ToolCallEvent(name=name, args=args, dialog_id=dialog_id)
 
     @staticmethod
