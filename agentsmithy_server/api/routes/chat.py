@@ -18,8 +18,8 @@ router = APIRouter()
 async def chat(
     request: ChatRequest,
     raw_request: Request,
-    project: Project = Depends(get_project),
-    chat_service: ChatService = Depends(get_chat_service),
+    project: Project = Depends(get_project),  # noqa: B008
+    chat_service: ChatService = Depends(get_chat_service),  # noqa: B008
 ):
     start_time = time.time()
     client_host = raw_request.client.host if raw_request.client else "unknown"

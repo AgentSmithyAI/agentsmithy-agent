@@ -20,7 +20,7 @@ async def list_dialogs(
     order: str = "desc",
     limit: int | None = 50,
     offset: int = 0,
-    project: Project = Depends(get_project),
+    project: Project = Depends(get_project),  # noqa: B008
 ):
     descending = order.lower() != "asc"
     items = project.list_dialogs(
@@ -37,7 +37,7 @@ async def list_dialogs(
 
 @router.post("/api/dialogs")
 async def create_dialog(
-    payload: DialogCreateRequest, project: Project = Depends(get_project)
+    payload: DialogCreateRequest, project: Project = Depends(get_project)  # noqa: B008
 ):
     dialog_id = project.create_dialog(
         title=payload.title, set_current=payload.set_current
@@ -46,7 +46,7 @@ async def create_dialog(
 
 
 @router.get("/api/dialogs/current")
-async def get_current_dialog(project: Project = Depends(get_project)):
+async def get_current_dialog(project: Project = Depends(get_project)):  # noqa: B008
     cid = project.get_current_dialog_id()
     if not cid:
         return {"id": None}
@@ -54,13 +54,17 @@ async def get_current_dialog(project: Project = Depends(get_project)):
 
 
 @router.patch("/api/dialogs/current")
-async def set_current_dialog(id: str, project: Project = Depends(get_project)):
+async def set_current_dialog(
+    id: str, project: Project = Depends(get_project)  # noqa: B008
+):
     project.set_current_dialog_id(id)
     return {"ok": True}
 
 
 @router.get("/api/dialogs/{dialog_id}")
-async def get_dialog(dialog_id: str, project: Project = Depends(get_project)):
+async def get_dialog(
+    dialog_id: str, project: Project = Depends(get_project)  # noqa: B008
+):
     meta = project.get_dialog_meta(dialog_id)
     if not meta:
         raise HTTPException(status_code=404, detail="Dialog not found")
@@ -69,7 +73,9 @@ async def get_dialog(dialog_id: str, project: Project = Depends(get_project)):
 
 @router.patch("/api/dialogs/{dialog_id}")
 async def patch_dialog(
-    dialog_id: str, payload: DialogPatchRequest, project: Project = Depends(get_project)
+    dialog_id: str,
+    payload: DialogPatchRequest,
+    project: Project = Depends(get_project),  # noqa: B008
 ):
     fields: dict[str, Any] = {}
     if payload.title is not None:
@@ -81,6 +87,8 @@ async def patch_dialog(
 
 
 @router.delete("/api/dialogs/{dialog_id}")
-async def delete_dialog(dialog_id: str, project: Project = Depends(get_project)):
+async def delete_dialog(
+    dialog_id: str, project: Project = Depends(get_project)  # noqa: B008
+):
     project.delete_dialog(dialog_id)
     return {"ok": True}
