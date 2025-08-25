@@ -54,15 +54,29 @@ class VersioningTracker:
 
     # ---- repo management ----
     def ensure_repo(self) -> Repo:
-        if self.repo_path.exists():
-            repo = Repo(str(self.repo_path))
+        # Use a bare shadow repository at shadow_root. Avoid re-initializing if it already exists.
+        objects_dir = self.shadow_root / "objects"
+        if objects_dir.exists():
+            repo = Repo(str(self.shadow_root))
         else:
-            repo = porcelain.init(path=str(self.shadow_root), bare=True)
+            self.shadow_root.mkdir(parents=True, exist_ok=True)
+            try:
+                repo = porcelain.init(path=str(self.shadow_root), bare=True)
+            except FileExistsError:
+                # Partial init or concurrent init; open existing
+                repo = Repo(str(self.shadow_root))
         # Set core.worktree so porcelain works over project files
-        with repo.get_config() as cfg:
+        cfg = repo.get_config()
+        try:
             cfg.set((b"core",), b"worktree", bytes(str(self.project_root), "utf-8"))
             cfg.set((b"user",), b"name", b"AgentSmithy Versioning")
             cfg.set((b"user",), b"email", b"versioning@agentsmithy.local")
+            # Persist config if supported
+            if hasattr(cfg, "write_to_path"):
+                cfg.write_to_path()
+        except Exception:
+            # Best-effort config; continue even if setting fails
+            pass
         # Ensure initial commit exists
         try:
             _ = repo.head()
