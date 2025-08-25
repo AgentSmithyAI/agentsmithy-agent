@@ -1,0 +1,86 @@
+from __future__ import annotations
+
+from typing import Any
+
+from fastapi import APIRouter, Depends, HTTPException
+
+from agentsmithy_server.api.deps import get_project
+from agentsmithy_server.api.schemas import (
+    DialogCreateRequest,
+    DialogPatchRequest,
+)
+from agentsmithy_server.core.project import Project
+
+router = APIRouter()
+
+
+@router.get("/api/dialogs")
+async def list_dialogs(
+    sort: str = "last_message_at",
+    order: str = "desc",
+    limit: int | None = 50,
+    offset: int = 0,
+    project: Project = Depends(get_project),
+):
+    descending = order.lower() != "asc"
+    items = project.list_dialogs(
+        sort_by=sort,
+        descending=descending,
+        limit=limit,
+        offset=offset,
+    )
+    return {
+        "current_dialog_id": project.get_current_dialog_id(),
+        "dialogs": items,
+    }
+
+
+@router.post("/api/dialogs")
+async def create_dialog(
+    payload: DialogCreateRequest, project: Project = Depends(get_project)
+):
+    dialog_id = project.create_dialog(
+        title=payload.title, set_current=payload.set_current
+    )
+    return {"id": dialog_id}
+
+
+@router.get("/api/dialogs/current")
+async def get_current_dialog(project: Project = Depends(get_project)):
+    cid = project.get_current_dialog_id()
+    if not cid:
+        return {"id": None}
+    return {"id": cid, "meta": project.get_dialog_meta(cid)}
+
+
+@router.patch("/api/dialogs/current")
+async def set_current_dialog(id: str, project: Project = Depends(get_project)):
+    project.set_current_dialog_id(id)
+    return {"ok": True}
+
+
+@router.get("/api/dialogs/{dialog_id}")
+async def get_dialog(dialog_id: str, project: Project = Depends(get_project)):
+    meta = project.get_dialog_meta(dialog_id)
+    if not meta:
+        raise HTTPException(status_code=404, detail="Dialog not found")
+    return meta
+
+
+@router.patch("/api/dialogs/{dialog_id}")
+async def patch_dialog(
+    dialog_id: str, payload: DialogPatchRequest, project: Project = Depends(get_project)
+):
+    fields: dict[str, Any] = {}
+    if payload.title is not None:
+        fields["title"] = payload.title
+    if not fields:
+        return {"ok": True}
+    project.upsert_dialog_meta(dialog_id, **fields)
+    return {"ok": True}
+
+
+@router.delete("/api/dialogs/{dialog_id}")
+async def delete_dialog(dialog_id: str, project: Project = Depends(get_project)):
+    project.delete_dialog(dialog_id)
+    return {"ok": True}
