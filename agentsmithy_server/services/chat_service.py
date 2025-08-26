@@ -188,6 +188,11 @@ class ChatService:
                             ):
                                 yield sse
                         api_logger.info(f"Finished streaming {chunk_count} chunks")
+                        # Final drain to ensure tool events (e.g., file_edit) are flushed
+                        for sse in await self._drain_tool_events_queue(
+                            sse_events_queue, dialog_id
+                        ):
+                            yield sse
                     else:
                         try:
                             async for sse_event in self._process_structured_chunk(
