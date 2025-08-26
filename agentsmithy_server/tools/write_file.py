@@ -35,13 +35,18 @@ class WriteFileTool(BaseTool):  # type: ignore[override]
             raise
         else:
             tracker.finalize_edit()
-            tracker.create_checkpoint(f"write_to_file: {str(file_path)}")
+            checkpoint = tracker.create_checkpoint(f"write_to_file: {str(file_path)}")
         # Emit file_edit event in simplified SSE protocol
         if self._sse_callback is not None:
             await self.emit_event(
                 {
                     "type": "file_edit",
                     "file": str(file_path),
+                    "checkpoint": getattr(checkpoint, "commit_id", None),
                 }
             )
-        return {"type": "write_file_result", "path": str(file_path)}
+        return {
+            "type": "write_file_result", 
+            "path": str(file_path),
+            "checkpoint": getattr(checkpoint, "commit_id", None),
+        }

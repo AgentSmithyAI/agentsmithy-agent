@@ -41,17 +41,19 @@ class DeleteFileTool(BaseTool):  # type: ignore[override]
             raise
         else:
             tracker.finalize_edit()
-            tracker.create_checkpoint(f"delete_file: {str(file_path)}")
+            checkpoint = tracker.create_checkpoint(f"delete_file: {str(file_path)}")
 
         if self._sse_callback is not None:
             await self.emit_event(
                 {
                     "type": "file_edit",
                     "file": str(file_path),
+                    "checkpoint": getattr(checkpoint, "commit_id", None),
                 }
             )
 
         return {
             "type": "delete_file_result",
             "path": str(file_path),
+            "checkpoint": getattr(checkpoint, "commit_id", None),
         }

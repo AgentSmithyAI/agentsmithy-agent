@@ -104,5 +104,7 @@ class PatchFileTool(BaseTool):  # type: ignore[override]
         return {
             "type": "patch_result",
             "file": str(file_path),
+            "diff": diff_str,
+            "checkpoint": getattr(checkpoint, "commit_id", None),
             "applied_changes": [c.__dict__ for c in parsed_changes],
         }
