@@ -28,6 +28,7 @@ class UniversalAgent(BaseAgent):
         """Set SSE callback for streaming updates."""
         self._sse_callback = callback
         self.tool_manager.set_sse_callback(callback)
+        self.tool_executor.set_sse_callback(callback)
 
     def get_default_system_prompt(self) -> str:
         return DEFAULT_SYSTEM_PROMPT
