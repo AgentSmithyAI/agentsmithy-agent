@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator
-import asyncio
 from typing import Any
 
 from agentsmithy_server.api.sse_protocol import EventFactory as SSEEventFactory
@@ -105,7 +104,7 @@ class ChatService:
         while True:
             try:
                 tool_event = await asyncio.wait_for(queue.get(), timeout=0.05)
-            except (asyncio.TimeoutError, TimeoutError):
+            except TimeoutError:
                 break
 
             if tool_event.get("type") == "tool_call":
@@ -133,8 +132,6 @@ class ChatService:
             sse_events.append(sse)
 
         return sse_events
-
-
 
     async def stream_chat(
         self,

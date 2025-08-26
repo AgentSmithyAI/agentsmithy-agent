@@ -44,14 +44,20 @@ class VersioningTracker:
     def __init__(self, project_root: str, dialog_id: str | None = None) -> None:
         self.project_root = Path(project_root).resolve()
         self.dialog_id = dialog_id
-        
+
         # Use dialog-specific directory if dialog_id provided
         if dialog_id:
-            self.shadow_root = self.project_root / ".agentsmithy" / "dialogs" / dialog_id / "checkpoints"
+            self.shadow_root = (
+                self.project_root
+                / ".agentsmithy"
+                / "dialogs"
+                / dialog_id
+                / "checkpoints"
+            )
         else:
             # Fallback for compatibility
             self.shadow_root = self.project_root / ".agentsmithy" / "checkpoints"
-            
+
         self.shadow_root.mkdir(parents=True, exist_ok=True)
         self._tmp_dir: Path | None = None
         self._preedit_snapshots: dict[Path, bytes] = {}
@@ -70,7 +76,7 @@ class VersioningTracker:
             except FileExistsError:
                 # Partial init or concurrent init; open existing
                 repo = Repo(str(self.shadow_root))
-        
+
         # Configure git
         cfg = repo.get_config()
         try:
@@ -82,7 +88,7 @@ class VersioningTracker:
         except Exception:
             # Best-effort config; continue even if setting fails
             pass
-        
+
         # Ensure initial commit exists
         try:
             _ = repo.head()
@@ -92,7 +98,7 @@ class VersioningTracker:
                 porcelain.commit(repo, b"Initial checkpoint", allow_empty=True)
             except Exception:
                 pass
-        
+
         self._write_excludes(repo)
         return repo
 
@@ -142,14 +148,14 @@ class VersioningTracker:
     # ---- checkpoints ----
     def create_checkpoint(self, message: str) -> CheckpointInfo:
         repo = self.ensure_repo()
-        
+
         # Since we have a non-bare repo, we need to add files from the project directory
         # We'll create blob objects directly and build the tree
-        from dulwich.objects import Blob, Tree, Commit, parse_timezone
-        from dulwich.index import build_index_from_tree, write_index
-        import time
         import os
-        
+        import time
+
+        from dulwich.objects import Blob, Commit, Tree, parse_timezone
+
         # Get current tree (if exists)
         try:
             parent_commit = repo[repo.head()]
@@ -157,50 +163,55 @@ class VersioningTracker:
         except:
             parent_commit = None
             parent_tree = None
-        
+
         # Create new tree by scanning project directory
         tree = Tree()
-        
+
         # Walk through project directory and add files
         for root, dirs, files in os.walk(self.project_root):
             # Skip hidden directories and common build artifacts
-            dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ['node_modules', '__pycache__', 'venv', '.venv']]
-            
+            dirs[:] = [
+                d
+                for d in dirs
+                if not d.startswith(".")
+                and d not in ["node_modules", "__pycache__", "venv", ".venv"]
+            ]
+
             for filename in files:
                 # Skip hidden files and common artifacts
-                if filename.startswith('.') or filename.endswith('.pyc'):
+                if filename.startswith(".") or filename.endswith(".pyc"):
                     continue
-                    
+
                 file_path = Path(root) / filename
                 try:
                     # Read file content
                     content = file_path.read_bytes()
-                    
+
                     # Create blob
                     blob = Blob.from_string(content)
                     repo.object_store.add_object(blob)
-                    
+
                     # Add to tree with relative path
                     rel_path = file_path.relative_to(self.project_root)
-                    tree_path = str(rel_path).replace('\\', '/').encode('utf-8')
+                    tree_path = str(rel_path).replace("\\", "/").encode("utf-8")
                     tree.add(tree_path, 0o100644, blob.id)
-                    
+
                 except Exception:
                     # Skip files we can't read
                     continue
-        
+
         # Only create commit if tree has entries
         if len(tree) == 0:
             # No files to track, return current HEAD
             try:
-                head = repo.head().decode('utf-8')
+                head = repo.head().decode("utf-8")
             except:
                 head = ""
             return CheckpointInfo(commit_id=head, message=message)
-        
+
         # Add tree to repo
         repo.object_store.add_object(tree)
-        
+
         # Create commit
         commit = Commit()
         commit.tree = tree.id
@@ -208,19 +219,21 @@ class VersioningTracker:
             commit.parents = [parent_commit.id]
         else:
             commit.parents = []
-        
-        commit.author = commit.committer = b"AgentSmithy Versioning <versioning@agentsmithy.local>"
+
+        commit.author = commit.committer = (
+            b"AgentSmithy Versioning <versioning@agentsmithy.local>"
+        )
         commit.commit_time = commit.author_time = int(time.time())
-        commit.commit_timezone = commit.author_timezone = parse_timezone(b'+0000')[0]
-        commit.message = message.encode('utf-8')
-        
+        commit.commit_timezone = commit.author_timezone = parse_timezone(b"+0000")[0]
+        commit.message = message.encode("utf-8")
+
         # Add commit to repo
         repo.object_store.add_object(commit)
-        
+
         # Update HEAD
-        repo.refs[b'HEAD'] = commit.id
-        
-        commit_id = commit.id.decode('utf-8')
+        repo.refs[b"HEAD"] = commit.id
+
+        commit_id = commit.id.decode("utf-8")
         self._record_metadata(commit_id, message)
         return CheckpointInfo(commit_id=commit_id, message=message)
 

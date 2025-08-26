@@ -171,13 +171,13 @@ YOU MUST USE THE TOOL OR YOUR RESPONSE IS INVALID!
             stream=stream,
             context_keys=list((context or {}).keys()),
         )
-        
+
         # Extract dialog_id from context and pass to tools
         dialog_id = None
         if context and context.get("dialog"):
             dialog_id = context["dialog"].get("id")
             self.tool_manager.set_dialog_id(dialog_id)
-        
+
         # Build context
         full_context = await self.context_builder.build_context(query, context)
 

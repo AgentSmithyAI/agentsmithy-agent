@@ -7,9 +7,9 @@ from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field
-from agentsmithy_server.utils.logger import agent_logger
 
 from agentsmithy_server.services.versioning import VersioningTracker
+from agentsmithy_server.utils.logger import agent_logger
 
 from .base_tool import BaseTool
 

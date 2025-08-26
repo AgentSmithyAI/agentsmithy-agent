@@ -46,7 +46,7 @@ class WriteFileTool(BaseTool):  # type: ignore[override]
                 }
             )
         return {
-            "type": "write_file_result", 
+            "type": "write_file_result",
             "path": str(file_path),
             "checkpoint": getattr(checkpoint, "commit_id", None),
         }

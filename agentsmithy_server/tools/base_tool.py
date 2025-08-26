@@ -24,7 +24,7 @@ class BaseTool(LCBaseTool, ABC):  # type: ignore[override]
 
     def set_sse_callback(self, callback: SseCallback | None) -> None:
         self._sse_callback = callback
-        
+
     def set_dialog_id(self, dialog_id: str | None) -> None:
         self._dialog_id = dialog_id
 

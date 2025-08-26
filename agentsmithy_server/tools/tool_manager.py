@@ -23,7 +23,7 @@ class ToolManager:
         self._sse_callback = callback
         for tool in self._tools.values():
             tool.set_sse_callback(callback)
-            
+
     def set_dialog_id(self, dialog_id: str | None) -> None:
         """Set dialog_id for all registered tools."""
         for tool in self._tools.values():
