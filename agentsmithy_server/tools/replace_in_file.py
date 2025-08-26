@@ -4,7 +4,7 @@ import difflib
 import os
 import re
 from pathlib import Path
-from typing import Any, Optional, Tuple, List
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -86,7 +86,7 @@ class ReplaceInFileTool(BaseTool):  # type: ignore[override]
                 preview = "\n".join(preview_lines)
                 if len(preview_lines) < len(original_text.splitlines()):
                     preview += "\n... (file continues)"
-                
+
                 enhanced_error = (
                     f"{str(e)}\n\n"
                     f"File preview (first 20 lines):\n"
@@ -184,63 +184,65 @@ def _looks_like_marker_style(diff_text: str) -> bool:
 
 def _block_anchor_fallback(
     original: str, search: str, start_index: int
-) -> Optional[Tuple[int, int]]:
+) -> tuple[int, int] | None:
     """
     Block anchor matching strategy from Cline.
     For blocks of 3+ lines, match using first and last lines as anchors.
     """
     orig_lines = original.split("\n")
     search_lines = search.split("\n")
-    
+
     # Remove trailing empty line if exists
     if search_lines and search_lines[-1] == "":
         search_lines.pop()
-    
+
     # Only use for blocks of 3+ lines
     if len(search_lines) < 3:
         return None
-    
+
     first_line_search = search_lines[0].strip()
     last_line_search = search_lines[-1].strip()
     search_block_size = len(search_lines)
-    
+
     # Find starting line from start_index
     current = 0
     start_line = 0
     while current < start_index and start_line < len(orig_lines):
         current += len(orig_lines[start_line]) + 1
         start_line += 1
-    
+
     # Look for matching start and end anchors
     for i in range(start_line, len(orig_lines) - search_block_size + 1):
         # Check if first line matches
         if orig_lines[i].strip() != first_line_search:
             continue
-        
+
         # Check if last line matches at expected position
         if orig_lines[i + search_block_size - 1].strip() != last_line_search:
             continue
-        
+
         # Calculate exact character positions
         start_char = sum(len(line) + 1 for line in orig_lines[:i])
         # Ensure we don't include the final newline if it doesn't exist
         if i + search_block_size >= len(orig_lines):
             # Last block - no trailing newline
-            end_char = start_char + sum(len(line) for line in orig_lines[i:i + search_block_size])
+            end_char = start_char + sum(
+                len(line) for line in orig_lines[i : i + search_block_size]
+            )
             end_char += search_block_size - 1  # Add newlines between lines
         else:
             end_char = start_char + sum(
-                len(line) + 1 for line in orig_lines[i:i + search_block_size]
+                len(line) + 1 for line in orig_lines[i : i + search_block_size]
             )
-        
+
         return (start_char, end_char)
-    
+
     return None
 
 
 def _trimmed_line_fallback(
     original: str, search: str, start_index: int
-) -> Optional[Tuple[int, int]]:
+) -> tuple[int, int] | None:
     orig_lines = original.split("\n")
     search_lines = search.split("\n")
     if search_lines and search_lines[-1] == "":
@@ -274,7 +276,7 @@ def _try_fix_malformed_blocks(diff_text: str) -> str:
     """Attempt to fix common malformed block issues."""
     lines = diff_text.splitlines()
     fixed_lines = []
-    
+
     for i, line in enumerate(lines):
         # Fix common marker variations
         if re.match(r"^-{3,6}\s*SEARCH", line):
@@ -285,7 +287,7 @@ def _try_fix_malformed_blocks(diff_text: str) -> str:
             fixed_lines.append("+++++++ REPLACE")
         else:
             fixed_lines.append(line)
-    
+
     return "\n".join(fixed_lines)
 
 
@@ -295,11 +297,11 @@ def _apply_marker_style_blocks(diff_text: str, file_path: Path) -> str:
     if fixed_diff != diff_text:
         agent_logger.info("Fixed malformed diff blocks")
         diff_text = fixed_diff
-    
+
     original = file_path.read_text(encoding="utf-8")
-    
+
     # Track all replacements for out-of-order editing support
-    replacements: List[dict] = []
+    replacements: list[dict] = []
 
     search_start_re = re.compile(r"^[-<]{3,}\s*SEARCH>?$")
     middle_re = re.compile(r"^[=]{3,}$")
@@ -307,26 +309,28 @@ def _apply_marker_style_blocks(diff_text: str, file_path: Path) -> str:
 
     lines = diff_text.splitlines()
     state = "idle"
-    search_buf: List[str] = []
-    replace_buf: List[str] = []
+    search_buf: list[str] = []
+    replace_buf: list[str] = []
     pending_search: str = ""  # For alternative format
 
     def apply_one(search_block: str, replace_block: str) -> None:
         # Empty SEARCH => full file replacement
         if search_block == "":
-            replacements.append({
-                "start": 0,
-                "end": len(original),
-                "content": replace_block,
-                "method": "full_replace"
-            })
+            replacements.append(
+                {
+                    "start": 0,
+                    "end": len(original),
+                    "content": replace_block,
+                    "method": "full_replace",
+                }
+            )
             return
 
         # Try multiple matching strategies in order
         match_result = None
         method_used = None
         search_from = 0  # Search from beginning to support out-of-order
-        
+
         # 1. Exact match
         idx = original.find(search_block, search_from)
         if idx != -1:
@@ -339,34 +343,40 @@ def _apply_marker_style_blocks(diff_text: str, file_path: Path) -> str:
                 method_used = "line_trimmed"
             else:
                 # 3. Block anchor fallback
-                match_result = _block_anchor_fallback(original, search_block, search_from)
+                match_result = _block_anchor_fallback(
+                    original, search_block, search_from
+                )
                 if match_result:
                     method_used = "block_anchor"
 
         if not match_result:
             # Extract a sample of what we were looking for
-            search_preview = search_block[:100] + "..." if len(search_block) > 100 else search_block
+            search_preview = (
+                search_block[:100] + "..." if len(search_block) > 100 else search_block
+            )
             raise ValueError(
                 f"The SEARCH block does not match anything in the file:\n"
                 f"```\n{search_preview}\n```\n"
                 f"Tried: exact match, line-trimmed match, block anchor match"
             )
-        
+
         start, end = match_result
         agent_logger.debug(
             "Match found",
             method=method_used,
             start=start,
             end=end,
-            search_len=len(search_block)
+            search_len=len(search_block),
         )
-        
-        replacements.append({
-            "start": start,
-            "end": end,
-            "content": replace_block,
-            "method": method_used
-        })
+
+        replacements.append(
+            {
+                "start": start,
+                "end": end,
+                "content": replace_block,
+                "method": method_used,
+            }
+        )
 
     for line in lines:
         if search_start_re.match(line):
@@ -421,30 +431,30 @@ def _apply_marker_style_blocks(diff_text: str, file_path: Path) -> str:
 
     # Apply all replacements in order
     replacements.sort(key=lambda r: r["start"])
-    
+
     result = ""
     current_pos = 0
-    
+
     for replacement in replacements:
         # Check for overlapping replacements
         if replacement["start"] < current_pos:
             agent_logger.warning(
                 "Overlapping replacement detected",
                 start=replacement["start"],
-                current_pos=current_pos
+                current_pos=current_pos,
             )
             continue
-        
+
         # Add original content up to this replacement
-        result += original[current_pos:replacement["start"]]
+        result += original[current_pos : replacement["start"]]
         # Add the replacement content
         result += replacement["content"]
         # Move position to after the replaced section
         current_pos = replacement["end"]
-    
+
     # Add any remaining original content
     result += original[current_pos:]
-    
+
     return result
 
 
