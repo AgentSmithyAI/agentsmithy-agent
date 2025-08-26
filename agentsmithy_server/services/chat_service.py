@@ -95,35 +95,42 @@ class ChatService:
     async def _drain_tool_events_queue(
         self, queue: asyncio.Queue[dict[str, Any]], dialog_id: str | None
     ) -> list[dict[str, str]]:
+        """Drain tool events reliably, tolerating race with queue.empty().
+
+        Uses a small timeout loop to catch events that arrive just after the check.
+        """
         sse_events: list[dict[str, str]] = []
-        try:
-            while not queue.empty():
-                tool_event = await asyncio.wait_for(queue.get(), timeout=0.01)
-                if tool_event.get("type") == "tool_call":
-                    sse = SSEEventFactory.tool_call(
-                        name=tool_event.get("name", ""),
-                        args=tool_event.get("args", {}),
-                        dialog_id=dialog_id,
-                    ).to_sse()
-                elif tool_event.get("type") == "file_edit":
-                    sse = SSEEventFactory.file_edit(
-                        file=tool_event.get("file", ""),
-                        diff=tool_event.get("diff"),
-                        checkpoint=tool_event.get("checkpoint"),
-                        dialog_id=dialog_id,
-                    ).to_sse()
-                elif tool_event.get("type") == "error":
-                    sse = SSEEventFactory.error(
-                        message=tool_event.get("error", ""), dialog_id=dialog_id
-                    ).to_sse()
-                else:
-                    sse = SSEEventFactory.chat(
-                        content=str(tool_event), dialog_id=dialog_id
-                    ).to_sse()
-                api_logger.stream_log("tool_event", None)
-                sse_events.append(sse)
-        except TimeoutError:
-            pass
+        # Attempt to pull multiple events with short timeouts
+        while True:
+            try:
+                tool_event = await asyncio.wait_for(queue.get(), timeout=0.05)
+            except TimeoutError:
+                break
+
+            if tool_event.get("type") == "tool_call":
+                sse = SSEEventFactory.tool_call(
+                    name=tool_event.get("name", ""),
+                    args=tool_event.get("args", {}),
+                    dialog_id=dialog_id,
+                ).to_sse()
+            elif tool_event.get("type") == "file_edit":
+                sse = SSEEventFactory.file_edit(
+                    file=tool_event.get("file", ""),
+                    diff=tool_event.get("diff"),
+                    checkpoint=tool_event.get("checkpoint"),
+                    dialog_id=dialog_id,
+                ).to_sse()
+            elif tool_event.get("type") == "error":
+                sse = SSEEventFactory.error(
+                    message=tool_event.get("error", ""), dialog_id=dialog_id
+                ).to_sse()
+            else:
+                sse = SSEEventFactory.chat(
+                    content=str(tool_event), dialog_id=dialog_id
+                ).to_sse()
+            api_logger.stream_log("tool_event", None)
+            sse_events.append(sse)
+
         return sse_events
 
     async def stream_chat(

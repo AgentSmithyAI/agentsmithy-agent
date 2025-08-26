@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field
+from agentsmithy_server.utils.logger import agent_logger
 
 from agentsmithy_server.services.versioning import VersioningTracker
 
@@ -55,6 +56,7 @@ class ReplaceInFileTool(BaseTool):  # type: ignore[override]
         tracker.start_edit([str(file_path)])
 
         try:
+            agent_logger.info("replace_in_file start", path=str(file_path))
             original_text = (
                 file_path.read_text(encoding="utf-8") if file_path.exists() else ""
             )
@@ -82,6 +84,7 @@ class ReplaceInFileTool(BaseTool):  # type: ignore[override]
             tracker.finalize_edit()
             checkpoint = tracker.create_checkpoint(f"replace_in_file: {str(file_path)}")
 
+        diff_str: str | None = None
         if self._sse_callback is not None:
             # Build unified diff between original and new content
             unified = difflib.unified_diff(
@@ -92,6 +95,12 @@ class ReplaceInFileTool(BaseTool):  # type: ignore[override]
                 lineterm="",
             )
             diff_str = "\n".join(unified)
+            agent_logger.info(
+                "replace_in_file emit_event",
+                path=str(file_path),
+                has_callback=self._sse_callback is not None,
+                diff_len=len(diff_str),
+            )
             await self.emit_event(
                 {
                     "type": "file_edit",
@@ -101,7 +110,12 @@ class ReplaceInFileTool(BaseTool):  # type: ignore[override]
                 }
             )
 
-        return {"type": "replace_file_result", "path": str(file_path)}
+        return {
+            "type": "replace_file_result",
+            "path": str(file_path),
+            "diff": diff_str,
+            "checkpoint": getattr(checkpoint, "commit_id", None),
+        }
 
 
 def _apply_search_replace_blocks(diff_text: str, file_path: Path) -> str:
