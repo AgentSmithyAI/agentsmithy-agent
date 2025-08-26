@@ -93,7 +93,7 @@ class ReplaceInFileTool(BaseTool):  # type: ignore[override]
                     f"```\n{preview}\n```\n\n"
                     f"Hint: Try using smaller, more specific SEARCH blocks or check for whitespace differences."
                 )
-                raise ValueError(enhanced_error)
+                raise ValueError(enhanced_error) from e
             raise
         else:
             tracker.finalize_edit()
@@ -277,7 +277,7 @@ def _try_fix_malformed_blocks(diff_text: str) -> str:
     lines = diff_text.splitlines()
     fixed_lines = []
 
-    for i, line in enumerate(lines):
+    for _i, line in enumerate(lines):
         # Fix common marker variations
         if re.match(r"^-{3,6}\s*SEARCH", line):
             fixed_lines.append("------- SEARCH")
