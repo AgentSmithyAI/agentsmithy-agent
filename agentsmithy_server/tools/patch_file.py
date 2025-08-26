@@ -38,7 +38,7 @@ class PatchFileTool(BaseTool):  # type: ignore[override]
         file_path = Path(kwargs["file_path"]).resolve()
         changes: list[dict[str, Any]] = kwargs.get("changes", [])
 
-        tracker = VersioningTracker(os.getcwd())
+        tracker = VersioningTracker(os.getcwd(), dialog_id=self._dialog_id)
         tracker.ensure_repo()
         tracker.start_edit([str(file_path)])
 

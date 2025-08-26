@@ -35,38 +35,45 @@ class CheckpointInfo:
 class VersioningTracker:
     """Shadow-repo versioning isolated from project's own Git.
 
-    - Shadow repo path: {project_root}/.agentsmithy/checkpoints/.git
-    - Worktree points to real project directory
+    - Each dialog has its own repo: {project_root}/.agentsmithy/dialogs/{dialog_id}/checkpoints/
+    - Uses non-bare repository to track project files
     - Only used to create checkpoints and restore files
     - Does not touch user's main .git in the project
     """
 
-    def __init__(self, project_root: str) -> None:
+    def __init__(self, project_root: str, dialog_id: str | None = None) -> None:
         self.project_root = Path(project_root).resolve()
-        # Use project's .agentsmithy directory for checkpoints
-        self.shadow_root = self.project_root / ".agentsmithy" / "checkpoints"
+        self.dialog_id = dialog_id
+        
+        # Use dialog-specific directory if dialog_id provided
+        if dialog_id:
+            self.shadow_root = self.project_root / ".agentsmithy" / "dialogs" / dialog_id / "checkpoints"
+        else:
+            # Fallback for compatibility
+            self.shadow_root = self.project_root / ".agentsmithy" / "checkpoints"
+            
         self.shadow_root.mkdir(parents=True, exist_ok=True)
-        self.repo_path = self.shadow_root / ".git"
         self._tmp_dir: Path | None = None
         self._preedit_snapshots: dict[Path, bytes] = {}
 
     # ---- repo management ----
     def ensure_repo(self) -> Repo:
-        # Use a bare shadow repository at shadow_root. Avoid re-initializing if it already exists.
-        objects_dir = self.shadow_root / "objects"
-        if objects_dir.exists():
+        # Use a non-bare repository that can track files in project directory
+        git_dir = self.shadow_root / ".git"
+        if git_dir.exists():
             repo = Repo(str(self.shadow_root))
         else:
             self.shadow_root.mkdir(parents=True, exist_ok=True)
             try:
-                repo = porcelain.init(path=str(self.shadow_root), bare=True)
+                # Create non-bare repo
+                repo = porcelain.init(path=str(self.shadow_root), bare=False)
             except FileExistsError:
                 # Partial init or concurrent init; open existing
                 repo = Repo(str(self.shadow_root))
-        # Set core.worktree so porcelain works over project files
+        
+        # Configure git
         cfg = repo.get_config()
         try:
-            cfg.set((b"core",), b"worktree", bytes(str(self.project_root), "utf-8"))
             cfg.set((b"user",), b"name", b"AgentSmithy Versioning")
             cfg.set((b"user",), b"email", b"versioning@agentsmithy.local")
             # Persist config if supported
@@ -75,14 +82,17 @@ class VersioningTracker:
         except Exception:
             # Best-effort config; continue even if setting fails
             pass
+        
         # Ensure initial commit exists
         try:
             _ = repo.head()
         except Exception:
             try:
-                porcelain.commit(repo, b"initial")
+                # Create empty initial commit
+                porcelain.commit(repo, b"Initial checkpoint", allow_empty=True)
             except Exception:
                 pass
+        
         self._write_excludes(repo)
         return repo
 
@@ -132,26 +142,87 @@ class VersioningTracker:
     # ---- checkpoints ----
     def create_checkpoint(self, message: str) -> CheckpointInfo:
         repo = self.ensure_repo()
+        
+        # Since we have a non-bare repo, we need to add files from the project directory
+        # We'll create blob objects directly and build the tree
+        from dulwich.objects import Blob, Tree, Commit, parse_timezone
+        from dulwich.index import build_index_from_tree, write_index
+        import time
+        import os
+        
+        # Get current tree (if exists)
         try:
-            porcelain.add(repo, paths=["."])
-        except Exception:
-            pass
-        try:
-            commit_bytes = porcelain.commit(repo, bytes(message, "utf-8"))
-            commit_id = (
-                commit_bytes.decode()
-                if isinstance(commit_bytes, (bytes | bytearray))
-                else str(commit_bytes)
-            )
-            self._record_metadata(commit_id, message)
-            return CheckpointInfo(commit_id=commit_id, message=message)
-        except Exception:
-            # If commit fails (no changes), return last HEAD if available
+            parent_commit = repo[repo.head()]
+            parent_tree = repo[parent_commit.tree]
+        except:
+            parent_commit = None
+            parent_tree = None
+        
+        # Create new tree by scanning project directory
+        tree = Tree()
+        
+        # Walk through project directory and add files
+        for root, dirs, files in os.walk(self.project_root):
+            # Skip hidden directories and common build artifacts
+            dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ['node_modules', '__pycache__', 'venv', '.venv']]
+            
+            for filename in files:
+                # Skip hidden files and common artifacts
+                if filename.startswith('.') or filename.endswith('.pyc'):
+                    continue
+                    
+                file_path = Path(root) / filename
+                try:
+                    # Read file content
+                    content = file_path.read_bytes()
+                    
+                    # Create blob
+                    blob = Blob.from_string(content)
+                    repo.object_store.add_object(blob)
+                    
+                    # Add to tree with relative path
+                    rel_path = file_path.relative_to(self.project_root)
+                    tree_path = str(rel_path).replace('\\', '/').encode('utf-8')
+                    tree.add(tree_path, 0o100644, blob.id)
+                    
+                except Exception:
+                    # Skip files we can't read
+                    continue
+        
+        # Only create commit if tree has entries
+        if len(tree) == 0:
+            # No files to track, return current HEAD
             try:
-                head = repo.head().decode()
-            except Exception:
+                head = repo.head().decode('utf-8')
+            except:
                 head = ""
             return CheckpointInfo(commit_id=head, message=message)
+        
+        # Add tree to repo
+        repo.object_store.add_object(tree)
+        
+        # Create commit
+        commit = Commit()
+        commit.tree = tree.id
+        if parent_commit:
+            commit.parents = [parent_commit.id]
+        else:
+            commit.parents = []
+        
+        commit.author = commit.committer = b"AgentSmithy Versioning <versioning@agentsmithy.local>"
+        commit.commit_time = commit.author_time = int(time.time())
+        commit.commit_timezone = commit.author_timezone = parse_timezone(b'+0000')[0]
+        commit.message = message.encode('utf-8')
+        
+        # Add commit to repo
+        repo.object_store.add_object(commit)
+        
+        # Update HEAD
+        repo.refs[b'HEAD'] = commit.id
+        
+        commit_id = commit.id.decode('utf-8')
+        self._record_metadata(commit_id, message)
+        return CheckpointInfo(commit_id=commit_id, message=message)
 
     def restore_checkpoint(self, commit_id: str) -> None:
         repo = self.ensure_repo()

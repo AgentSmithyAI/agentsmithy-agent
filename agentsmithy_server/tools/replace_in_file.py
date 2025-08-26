@@ -51,7 +51,7 @@ class ReplaceInFileTool(BaseTool):  # type: ignore[override]
     async def _arun(self, **kwargs: Any) -> dict[str, Any]:
         file_path = Path(kwargs["path"]).resolve()
         diff_text: str = kwargs["diff"]
-        tracker = VersioningTracker(os.getcwd())
+        tracker = VersioningTracker(os.getcwd(), dialog_id=self._dialog_id)
         tracker.ensure_repo()
         tracker.start_edit([str(file_path)])
 

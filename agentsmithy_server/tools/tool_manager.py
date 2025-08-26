@@ -23,6 +23,11 @@ class ToolManager:
         self._sse_callback = callback
         for tool in self._tools.values():
             tool.set_sse_callback(callback)
+            
+    def set_dialog_id(self, dialog_id: str | None) -> None:
+        """Set dialog_id for all registered tools."""
+        for tool in self._tools.values():
+            tool.set_dialog_id(dialog_id)
 
     def register(self, tool: BaseTool) -> None:
         # Ensure tool has a usable name/description even if pydantic fields are not set as attrs
