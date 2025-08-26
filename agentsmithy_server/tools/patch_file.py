@@ -73,6 +73,7 @@ class PatchFileTool(BaseTool):  # type: ignore[override]
         new_text = "\n".join(modified_lines) + (
             "\n" if original_text.endswith("\n") else ""
         )
+        checkpoint = None
         try:
             file_path.write_text(new_text, encoding="utf-8")
         except Exception:
@@ -82,16 +83,18 @@ class PatchFileTool(BaseTool):  # type: ignore[override]
             tracker.finalize_edit()
             checkpoint = tracker.create_checkpoint(f"patch_file: {str(file_path)}")
 
-        # Emit file_edit event with diff and checkpoint
+        # Compute diff string for return and possible event emission
+        unified = difflib.unified_diff(
+            original_text.splitlines(keepends=True),
+            new_text.splitlines(keepends=True),
+            fromfile=f"a/{file_path}",
+            tofile=f"b/{file_path}",
+            lineterm="",
+        )
+        diff_str = "\n".join(unified)
+
+        # Emit file_edit event with diff and checkpoint if callback is set
         if self._sse_callback is not None:
-            unified = difflib.unified_diff(
-                original_text.splitlines(keepends=True),
-                new_text.splitlines(keepends=True),
-                fromfile=f"a/{file_path}",
-                tofile=f"b/{file_path}",
-                lineterm="",
-            )
-            diff_str = "\n".join(unified)
             await self.emit_event(
                 {
                     "type": "file_edit",

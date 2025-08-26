@@ -27,6 +27,7 @@ class DeleteFileTool(BaseTool):  # type: ignore[override]
         tracker.ensure_repo()
         tracker.start_edit([str(file_path)])
 
+        checkpoint = None
         try:
             if file_path.exists():
                 if file_path.is_file():

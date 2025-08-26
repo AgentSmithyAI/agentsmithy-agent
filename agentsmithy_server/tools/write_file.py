@@ -27,6 +27,7 @@ class WriteFileTool(BaseTool):  # type: ignore[override]
         tracker.ensure_repo()
         tracker.start_edit([str(file_path)])
         file_path.parent.mkdir(parents=True, exist_ok=True)
+        checkpoint = None
         try:
             file_path.write_text(kwargs["content"], encoding="utf-8")
         except Exception:

@@ -55,6 +55,7 @@ class ReplaceInFileTool(BaseTool):  # type: ignore[override]
         tracker.ensure_repo()
         tracker.start_edit([str(file_path)])
 
+        checkpoint = None
         try:
             agent_logger.info("replace_in_file start", path=str(file_path))
             original_text = (

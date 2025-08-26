@@ -106,30 +106,31 @@ class ChatService:
                 tool_event = await asyncio.wait_for(queue.get(), timeout=0.05)
             except TimeoutError:
                 break
-
-            if tool_event.get("type") == "tool_call":
-                sse = SSEEventFactory.tool_call(
-                    name=tool_event.get("name", ""),
-                    args=tool_event.get("args", {}),
-                    dialog_id=dialog_id,
-                ).to_sse()
-            elif tool_event.get("type") == "file_edit":
-                sse = SSEEventFactory.file_edit(
-                    file=tool_event.get("file", ""),
-                    diff=tool_event.get("diff"),
-                    checkpoint=tool_event.get("checkpoint"),
-                    dialog_id=dialog_id,
-                ).to_sse()
-            elif tool_event.get("type") == "error":
-                sse = SSEEventFactory.error(
-                    message=tool_event.get("error", ""), dialog_id=dialog_id
-                ).to_sse()
             else:
-                sse = SSEEventFactory.chat(
-                    content=str(tool_event), dialog_id=dialog_id
-                ).to_sse()
-            api_logger.stream_log("tool_event", None)
-            sse_events.append(sse)
+                # Process the event only if we successfully got one
+                if tool_event.get("type") == "tool_call":
+                    sse = SSEEventFactory.tool_call(
+                        name=tool_event.get("name", ""),
+                        args=tool_event.get("args", {}),
+                        dialog_id=dialog_id,
+                    ).to_sse()
+                elif tool_event.get("type") == "file_edit":
+                    sse = SSEEventFactory.file_edit(
+                        file=tool_event.get("file", ""),
+                        diff=tool_event.get("diff"),
+                        checkpoint=tool_event.get("checkpoint"),
+                        dialog_id=dialog_id,
+                    ).to_sse()
+                elif tool_event.get("type") == "error":
+                    sse = SSEEventFactory.error(
+                        message=tool_event.get("error", ""), dialog_id=dialog_id
+                    ).to_sse()
+                else:
+                    sse = SSEEventFactory.chat(
+                        content=str(tool_event), dialog_id=dialog_id
+                    ).to_sse()
+                api_logger.stream_log("tool_event", None)
+                sse_events.append(sse)
 
         return sse_events
 
