@@ -6,6 +6,7 @@ compatible with our SSE protocol (e.g., diff events).
 """
 
 from .base_tool import BaseTool
+from .delete_file import DeleteFileTool
 from .patch_file import PatchFileTool
 from .tool_executor import ToolExecutor
 from .tool_factory import ToolFactory
@@ -17,4 +18,5 @@ __all__ = [
     "ToolManager",
     "ToolExecutor",
     "ToolFactory",
+    "DeleteFileTool",
 ]

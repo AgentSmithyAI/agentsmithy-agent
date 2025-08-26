@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Main entry point for AgentSmithy server."""
+"""Main entry point for AgentSmithy server.
+
+Bootstraps a Uvicorn ASGI server for agentsmithy_server.api.server:app.
+Requires a .env (DEFAULT_MODEL and OPENAI_API_KEY) and a --workdir path.
+"""
 
 import os
 import sys

@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import difflib
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field
+
+from agentsmithy_server.services.versioning import VersioningTracker
 
 from .base_tool import BaseTool
 
@@ -33,6 +37,10 @@ class PatchFileTool(BaseTool):  # type: ignore[override]
     async def _arun(self, **kwargs: Any) -> dict[str, Any]:
         file_path = Path(kwargs["file_path"]).resolve()
         changes: list[dict[str, Any]] = kwargs.get("changes", [])
+
+        tracker = VersioningTracker(os.getcwd(), dialog_id=self._dialog_id)
+        tracker.ensure_repo()
+        tracker.start_edit([str(file_path)])
 
         # Read original file content
         original_text = file_path.read_text(encoding="utf-8")
@@ -65,19 +73,41 @@ class PatchFileTool(BaseTool):  # type: ignore[override]
         new_text = "\n".join(modified_lines) + (
             "\n" if original_text.endswith("\n") else ""
         )
-        file_path.write_text(new_text, encoding="utf-8")
+        checkpoint = None
+        try:
+            file_path.write_text(new_text, encoding="utf-8")
+        except Exception:
+            tracker.abort_edit()
+            raise
+        else:
+            tracker.finalize_edit()
+            checkpoint = tracker.create_checkpoint(f"patch_file: {str(file_path)}")
 
-        # Emit file_edit event in simplified SSE protocol
+        # Compute diff string for return and possible event emission
+        unified = difflib.unified_diff(
+            original_text.splitlines(keepends=True),
+            new_text.splitlines(keepends=True),
+            fromfile=f"a/{file_path}",
+            tofile=f"b/{file_path}",
+            lineterm="",
+        )
+        diff_str = "\n".join(unified)
+
+        # Emit file_edit event with diff and checkpoint if callback is set
         if self._sse_callback is not None:
             await self.emit_event(
                 {
                     "type": "file_edit",
                     "file": str(file_path),
+                    "diff": diff_str,
+                    "checkpoint": getattr(checkpoint, "commit_id", None),
                 }
             )
 
         return {
             "type": "patch_result",
             "file": str(file_path),
+            "diff": diff_str,
+            "checkpoint": getattr(checkpoint, "commit_id", None),
             "applied_changes": [c.__dict__ for c in parsed_changes],
         }

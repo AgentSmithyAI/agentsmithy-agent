@@ -1,5 +1,5 @@
 PYTHON ?= python3
-VENV ?= venv
+VENV ?= .venv
 PIP := $(VENV)/bin/pip
 PY := $(VENV)/bin/python
 

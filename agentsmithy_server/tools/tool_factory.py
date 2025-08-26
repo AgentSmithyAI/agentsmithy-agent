@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from .delete_file import DeleteFileTool
 from .list_files import ListFilesTool
 from .patch_file import PatchFileTool
 from .read_file import ReadFileTool
@@ -19,9 +20,10 @@ class ToolFactory:
         # Register default tools (Cline-style set)
         manager.register(ReadFileTool())
         manager.register(WriteFileTool())
-        manager.register(ReplaceInFileTool())
+        manager.register(ReplaceInFileTool())  # Now includes enhanced features
         manager.register(ListFilesTool())
         manager.register(SearchFilesTool())
         manager.register(PatchFileTool())  # keep for unified diff workflow
         manager.register(ReturnInspectionTool())
+        manager.register(DeleteFileTool())
         return manager

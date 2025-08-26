@@ -67,7 +67,10 @@ class ChatService:
                 yield SSEEventFactory.reasoning_end(dialog_id=dialog_id).to_sse()
             elif chunk["type"] == "file_edit":
                 yield SSEEventFactory.file_edit(
-                    file=chunk.get("file", ""), dialog_id=dialog_id
+                    file=chunk.get("file", ""),
+                    diff=chunk.get("diff"),
+                    checkpoint=chunk.get("checkpoint"),
+                    dialog_id=dialog_id,
                 ).to_sse()
             elif chunk["type"] == "tool_call":
                 yield SSEEventFactory.tool_call(
@@ -92,10 +95,19 @@ class ChatService:
     async def _drain_tool_events_queue(
         self, queue: asyncio.Queue[dict[str, Any]], dialog_id: str | None
     ) -> list[dict[str, str]]:
+        """Drain tool events reliably, tolerating race with queue.empty().
+
+        Uses a small timeout loop to catch events that arrive just after the check.
+        """
         sse_events: list[dict[str, str]] = []
-        try:
-            while not queue.empty():
-                tool_event = await asyncio.wait_for(queue.get(), timeout=0.01)
+        # Attempt to pull multiple events with short timeouts
+        while True:
+            try:
+                tool_event = await asyncio.wait_for(queue.get(), timeout=0.05)
+            except TimeoutError:
+                break
+            else:
+                # Process the event only if we successfully got one
                 if tool_event.get("type") == "tool_call":
                     sse = SSEEventFactory.tool_call(
                         name=tool_event.get("name", ""),
@@ -104,7 +116,10 @@ class ChatService:
                     ).to_sse()
                 elif tool_event.get("type") == "file_edit":
                     sse = SSEEventFactory.file_edit(
-                        file=tool_event.get("file", ""), dialog_id=dialog_id
+                        file=tool_event.get("file", ""),
+                        diff=tool_event.get("diff"),
+                        checkpoint=tool_event.get("checkpoint"),
+                        dialog_id=dialog_id,
                     ).to_sse()
                 elif tool_event.get("type") == "error":
                     sse = SSEEventFactory.error(
@@ -116,8 +131,7 @@ class ChatService:
                     ).to_sse()
                 api_logger.stream_log("tool_event", None)
                 sse_events.append(sse)
-        except TimeoutError:
-            pass
+
         return sse_events
 
     async def stream_chat(
@@ -176,11 +190,6 @@ class ChatService:
                             except StreamAbortError:
                                 yield SSEEventFactory.done(dialog_id=dialog_id).to_sse()
                                 return
-
-                            for sse in await self._drain_tool_events_queue(
-                                sse_events_queue, dialog_id
-                            ):
-                                yield sse
                         api_logger.info(f"Finished streaming {chunk_count} chunks")
                     else:
                         try:
