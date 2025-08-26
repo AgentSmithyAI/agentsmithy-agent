@@ -4,7 +4,7 @@ import difflib
 import os
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional, Tuple, List
 
 from pydantic import BaseModel, Field
 
@@ -43,8 +43,8 @@ class ReplaceInFileTool(BaseTool):  # type: ignore[override]
         "[replacement lines]\n"
         "+++++++ REPLACE\n"
         "```\n"
-        "Rules: exact line matches including whitespace; multiple blocks allowed in order;\n"
-        "empty SEARCH replaces whole file; common escaped chars (\\|, \\(, etc) are auto-unescaped."
+        "Features: exact match, line-trimmed match (ignores whitespace), block anchor match (3+ lines);\n"
+        "multiple blocks allowed; empty SEARCH replaces whole file; handles out-of-order edits."
     )
     args_schema: type[BaseModel] | dict[str, Any] | None = ReplaceArgs
 
@@ -77,8 +77,23 @@ class ReplaceInFileTool(BaseTool):  # type: ignore[override]
 
             file_path.parent.mkdir(parents=True, exist_ok=True)
             file_path.write_text(new_text, encoding="utf-8")
-        except Exception:
+        except Exception as e:
             tracker.abort_edit()
+            # Provide more context in error messages
+            if isinstance(e, ValueError) and "does not match" in str(e):
+                # Add file content preview to help LLM understand the issue
+                preview_lines = original_text.splitlines()[:20]
+                preview = "\n".join(preview_lines)
+                if len(preview_lines) < len(original_text.splitlines()):
+                    preview += "\n... (file continues)"
+                
+                enhanced_error = (
+                    f"{str(e)}\n\n"
+                    f"File preview (first 20 lines):\n"
+                    f"```\n{preview}\n```\n\n"
+                    f"Hint: Try using smaller, more specific SEARCH blocks or check for whitespace differences."
+                )
+                raise ValueError(enhanced_error)
             raise
         else:
             tracker.finalize_edit()
@@ -167,9 +182,65 @@ def _looks_like_marker_style(diff_text: str) -> bool:
     )
 
 
+def _block_anchor_fallback(
+    original: str, search: str, start_index: int
+) -> Optional[Tuple[int, int]]:
+    """
+    Block anchor matching strategy from Cline.
+    For blocks of 3+ lines, match using first and last lines as anchors.
+    """
+    orig_lines = original.split("\n")
+    search_lines = search.split("\n")
+    
+    # Remove trailing empty line if exists
+    if search_lines and search_lines[-1] == "":
+        search_lines.pop()
+    
+    # Only use for blocks of 3+ lines
+    if len(search_lines) < 3:
+        return None
+    
+    first_line_search = search_lines[0].strip()
+    last_line_search = search_lines[-1].strip()
+    search_block_size = len(search_lines)
+    
+    # Find starting line from start_index
+    current = 0
+    start_line = 0
+    while current < start_index and start_line < len(orig_lines):
+        current += len(orig_lines[start_line]) + 1
+        start_line += 1
+    
+    # Look for matching start and end anchors
+    for i in range(start_line, len(orig_lines) - search_block_size + 1):
+        # Check if first line matches
+        if orig_lines[i].strip() != first_line_search:
+            continue
+        
+        # Check if last line matches at expected position
+        if orig_lines[i + search_block_size - 1].strip() != last_line_search:
+            continue
+        
+        # Calculate exact character positions
+        start_char = sum(len(line) + 1 for line in orig_lines[:i])
+        # Ensure we don't include the final newline if it doesn't exist
+        if i + search_block_size >= len(orig_lines):
+            # Last block - no trailing newline
+            end_char = start_char + sum(len(line) for line in orig_lines[i:i + search_block_size])
+            end_char += search_block_size - 1  # Add newlines between lines
+        else:
+            end_char = start_char + sum(
+                len(line) + 1 for line in orig_lines[i:i + search_block_size]
+            )
+        
+        return (start_char, end_char)
+    
+    return None
+
+
 def _trimmed_line_fallback(
     original: str, search: str, start_index: int
-) -> tuple[int, int] | None:
+) -> Optional[Tuple[int, int]]:
     orig_lines = original.split("\n")
     search_lines = search.split("\n")
     if search_lines and search_lines[-1] == "":
@@ -199,10 +270,36 @@ def _trimmed_line_fallback(
     return None
 
 
+def _try_fix_malformed_blocks(diff_text: str) -> str:
+    """Attempt to fix common malformed block issues."""
+    lines = diff_text.splitlines()
+    fixed_lines = []
+    
+    for i, line in enumerate(lines):
+        # Fix common marker variations
+        if re.match(r"^-{3,6}\s*SEARCH", line):
+            fixed_lines.append("------- SEARCH")
+        elif re.match(r"^={3,6}$", line):
+            fixed_lines.append("=======")
+        elif re.match(r"^\+{3,6}\s*REPLACE", line):
+            fixed_lines.append("+++++++ REPLACE")
+        else:
+            fixed_lines.append(line)
+    
+    return "\n".join(fixed_lines)
+
+
 def _apply_marker_style_blocks(diff_text: str, file_path: Path) -> str:
+    # Try to fix common malformed blocks first
+    fixed_diff = _try_fix_malformed_blocks(diff_text)
+    if fixed_diff != diff_text:
+        agent_logger.info("Fixed malformed diff blocks")
+        diff_text = fixed_diff
+    
     original = file_path.read_text(encoding="utf-8")
-    result_parts: list[str] = []
-    last_processed = 0
+    
+    # Track all replacements for out-of-order editing support
+    replacements: List[dict] = []
 
     search_start_re = re.compile(r"^[-<]{3,}\s*SEARCH>?$")
     middle_re = re.compile(r"^[=]{3,}$")
@@ -210,45 +307,66 @@ def _apply_marker_style_blocks(diff_text: str, file_path: Path) -> str:
 
     lines = diff_text.splitlines()
     state = "idle"
-    search_buf: list[str] = []
-    replace_buf: list[str] = []
+    search_buf: List[str] = []
+    replace_buf: List[str] = []
     pending_search: str = ""  # For alternative format
 
-    def apply_one(search_block: str, replace_block: str):
-        nonlocal original, result_parts, last_processed
+    def apply_one(search_block: str, replace_block: str) -> None:
         # Empty SEARCH => full file replacement
         if search_block == "":
-            result_parts = [replace_block]
-            original = ""
-            last_processed = 0
+            replacements.append({
+                "start": 0,
+                "end": len(original),
+                "content": replace_block,
+                "method": "full_replace"
+            })
             return
 
-        # Exact match from last_processed
-        idx = original.find(search_block, last_processed)
-        if idx == -1:
-            # Trimmed fallback
-            fallback = _trimmed_line_fallback(original, search_block, last_processed)
-            if fallback is None:
-                # fallback: search from beginning
-                idx = original.find(search_block)
-                if idx == -1:
-                    fb2 = _trimmed_line_fallback(original, search_block, 0)
-                    if fb2 is None:
-                        raise ValueError(
-                            "The SEARCH block does not match anything in the file"
-                        )
-                    start, end = fb2
-                else:
-                    start, end = idx, idx + len(search_block)
-            else:
-                start, end = fallback
+        # Try multiple matching strategies in order
+        match_result = None
+        method_used = None
+        search_from = 0  # Search from beginning to support out-of-order
+        
+        # 1. Exact match
+        idx = original.find(search_block, search_from)
+        if idx != -1:
+            match_result = (idx, idx + len(search_block))
+            method_used = "exact_match"
         else:
-            start, end = idx, idx + len(search_block)
+            # 2. Trimmed line fallback
+            match_result = _trimmed_line_fallback(original, search_block, search_from)
+            if match_result:
+                method_used = "line_trimmed"
+            else:
+                # 3. Block anchor fallback
+                match_result = _block_anchor_fallback(original, search_block, search_from)
+                if match_result:
+                    method_used = "block_anchor"
 
-        # Append up to match, then replacement
-        result_parts.append(original[last_processed:start])
-        result_parts.append(replace_block)
-        last_processed = end
+        if not match_result:
+            # Extract a sample of what we were looking for
+            search_preview = search_block[:100] + "..." if len(search_block) > 100 else search_block
+            raise ValueError(
+                f"The SEARCH block does not match anything in the file:\n"
+                f"```\n{search_preview}\n```\n"
+                f"Tried: exact match, line-trimmed match, block anchor match"
+            )
+        
+        start, end = match_result
+        agent_logger.debug(
+            "Match found",
+            method=method_used,
+            start=start,
+            end=end,
+            search_len=len(search_block)
+        )
+        
+        replacements.append({
+            "start": start,
+            "end": end,
+            "content": replace_block,
+            "method": method_used
+        })
 
     for line in lines:
         if search_start_re.match(line):
@@ -301,9 +419,33 @@ def _apply_marker_style_blocks(diff_text: str, file_path: Path) -> str:
         replace_block = "\n".join(replace_buf)
         apply_one(pending_search, replace_block)
 
-    # Append remaining original content
-    result_parts.append(original[last_processed:])
-    return "".join(result_parts)
+    # Apply all replacements in order
+    replacements.sort(key=lambda r: r["start"])
+    
+    result = ""
+    current_pos = 0
+    
+    for replacement in replacements:
+        # Check for overlapping replacements
+        if replacement["start"] < current_pos:
+            agent_logger.warning(
+                "Overlapping replacement detected",
+                start=replacement["start"],
+                current_pos=current_pos
+            )
+            continue
+        
+        # Add original content up to this replacement
+        result += original[current_pos:replacement["start"]]
+        # Add the replacement content
+        result += replacement["content"]
+        # Move position to after the replaced section
+        current_pos = replacement["end"]
+    
+    # Add any remaining original content
+    result += original[current_pos:]
+    
+    return result
 
 
 def _apply_unified_patch_to_file(patch: str, file_path: Path) -> str:

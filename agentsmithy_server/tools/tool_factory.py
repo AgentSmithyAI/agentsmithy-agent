@@ -20,7 +20,7 @@ class ToolFactory:
         # Register default tools (Cline-style set)
         manager.register(ReadFileTool())
         manager.register(WriteFileTool())
-        manager.register(ReplaceInFileTool())
+        manager.register(ReplaceInFileTool())  # Now includes enhanced features
         manager.register(ListFilesTool())
         manager.register(SearchFilesTool())
         manager.register(PatchFileTool())  # keep for unified diff workflow
