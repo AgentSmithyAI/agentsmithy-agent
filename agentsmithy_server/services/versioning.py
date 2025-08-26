@@ -95,7 +95,7 @@ class VersioningTracker:
         except Exception:
             try:
                 # Create empty initial commit
-                porcelain.commit(repo, b"Initial checkpoint", allow_empty=True)
+                porcelain.commit(repo, b"Initial checkpoint")
             except Exception:
                 pass
 
@@ -159,10 +159,8 @@ class VersioningTracker:
         # Get current tree (if exists)
         try:
             parent_commit = repo[repo.head()]
-            parent_tree = repo[parent_commit.tree]
-        except:
+        except Exception:
             parent_commit = None
-            parent_tree = None
 
         # Create new tree by scanning project directory
         tree = Tree()
@@ -205,7 +203,7 @@ class VersioningTracker:
             # No files to track, return current HEAD
             try:
                 head = repo.head().decode("utf-8")
-            except:
+            except Exception:
                 head = ""
             return CheckpointInfo(commit_id=head, message=message)
 
