@@ -231,9 +231,19 @@ class ChatService:
                                             dialog_id=dialog_id
                                         ).to_sse()
                                         return
+                                # Drain tool events (e.g., file_edit) that may have arrived during streaming
+                                for sse in await self._drain_tool_events_queue(
+                                    sse_events_queue, dialog_id
+                                ):
+                                    yield sse
                                 api_logger.info(
                                     f"Finished streaming {chunk_count} chunks from {key}"
                                 )
+                                # Final drain to ensure no pending tool events remain
+                                for sse in await self._drain_tool_events_queue(
+                                    sse_events_queue, dialog_id
+                                ):
+                                    yield sse
                             elif asyncio.iscoroutine(response):
                                 actual_response = await response
                                 if hasattr(actual_response, "__aiter__"):
@@ -252,9 +262,19 @@ class ChatService:
                                                 dialog_id=dialog_id
                                             ).to_sse()
                                             return
+                                        # Drain tool events (e.g., file_edit) that may have arrived during streaming
+                                        for sse in await self._drain_tool_events_queue(
+                                            sse_events_queue, dialog_id
+                                        ):
+                                            yield sse
                                     api_logger.info(
                                         f"Finished streaming {chunk_count} chunks from {key}"
                                     )
+                                    # Final drain to ensure no pending tool events remain
+                                    for sse in await self._drain_tool_events_queue(
+                                        sse_events_queue, dialog_id
+                                    ):
+                                        yield sse
                                 else:
                                     try:
                                         async for (
@@ -265,6 +285,11 @@ class ChatService:
                                             yield sse_event
                                     except StreamAbortError:
                                         pass
+                                    # Drain tool events after processing non-iterable response
+                                    for sse in await self._drain_tool_events_queue(
+                                        sse_events_queue, dialog_id
+                                    ):
+                                        yield sse
 
             # Persist handled by router after buffer is returned via closure
             api_logger.info("SSE generation completed", total_events=event_count)
