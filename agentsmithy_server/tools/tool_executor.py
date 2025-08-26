@@ -294,7 +294,30 @@ class ToolExecutor:
                     # Execute tool
                     result = await self.tool_manager.run_tool(name, **args)
 
-                    # Do not emit file_edit here. Mutating tools should emit their own events.
+                    # If the tool itself didn't emit a file_edit event via callback,
+                    # but it returned structured info including a diff, emit a fallback file_edit now.
+                    try:
+                        if isinstance(result, dict) and result.get("type") in {
+                            "replace_file_result",
+                            "patch_result",
+                            "write_file_result",
+                            "delete_file_result",
+                        }:
+                            file_path = result.get("path") or result.get("file")
+                            diff = result.get("diff")
+                            checkpoint = result.get("checkpoint")
+                            if file_path and self._sse_callback is not None:
+                                await self.emit_event(
+                                    {
+                                        "type": "file_edit",
+                                        "file": file_path,
+                                        "diff": diff,
+                                        "checkpoint": checkpoint,
+                                    }
+                                )
+                    except Exception:
+                        # Best-effort fallback; ignore emission errors
+                        pass
 
                     # Add tool message to conversation
                     tool_message = ToolMessage(
