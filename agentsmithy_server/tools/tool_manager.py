@@ -106,16 +106,16 @@ class ToolManager:
             result = await tool.arun(**args)
         except Exception as e:
             agent_logger.error(
-                "Tool execution failed", 
-                tool=name, 
+                "Tool execution failed",
+                tool=name,
                 error=str(e),
-                error_type=type(e).__name__
+                error_type=type(e).__name__,
             )
             return {
-                "type": "tool_error", 
-                "name": name, 
+                "type": "tool_error",
+                "name": name,
                 "error": str(e),
-                "error_type": type(e).__name__
+                "error_type": type(e).__name__,
             }
 
         # Diagnostics: result size
