@@ -226,20 +226,21 @@ async def test_search_files_hidden_files_handling(tmp_path: Path):
     assert len(results2) >= 1
 
 
-async def test_search_files_max_results_limit(tmp_path: Path):
-    """Test that search results are limited to prevent excessive output."""
+async def test_search_files_returns_all_results(tmp_path: Path):
+    """Test that search returns all matching results without limits."""
     # Create many files with matches
-    for i in range(350):
+    num_files = 500
+    for i in range(num_files):
         (tmp_path / f"file{i}.txt").write_text(f"MATCH {i}", encoding="utf-8")
 
     t = SearchFilesTool()
     res = await _run(t, path=str(tmp_path), regex=r"MATCH", file_pattern="**/*.txt")
     results = res["results"]
 
-    # Should be limited to 300 results
-    assert len(results) == 300
-    assert res.get("truncated") is True
-    assert "truncated" in res.get("message", "").lower()
+    # Should return all results
+    assert len(results) == num_files
+    assert res.get("truncated") is None
+    assert "truncated" not in str(res)
 
 
 async def test_search_files_restricted_paths(tmp_path: Path):

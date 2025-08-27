@@ -5,7 +5,6 @@ Contains hardcoded patterns for ignored directories.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Any
 
@@ -13,15 +12,13 @@ from typing import Any
 class FileRestrictions:
     """Controls file/directory access by enforcing ignore patterns."""
 
-    # Default directories to ignore (based on Cline's implementation)
+    # Default directories to ignore
     DEFAULT_IGNORE_DIRS = {
         "node_modules",
         "__pycache__",
         "env",
         "venv",
         ".venv",
-        "target/dependency",
-        "build/dependencies",
         "dist",
         "out",
         "bundle",
@@ -35,6 +32,12 @@ class FileRestrictions:
         ".cache",
         ".env",
     }
+
+    # Special nested paths to ignore (will be checked separately)
+    NESTED_IGNORE_PATTERNS = [
+        ("target", "dependency"),
+        ("build", "dependencies"),
+    ]
 
     def __init__(self, workspace_root: str | Path):
         """Initialize FileRestrictions with a workspace root."""
@@ -58,10 +61,20 @@ class FileRestrictions:
                 return True
 
             # Special case for nested dependency paths
-            path_str = str(rel_path).replace(os.sep, "/")
-            for pattern in ["target/dependency", "build/dependencies"]:
-                if pattern in path_str:
-                    return True
+            # Check if path contains nested ignore patterns like target/dependency
+            for parent_dir, child_dir in self.NESTED_IGNORE_PATTERNS:
+                try:
+                    # Find index of parent directory in parts
+                    parent_idx = parts.index(parent_dir)
+                    # Check if the next part is the child directory
+                    if (
+                        parent_idx + 1 < len(parts)
+                        and parts[parent_idx + 1] == child_dir
+                    ):
+                        return True
+                except ValueError:
+                    # Parent directory not found in path
+                    continue
 
         except ValueError:
             # Path is not relative to workspace root
@@ -140,8 +153,8 @@ class FileRestrictions:
             True if the path is restricted, False otherwise
         """
         try:
-            # Check if it's root directory
-            if path == Path("/") or (os.name == "nt" and str(path).endswith(":\\")):
+            # Check if it's root directory (cross-platform)
+            if path.parts == (path.anchor,):
                 return True
 
             # Check if it's home directory

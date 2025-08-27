@@ -80,7 +80,6 @@ class SearchFilesTool(BaseTool):  # type: ignore[override]
             }
 
         results: list[dict[str, Any]] = []
-        max_results = 300  # Limit based on Cline's implementation
 
         try:
             for file_path in base.glob(file_glob):
@@ -111,15 +110,6 @@ class SearchFilesTool(BaseTool):  # type: ignore[override]
                         results.append(
                             {"file": str(file_path), "line": i, "context": context}
                         )
-
-                        # Stop if we've reached the maximum number of results
-                        if len(results) >= max_results:
-                            return {
-                                "type": "search_files_result",
-                                "results": results,
-                                "truncated": True,
-                                "message": f"Results truncated at {max_results} matches. Use more specific search criteria.",
-                            }
 
             return {"type": "search_files_result", "results": results}
 
