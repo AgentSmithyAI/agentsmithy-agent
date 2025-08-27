@@ -27,24 +27,65 @@ class SearchFilesTool(BaseTool):  # type: ignore[override]
         pattern = kwargs["regex"]
         file_glob = kwargs.get("file_pattern") or "**/*"
 
-        regex = re.compile(pattern)
+        try:
+            if not base.exists():
+                return {
+                    "type": "search_files_error",
+                    "path": str(base),
+                    "error": f"Path does not exist: {base}",
+                    "error_type": "PathNotFoundError"
+                }
+            
+            if not base.is_dir():
+                return {
+                    "type": "search_files_error",
+                    "path": str(base),
+                    "error": f"Path is not a directory: {base}",
+                    "error_type": "NotADirectoryError"
+                }
+
+            regex = re.compile(pattern)
+        except re.error as e:
+            return {
+                "type": "search_files_error",
+                "path": str(base),
+                "error": f"Invalid regex pattern: {pattern} - {str(e)}",
+                "error_type": "RegexError"
+            }
+
         results: list[dict[str, Any]] = []
 
-        for file_path in base.glob(file_glob):
-            if not file_path.is_file():
-                continue
-            try:
-                content = file_path.read_text(encoding="utf-8", errors="ignore")
-            except Exception:
-                continue
-            lines = content.splitlines()
-            for i, line in enumerate(lines, start=1):
-                if regex.search(line):
-                    start = max(1, i - 2)
-                    end = min(len(lines), i + 2)
-                    context = "\n".join(lines[start - 1 : end])
-                    results.append(
-                        {"file": str(file_path), "line": i, "context": context}
-                    )
+        try:
+            for file_path in base.glob(file_glob):
+                if not file_path.is_file():
+                    continue
+                try:
+                    content = file_path.read_text(encoding="utf-8", errors="ignore")
+                except Exception:
+                    continue
+                lines = content.splitlines()
+                for i, line in enumerate(lines, start=1):
+                    if regex.search(line):
+                        start = max(1, i - 2)
+                        end = min(len(lines), i + 2)
+                        context = "\n".join(lines[start - 1 : end])
+                        results.append(
+                            {"file": str(file_path), "line": i, "context": context}
+                        )
 
-        return {"type": "search_files_result", "results": results}
+            return {"type": "search_files_result", "results": results}
+            
+        except PermissionError as e:
+            return {
+                "type": "search_files_error",
+                "path": str(base),
+                "error": f"Permission denied accessing directory: {base}",
+                "error_type": "PermissionError"
+            }
+        except Exception as e:
+            return {
+                "type": "search_files_error",
+                "path": str(base),
+                "error": f"Error searching files: {str(e)}",
+                "error_type": type(e).__name__
+            }

@@ -102,7 +102,21 @@ class ToolManager:
         except Exception as ve:
             return {"type": "tool_error", "name": name, "error": str(ve)}
 
-        result = await tool.arun(**args)
+        try:
+            result = await tool.arun(**args)
+        except Exception as e:
+            agent_logger.error(
+                "Tool execution failed", 
+                tool=name, 
+                error=str(e),
+                error_type=type(e).__name__
+            )
+            return {
+                "type": "tool_error", 
+                "name": name, 
+                "error": str(e),
+                "error_type": type(e).__name__
+            }
 
         # Diagnostics: result size
         try:

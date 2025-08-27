@@ -19,5 +19,45 @@ class ReadFileTool(BaseTool):  # type: ignore[override]
 
     async def _arun(self, **kwargs: Any) -> dict[str, Any]:
         file_path = Path(kwargs["path"]).resolve()
-        content = file_path.read_text(encoding="utf-8")
-        return {"type": "read_file_result", "path": str(file_path), "content": content}
+        
+        try:
+            if not file_path.exists():
+                return {
+                    "type": "read_file_error",
+                    "path": str(file_path),
+                    "error": f"File not found: {file_path}",
+                    "error_type": "FileNotFoundError"
+                }
+            
+            if not file_path.is_file():
+                return {
+                    "type": "read_file_error",
+                    "path": str(file_path),
+                    "error": f"Path is not a file: {file_path}",
+                    "error_type": "NotAFileError"
+                }
+            
+            content = file_path.read_text(encoding="utf-8")
+            return {"type": "read_file_result", "path": str(file_path), "content": content}
+            
+        except PermissionError as e:
+            return {
+                "type": "read_file_error",
+                "path": str(file_path),
+                "error": f"Permission denied reading file: {file_path}",
+                "error_type": "PermissionError"
+            }
+        except UnicodeDecodeError as e:
+            return {
+                "type": "read_file_error",
+                "path": str(file_path),
+                "error": f"File is not a valid UTF-8 text file: {file_path}",
+                "error_type": "UnicodeDecodeError"
+            }
+        except Exception as e:
+            return {
+                "type": "read_file_error",
+                "path": str(file_path),
+                "error": f"Error reading file: {str(e)}",
+                "error_type": type(e).__name__
+            }

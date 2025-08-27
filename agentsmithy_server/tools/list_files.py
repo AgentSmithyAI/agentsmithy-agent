@@ -38,14 +38,47 @@ class ListFilesTool(BaseTool):  # type: ignore[override]
                 relative_parts = path.parts
             return any(part.startswith(".") for part in relative_parts)
 
-        if recursive:
-            for p in base.rglob("*"):
-                if not include_hidden and is_hidden(p):
-                    continue
-                items.append(str(p))
-        else:
-            for p in base.glob("*"):
-                if not include_hidden and is_hidden(p):
-                    continue
-                items.append(str(p))
-        return {"type": "list_files_result", "path": str(base), "items": items}
+        try:
+            if not base.exists():
+                return {
+                    "type": "list_files_error",
+                    "path": str(base),
+                    "error": f"Path does not exist: {base}",
+                    "error_type": "PathNotFoundError"
+                }
+            
+            if not base.is_dir():
+                return {
+                    "type": "list_files_error",
+                    "path": str(base),
+                    "error": f"Path is not a directory: {base}",
+                    "error_type": "NotADirectoryError"
+                }
+
+            if recursive:
+                for p in base.rglob("*"):
+                    if not include_hidden and is_hidden(p):
+                        continue
+                    items.append(str(p))
+            else:
+                for p in base.glob("*"):
+                    if not include_hidden and is_hidden(p):
+                        continue
+                    items.append(str(p))
+            
+            return {"type": "list_files_result", "path": str(base), "items": items}
+            
+        except PermissionError as e:
+            return {
+                "type": "list_files_error",
+                "path": str(base),
+                "error": f"Permission denied accessing directory: {base}",
+                "error_type": "PermissionError"
+            }
+        except Exception as e:
+            return {
+                "type": "list_files_error",
+                "path": str(base),
+                "error": f"Error listing directory: {str(e)}",
+                "error_type": type(e).__name__
+            }
