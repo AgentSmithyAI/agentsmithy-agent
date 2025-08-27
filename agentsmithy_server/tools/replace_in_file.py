@@ -187,7 +187,7 @@ def _block_anchor_fallback(
     original: str, search: str, start_index: int
 ) -> tuple[int, int] | None:
     """
-    Block anchor matching strategy from Cline.
+    Block anchor matching strategy.
     For blocks of 3+ lines, match using first and last lines as anchors.
     """
     orig_lines = original.split("\n")

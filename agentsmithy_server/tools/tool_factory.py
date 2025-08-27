@@ -17,7 +17,7 @@ class ToolFactory:
     @staticmethod
     def create_tool_manager() -> ToolManager:
         manager = ToolManager()
-        # Register default tools (Cline-style set)
+        # Register default tools
         manager.register(ReadFileTool())
         manager.register(WriteFileTool())
         manager.register(ReplaceInFileTool())  # Now includes enhanced features

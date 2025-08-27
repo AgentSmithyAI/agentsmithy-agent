@@ -175,3 +175,108 @@ async def test_alternation_groups_and_escaping(tmp_path: Path):
         t, path=str(tmp_path), regex=r"cat\|dog\(\)", file_pattern="**/*.txt"
     )
     assert res3["results"] == []
+
+
+async def test_search_files_with_ignored_directories(tmp_path: Path):
+    """Test that search excludes default ignored directories."""
+    # Create regular files
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "main.py").write_text(
+        "TODO: implement feature", encoding="utf-8"
+    )
+
+    # Create files in ignored directories
+    (tmp_path / "node_modules").mkdir()
+    (tmp_path / "node_modules" / "lib.js").write_text("TODO: fix bug", encoding="utf-8")
+    (tmp_path / "__pycache__").mkdir()
+    (tmp_path / "__pycache__" / "test.py").write_text("TODO: cleanup", encoding="utf-8")
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".git" / "hooks.py").write_text("TODO: git hook", encoding="utf-8")
+
+    t = SearchFilesTool()
+    res = await _run(t, path=str(tmp_path), regex=r"TODO:", file_pattern="**/*")
+    results = res["results"]
+
+    # Should only find TODO in src/main.py
+    assert len(results) == 1
+    assert "src/main.py" in results[0]["file"]
+    assert "implement feature" in results[0]["context"]
+
+
+async def test_search_files_hidden_files_handling(tmp_path: Path):
+    """Test that hidden files are excluded by default."""
+    # Create regular and hidden files
+    (tmp_path / "visible.txt").write_text("FIND ME", encoding="utf-8")
+    (tmp_path / ".hidden.txt").write_text("FIND ME", encoding="utf-8")
+    (tmp_path / ".config").mkdir()
+    (tmp_path / ".config" / "settings.json").write_text("FIND ME", encoding="utf-8")
+
+    t = SearchFilesTool()
+    res = await _run(t, path=str(tmp_path), regex=r"FIND ME", file_pattern="**/*")
+    results = res["results"]
+
+    # Should only find in visible file
+    assert len(results) == 1
+    assert "visible.txt" in results[0]["file"]
+
+    # Test with explicit hidden file pattern
+    res2 = await _run(t, path=str(tmp_path), regex=r"FIND ME", file_pattern=".*")
+    results2 = res2["results"]
+    # Should find hidden files when explicitly requested
+    assert len(results2) >= 1
+
+
+async def test_search_files_returns_all_results(tmp_path: Path):
+    """Test that search returns all matching results without limits."""
+    # Create many files with matches
+    num_files = 500
+    for i in range(num_files):
+        (tmp_path / f"file{i}.txt").write_text(f"MATCH {i}", encoding="utf-8")
+
+    t = SearchFilesTool()
+    res = await _run(t, path=str(tmp_path), regex=r"MATCH", file_pattern="**/*.txt")
+    results = res["results"]
+
+    # Should return all results
+    assert len(results) == num_files
+    assert res.get("truncated") is None
+    assert "truncated" not in str(res)
+
+
+async def test_search_files_restricted_paths(tmp_path: Path):
+    """Test that restricted paths are blocked."""
+    t = SearchFilesTool()
+
+    # Test root directory
+    res = await _run(t, path="/", regex=r"test", file_pattern="**/*")
+    assert res["type"] == "search_files_error"
+    assert "restricted" in res["error"].lower()
+
+    # Test home directory
+    res = await _run(t, path=str(Path.home()), regex=r"test", file_pattern="**/*")
+    assert res["type"] == "search_files_error"
+    assert "restricted" in res["error"].lower()
+
+
+async def test_search_files_invalid_regex(tmp_path: Path):
+    """Test error handling for invalid regex patterns."""
+    (tmp_path / "test.txt").write_text("content", encoding="utf-8")
+
+    t = SearchFilesTool()
+    res = await _run(t, path=str(tmp_path), regex=r"[unclosed", file_pattern="**/*.txt")
+
+    assert res["type"] == "search_files_error"
+    assert res["error_type"] == "RegexError"
+    assert "Invalid regex" in res["error"]
+
+
+async def test_search_files_nonexistent_path(tmp_path: Path):
+    """Test error handling for non-existent paths."""
+    t = SearchFilesTool()
+    res = await _run(
+        t, path=str(tmp_path / "nonexistent"), regex=r"test", file_pattern="**/*"
+    )
+
+    assert res["type"] == "search_files_error"
+    assert res["error_type"] == "PathNotFoundError"
+    assert "does not exist" in res["error"]
