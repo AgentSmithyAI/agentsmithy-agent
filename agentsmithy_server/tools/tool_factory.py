@@ -6,6 +6,7 @@ from .patch_file import PatchFileTool
 from .read_file import ReadFileTool
 from .replace_in_file import ReplaceInFileTool
 from .return_inspection import ReturnInspectionTool
+from .run_command import RunCommandTool
 from .search_files import SearchFilesTool
 from .tool_manager import ToolManager
 from .write_file import WriteFileTool
@@ -26,4 +27,5 @@ class ToolFactory:
         manager.register(PatchFileTool())  # keep for unified diff workflow
         manager.register(ReturnInspectionTool())
         manager.register(DeleteFileTool())
+        manager.register(RunCommandTool())
         return manager
