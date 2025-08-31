@@ -1,0 +1,47 @@
+from __future__ import annotations
+
+import sys
+
+import pytest
+
+from agentsmithy_server.tools.run_command import RunCommandTool
+
+pytestmark = pytest.mark.asyncio
+
+
+async def _run(tool, **kwargs):
+    return await tool.arun(kwargs)
+
+
+async def test_run_command_stdout_stderr_and_exit_code():
+    t = RunCommandTool()
+    # Cross-platform: invoke current Python to emit to stdout/stderr and exit with code 3
+    cmd = [
+        sys.executable,
+        "-c",
+        "import sys; print('OUT'); sys.stderr.write('ERR\n'); sys.exit(3)",
+    ]
+    res = await _run(t, command=" ".join(cmd), shell=False, timeout=10.0)
+
+    assert res["type"] == "run_command_result"
+    assert res["exit_code"] == 3
+    assert "OUT" in res["stdout"]
+    assert "ERR" in res["stderr"]
+    assert isinstance(res.get("os"), dict)
+    assert res["timed_out"] is False
+
+
+async def test_run_command_error_not_found():
+    t = RunCommandTool()
+    # Use shell=False to trigger FileNotFoundError for an unknown binary
+    res = await _run(t, command="this_command_should_not_exist_abcxyz", shell=False)
+    assert res["type"] == "run_command_error"
+    assert res["error_type"] in {"FileNotFoundError", "OSError"}
+
+
+async def test_run_command_timeout():
+    t = RunCommandTool()
+    cmd = [sys.executable, "-c", "import time; time.sleep(2)"]
+    res = await _run(t, command=" ".join(cmd), shell=False, timeout=0.2)
+    assert res["type"] == "run_command_timeout"
+    assert res["timed_out"] is True
