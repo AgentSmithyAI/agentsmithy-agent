@@ -169,12 +169,12 @@ class RunCommandTool(BaseTool):  # type: ignore[override]
                     "type": "run_command_timeout",
                     "command": args.command,
                     "cwd": str(cwd_path) if cwd_path else None,
-                    "stdout": out_b.decode(args.encoding, errors="replace")[
-                        : args.max_output_bytes
-                    ],
-                    "stderr": err_b.decode(args.encoding, errors="replace")[
-                        : args.max_output_bytes
-                    ],
+                    "stdout": out_b[: args.max_output_bytes].decode(
+                        args.encoding, errors="replace"
+                    ),
+                    "stderr": err_b[: args.max_output_bytes].decode(
+                        args.encoding, errors="replace"
+                    ),
                     "exit_code": None,
                     "timed_out": True,
                     "duration_ms": duration_ms,
@@ -185,18 +185,15 @@ class RunCommandTool(BaseTool):  # type: ignore[override]
 
             # Decode and truncate if needed
             def _decode_and_truncate(b: bytes) -> tuple[str, bool, int]:
-                s = b.decode(args.encoding, errors="replace")
-                if (
-                    len(s.encode(args.encoding, errors="replace"))
-                    <= args.max_output_bytes
-                ):
+                # Fast path: no truncation needed
+                if len(b) <= args.max_output_bytes:
+                    s = b.decode(args.encoding, errors="replace")
                     return s, False, 0
-                # Truncate conservatively by characters
-                truncated = s.encode(args.encoding, errors="replace")[
-                    : args.max_output_bytes
-                ]
-                s2 = truncated.decode(args.encoding, errors="replace")
-                return s2, True, len(b) - len(truncated)
+                # Truncate by bytes to avoid re-encoding overhead; decode with replacement to handle partial characters
+                truncated_b = b[: args.max_output_bytes]
+                s2 = truncated_b.decode(args.encoding, errors="replace")
+                truncated_bytes = len(b) - len(truncated_b)
+                return s2, True, truncated_bytes
 
             stdout_text, stdout_trunc, stdout_trunc_bytes = _decode_and_truncate(out_b)
             stderr_text, stderr_trunc, stderr_trunc_bytes = _decode_and_truncate(err_b)
