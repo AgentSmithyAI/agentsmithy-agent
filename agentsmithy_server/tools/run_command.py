@@ -18,8 +18,11 @@ def _detect_shell() -> str | None:
     """Detect the preferred system shell executable.
 
     Resolution strategy:
-    - On Windows, returns COMSPEC if set, otherwise 'cmd.exe'.
-    - On POSIX systems, returns SHELL if set, otherwise '/bin/sh'.
+    - Windows: return COMSPEC if set, otherwise 'cmd.exe'.
+    - POSIX (Linux/macOS/BSD): return SHELL if set.
+      If SHELL is unset on macOS (Darwin), prefer '/bin/zsh' (default since 10.15),
+      then '/bin/bash' if available, else fall back to '/bin/sh'.
+      On other POSIX systems, fall back to '/bin/sh'.
 
     Returns:
         Path to the shell executable as a string, or None if detection fails.
@@ -28,7 +31,20 @@ def _detect_shell() -> str | None:
     # Prefer explicit environment variables
     if os.name == "nt":
         return os.environ.get("COMSPEC") or "cmd.exe"
-    return os.environ.get("SHELL") or "/bin/sh"
+
+    shell = os.environ.get("SHELL")
+    if shell:
+        return shell
+
+    # Platform-specific sensible defaults
+    if sys.platform == "darwin":  # macOS
+        for candidate in ("/bin/zsh", "/bin/bash", "/bin/sh"):
+            if Path(candidate).exists():
+                return candidate
+        return "/bin/sh"
+
+    # Generic POSIX fallback
+    return "/bin/sh"
 
 
 def _os_context() -> dict[str, Any]:
