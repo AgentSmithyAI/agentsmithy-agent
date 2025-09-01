@@ -15,6 +15,16 @@ from .base_tool import BaseTool
 
 
 def _detect_shell() -> str | None:
+    """Detect the preferred system shell executable.
+
+    Resolution strategy:
+    - On Windows, returns COMSPEC if set, otherwise 'cmd.exe'.
+    - On POSIX systems, returns SHELL if set, otherwise '/bin/sh'.
+
+    Returns:
+        Path to the shell executable as a string, or None if detection fails.
+        Note: with current fallbacks this function typically returns a string.
+    """
     # Prefer explicit environment variables
     if os.name == "nt":
         return os.environ.get("COMSPEC") or "cmd.exe"
@@ -22,6 +32,13 @@ def _detect_shell() -> str | None:
 
 
 def _os_context() -> dict[str, Any]:
+    """Collect a snapshot of OS and runtime context for diagnostics.
+
+    Returns a mapping with keys such as:
+    - platform, system, release, version, machine, python, shell, and optionally processor.
+
+    The function is defensive and never raises; it returns an empty dict on failure.
+    """
     try:
         ctx: dict[str, Any] = {
             "platform": sys.platform,
@@ -185,6 +202,17 @@ class RunCommandTool(BaseTool):  # type: ignore[override]
 
             # Decode and truncate if needed
             def _decode_and_truncate(b: bytes) -> tuple[str, bool, int]:
+                """Decode a bytes buffer and enforce a byte-size limit.
+
+                Args:
+                    b: Raw bytes from a stream (stdout/stderr).
+
+                Returns:
+                    A tuple of:
+                    - decoded string using args.encoding with replacement for errors,
+                    - was_truncated flag (True if the original bytes exceeded the limit),
+                    - number of bytes truncated from the original buffer.
+                """
                 # Fast path: no truncation needed
                 if len(b) <= args.max_output_bytes:
                     s = b.decode(args.encoding, errors="replace")
