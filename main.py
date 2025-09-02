@@ -102,8 +102,16 @@ if __name__ == "__main__":
         )
 
         chosen_port = ensure_singleton_and_select_port(
-            get_current_project(), base_port=int(os.getenv("SERVER_PORT", "11434"))
+            get_current_project(),
+            base_port=int(os.getenv("SERVER_PORT", "11434")),
+            host=settings.server_host,
+            max_probe=20,
         )
+        # Keep settings in sync with the chosen port for logging/uvicorn
+        try:
+            settings.server_port = chosen_port  # type: ignore[attr-defined]
+        except Exception:
+            pass
 
         # Treat workdir as the active project; inspect and save metadata if missing
         try:
@@ -150,8 +158,8 @@ if __name__ == "__main__":
 
         startup_logger.info(
             "Starting AgentSmithy Server",
-            server_url=f"http://{settings.server_host}:{settings.server_port}",
-            docs_url=f"http://{settings.server_host}:{settings.server_port}/docs",
+            server_url=f"http://{settings.server_host}:{chosen_port}",
+            docs_url=f"http://{settings.server_host}:{chosen_port}/docs",
             workdir=str(workdir_path),
             state_dir=str(state_dir),
         )
@@ -167,7 +175,7 @@ if __name__ == "__main__":
         config = uvicorn.Config(
             "agentsmithy_server.api.server:app",
             host=settings.server_host,
-            port=settings.server_port,
+            port=chosen_port,
             reload=reload_enabled,
             log_config=LOGGING_CONFIG,
             env_file=".env",
