@@ -24,15 +24,24 @@ async def lifespan(app: FastAPI):
         dialogs = index.get("dialogs") or []
         if not dialogs:
             project.create_dialog(title="default", set_current=True)
+            
+        # Get shutdown event from app state if available
+        if hasattr(app.state, "shutdown_event"):
+            from agentsmithy_server.api.deps import set_shutdown_event
+            set_shutdown_event(app.state.shutdown_event)
+            api_logger.info("Shutdown event registered with chat service")
     except Exception as e:
         api_logger.error("Dialog state init failed", exception=e)
 
     yield
 
-    # Shutdown: placeholder for resource cleanup (e.g., vector stores)
+    # Shutdown: cleanup active streams and resources
     try:
-        # Add cleanup hooks if needed
-        await asyncio.sleep(0)
+        api_logger.info("Starting shutdown cleanup")
+        from agentsmithy_server.api.deps import get_chat_service
+        chat_service = get_chat_service()
+        await chat_service.shutdown()
+        api_logger.info("Chat service shutdown completed")
     except Exception as e:
         api_logger.error("Shutdown cleanup failed", exception=e)
 
@@ -57,6 +66,28 @@ def create_app() -> FastAPI:
     app.include_router(health_router)
     app.include_router(dialogs_router)
     app.include_router(meta_router)
+    
+    # Temporary test endpoint for shutdown testing
+    @app.get("/test/sse")
+    async def test_sse():
+        """Test SSE endpoint for shutdown testing."""
+        from agentsmithy_server.api.sse import stream_response
+        from agentsmithy_server.api.sse_protocol import EventFactory as SSEEventFactory
+        
+        async def generate_test_events():
+            """Generate test events continuously."""
+            import asyncio
+            try:
+                for i in range(100):
+                    yield SSEEventFactory.chat(f"Test event {i}").to_sse()
+                    await asyncio.sleep(0.05)  # 50ms between events
+            except asyncio.CancelledError:
+                api_logger.info("Test SSE stream cancelled")
+                raise
+            finally:
+                yield SSEEventFactory.done().to_sse()
+        
+        return stream_response(generate_test_events())
 
     # Basic error handler example
     @app.middleware("http")

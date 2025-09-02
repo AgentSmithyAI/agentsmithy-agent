@@ -21,11 +21,27 @@ class StreamAbortError(Exception):
 class ChatService:
     def __init__(self) -> None:
         self._orchestrator: AgentOrchestrator | None = None
+        self._active_streams: set[asyncio.Task] = set()
+        self._shutdown_event: asyncio.Event | None = None
 
     def _get_orchestrator(self) -> AgentOrchestrator:
         if self._orchestrator is None:
             self._orchestrator = AgentOrchestrator()
         return self._orchestrator
+
+    def set_shutdown_event(self, event: asyncio.Event) -> None:
+        """Set the shutdown event for graceful termination."""
+        self._shutdown_event = event
+
+    async def shutdown(self) -> None:
+        """Cancel all active streams during shutdown."""
+        api_logger.info("Cancelling active streams", count=len(self._active_streams))
+        for task in self._active_streams:
+            if not task.done():
+                task.cancel()
+        # Wait for all tasks to complete
+        if self._active_streams:
+            await asyncio.gather(*self._active_streams, return_exceptions=True)
 
     async def _process_structured_chunk(
         self,
@@ -142,6 +158,11 @@ class ChatService:
         project_dialog: tuple[Any, str] | None,
     ) -> AsyncIterator[dict[str, Any]]:
         api_logger.info("Starting SSE event generation", query=query[:100])
+        
+        # Create a task for tracking
+        current_task = asyncio.current_task()
+        if current_task:
+            self._active_streams.add(current_task)
 
         sse_events_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
 
@@ -164,6 +185,14 @@ class ChatService:
             assistant_buffer: list[str] = []
 
             async for state in graph_execution:
+                # Check for shutdown signal
+                if self._shutdown_event and self._shutdown_event.is_set():
+                    api_logger.info("Shutdown detected, terminating stream")
+                    yield SSEEventFactory.error(
+                        message="Server is shutting down", dialog_id=dialog_id
+                    ).to_sse()
+                    yield SSEEventFactory.done(dialog_id=dialog_id).to_sse()
+                    return
                 event_count += 1
                 api_logger.debug(
                     f"Processing state #{event_count}", state_keys=list(state.keys())
@@ -261,12 +290,23 @@ class ChatService:
             api_logger.info("SSE generation completed", total_events=event_count)
             yield SSEEventFactory.done(dialog_id=dialog_id).to_sse()
 
+        except asyncio.CancelledError:
+            api_logger.info("Stream cancelled due to shutdown")
+            yield SSEEventFactory.error(
+                message="Request cancelled due to server shutdown", dialog_id=dialog_id
+            ).to_sse()
+            yield SSEEventFactory.done(dialog_id=dialog_id).to_sse()
+            raise
         except Exception as e:
             api_logger.error("Error in SSE generation", exception=e)
             error_msg = f"Error processing request: {str(e)}"
             api_logger.error(f"Yielding error event: {error_msg}")
             yield SSEEventFactory.error(message=error_msg, dialog_id=dialog_id).to_sse()
             yield SSEEventFactory.done(dialog_id=dialog_id).to_sse()
+        finally:
+            # Remove task from active streams
+            if current_task and current_task in self._active_streams:
+                self._active_streams.discard(current_task)
 
     async def chat(self, query: str, context: dict[str, Any]) -> dict[str, Any]:
         orchestrator = self._get_orchestrator()

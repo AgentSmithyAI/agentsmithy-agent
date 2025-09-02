@@ -7,11 +7,16 @@ Requires a .env (DEFAULT_MODEL and OPENAI_API_KEY) and a --workdir path.
 
 import os
 import sys
+import signal
+import asyncio
 from argparse import ArgumentParser
 from pathlib import Path
 
 # Add the project root to Python path
 sys.path.insert(0, str(Path(__file__).parent))
+
+# Global flag for graceful shutdown
+shutdown_event = asyncio.Event()
 
 if __name__ == "__main__":
     # Setup basic logging for startup
@@ -30,6 +35,17 @@ if __name__ == "__main__":
             datefmt="%H:%M:%S",
         )
         startup_logger = logging.getLogger("server.startup")
+
+    # Signal handlers for graceful shutdown
+    def signal_handler(signum, frame):
+        """Handle shutdown signals gracefully."""
+        sig_name = signal.Signals(signum).name
+        startup_logger.info(f"Received {sig_name}, initiating graceful shutdown...")
+        shutdown_event.set()
+
+    # Register signal handlers
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
 
     # Check if .env file exists
     if not os.path.exists(".env"):
@@ -147,7 +163,8 @@ if __name__ == "__main__":
         reload_enabled_env = os.getenv("SERVER_RELOAD", "false").lower()
         reload_enabled = reload_enabled_env in {"1", "true", "yes", "on"}
 
-        uvicorn.run(
+        # Create custom server to pass shutdown event
+        config = uvicorn.Config(
             "agentsmithy_server.api.server:app",
             host=settings.server_host,
             port=settings.server_port,
@@ -155,6 +172,30 @@ if __name__ == "__main__":
             log_config=LOGGING_CONFIG,
             env_file=".env",
         )
+        server = uvicorn.Server(config)
+        
+        async def run_server():
+            # Pass shutdown event to the app
+            from agentsmithy_server.api.server import app
+            app.state.shutdown_event = shutdown_event
+            
+            # Monitor shutdown event
+            shutdown_task = asyncio.create_task(shutdown_event.wait())
+            serve_task = asyncio.create_task(server.serve())
+            
+            # Wait for either shutdown or server to complete
+            done, pending = await asyncio.wait(
+                {shutdown_task, serve_task}, return_when=asyncio.FIRST_COMPLETED
+            )
+            
+            # If shutdown was triggered, stop the server
+            if shutdown_task in done:
+                startup_logger.info("Stopping server due to shutdown signal...")
+                server.should_exit = True
+                await serve_task
+            
+        # Run server with asyncio
+        asyncio.run(run_server())
     except ImportError as e:
         startup_logger.error(
             "Error importing required modules",
