@@ -5,10 +5,10 @@ Bootstraps a Uvicorn ASGI server for agentsmithy_server.api.server:app.
 Requires a .env (DEFAULT_MODEL and OPENAI_API_KEY) and a --workdir path.
 """
 
-import os
-import sys
-import signal
 import asyncio
+import os
+import signal
+import sys
 from argparse import ArgumentParser
 from pathlib import Path
 
@@ -173,27 +173,28 @@ if __name__ == "__main__":
             env_file=".env",
         )
         server = uvicorn.Server(config)
-        
+
         async def run_server():
             # Pass shutdown event to the app
             from agentsmithy_server.api.server import app
+
             app.state.shutdown_event = shutdown_event
-            
+
             # Monitor shutdown event
             shutdown_task = asyncio.create_task(shutdown_event.wait())
             serve_task = asyncio.create_task(server.serve())
-            
+
             # Wait for either shutdown or server to complete
             done, pending = await asyncio.wait(
                 {shutdown_task, serve_task}, return_when=asyncio.FIRST_COMPLETED
             )
-            
+
             # If shutdown was triggered, stop the server
             if shutdown_task in done:
                 startup_logger.info("Stopping server due to shutdown signal...")
                 server.should_exit = True
                 await serve_task
-            
+
         # Run server with asyncio
         asyncio.run(run_server())
     except ImportError as e:

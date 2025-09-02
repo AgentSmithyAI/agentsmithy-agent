@@ -24,7 +24,7 @@ def stream_response(
 
         done_sent = False
         shutdown = False
-        
+
         try:
             async for event in event_stream:
                 try:
@@ -58,7 +58,7 @@ def stream_response(
                 yield SSEEventFactory.done(dialog_id=dialog_id).to_sse()
                 done_sent = True
             return
-        
+
         # Only send done if we completed normally (not shutdown)
         if not done_sent and not shutdown:
             yield SSEEventFactory.done(dialog_id=dialog_id).to_sse()

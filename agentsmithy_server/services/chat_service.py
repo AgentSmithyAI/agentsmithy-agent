@@ -158,7 +158,7 @@ class ChatService:
         project_dialog: tuple[Any, str] | None,
     ) -> AsyncIterator[dict[str, Any]]:
         api_logger.info("Starting SSE event generation", query=query[:100])
-        
+
         # Create a task for tracking
         current_task = asyncio.current_task()
         if current_task:

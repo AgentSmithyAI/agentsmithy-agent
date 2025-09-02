@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-from functools import lru_cache
 
 from agentsmithy_server.core.project import Project, get_current_project
 from agentsmithy_server.services.chat_service import ChatService
