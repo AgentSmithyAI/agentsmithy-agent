@@ -297,7 +297,6 @@ class ToolExecutor:
                     # Immediately yield file_edit in the same stream if tool produced a file change
                     if isinstance(result, dict) and result.get("type") in {
                         "replace_file_result",
-                        "patch_result",
                         "write_file_result",
                         "delete_file_result",
                     }:

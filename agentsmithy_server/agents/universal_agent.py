@@ -76,31 +76,22 @@ class UniversalAgent(BaseAgent):
         if should_use_tools:
             enforcement_message = SystemMessage(
                 content="""
-🚨🚨🚨 CRITICAL: USER WANTS CODE CHANGES - YOU MUST USE THE patch_file TOOL! 🚨🚨🚨
+🚨🚨🚨 CRITICAL: USER WANTS CODE CHANGES - YOU MUST USE THE replace_in_file TOOL! 🚨🚨🚨
 
 DO NOT JUST PROVIDE CODE IN YOUR RESPONSE!
-YOU MUST USE THE patch_file TOOL WITH THESE PARAMETERS:
+YOU MUST USE THE replace_in_file TOOL WITH THESE PARAMETERS:
 
-- file_path: The exact file path from the context
-- changes: An array of change objects, each with:
-  - line_start: Starting line number (1-based)
-  - line_end: Ending line number (1-based)  
-  - old_content: The exact current code
-  - new_content: The improved code
-  - reason: Brief explanation
+- file: The exact file path from the context
+- search: The exact current code to search for
+- replace: The new code to replace with
 
 EXAMPLE TOOL CALL:
 {
-  "name": "patch_file",
+  "name": "replace_in_file",
   "arguments": {
-    "file_path": "src/example.py",
-    "changes": [{
-      "line_start": 1,
-      "line_end": 2,
-      "old_content": "def old_function():\\n    return 'old'",
-      "new_content": "def improved_function():\\n    \\\"\\\"\\\"Better function.\\\"\\\"\\\"\\n    return 'improved'",
-      "reason": "Added documentation and better naming"
-    }]
+    "file": "src/example.py",
+    "search": "def old_function():\\n    return 'old'",
+    "replace": "def improved_function():\\n    \\\"\\\"\\\"Better function.\\\"\\\"\\\"\\n    return 'improved'"
   }
 }
 

@@ -6,27 +6,19 @@ from textwrap import dedent
 def build_tool_enforcement_message() -> str:
     return dedent(
         """
-        🚨 CRITICAL: USER REQUESTS CODE CHANGES — YOU MUST USE THE `patch_file` TOOL!
+        🚨 CRITICAL: USER REQUESTS CODE CHANGES — YOU MUST USE THE `replace_in_file` TOOL!
 
         Do NOT return raw code edits in your assistant content.
-        You MUST call `patch_file` with:
-        - file_path: exact path present in context
-        - changes: array of change objects with fields:
-          - line_start (1-based)
-          - line_end (1-based)
-          - old_content (exact current code)
-          - new_content (improved code)
-          - reason (short explanation)
+        You MUST call `replace_in_file` with:
+        - file: exact path present in context
+        - search: exact current code to find
+        - replace: new code to replace with
 
         Example tool call (conceptual):
-        name: patch_file
+        name: replace_in_file
         arguments:
-          file_path: src/example.py
-          changes:
-            - line_start: 1
-              line_end: 2
-              old_content: "def a():\n    pass"
-              new_content: "def a():\n    ..."
-              reason: "Add behavior"
+          file: src/example.py
+          search: "def a():\\n    pass"
+          replace: "def a():\\n    ..."
         """
     ).strip()
