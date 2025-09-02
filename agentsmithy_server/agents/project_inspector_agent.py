@@ -46,18 +46,21 @@ class ProjectInspectorAgent(BaseAgent):
                 "You are a software project inspector.\n"
                 "Goal: Inspect the repository to infer primary languages, frameworks, build tooling, test setup, and architectural structure.\n"
                 "Constraints:\n"
-                "- Use available tools (list_files, read_file, search_files).\n"
+                "- Use available tools.\n"
                 "- STRICT: When you are DONE, you MUST call the tool `return_inspection` with the final JSON object. Do not print JSON directly.\n"
                 "- Prefer scanning top-level files (package manifests, build files) and representative source directories.\n"
-                ""
                 "- Keep file reads minimal and targeted.\n"
             )
         )
         human = HumanMessage(
             content=(
                 f"The project root is: {project.root}.\n"
-                "Step plan: (1) list_files at root (non-recursive); (2) read_file manifests like requirements.txt, pyproject.toml;"
-                " (3) if needed, do targeted list_files on 'src' or 'app' only; (4) when ready, call return_inspection with final JSON."
+                "Step plan:"
+                "(1) list_files at root (non-recursive);"
+                "(2) read_file manifests;"
+                "(3) if needed, do targeted list_files on source code directories;"
+                "(4) incpect avalilable build tools, package managers, linters, and other tools;"
+                "(5) when ready, call return_inspection with final JSON."
             )
         )
 

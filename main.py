@@ -114,6 +114,8 @@ if __name__ == "__main__":
             pass
 
         # Treat workdir as the active project; inspect and save metadata if missing
+        should_inspect = False
+        project = None
         try:
             import asyncio
 
@@ -126,20 +128,10 @@ if __name__ == "__main__":
             project = get_current_project()
             project.root.mkdir(parents=True, exist_ok=True)
             project.ensure_state_dir()
-            if not project.has_metadata():
-                # Use a tool-capable model for inspector; allow env override
-                import os as _os
-
-                inspector_model = _os.getenv("AGENTSMITHY_INSPECTOR_MODEL")
-                llm_provider = LLMFactory.create(
-                    "openai",
-                    model=inspector_model,
-                    agent_name="project_inspector",
-                )
-                inspector = ProjectInspectorAgent(llm_provider, None)
-                asyncio.run(inspector.inspect_and_save(project))
+            should_inspect = not project.has_metadata()
+            if should_inspect:
                 startup_logger.info(
-                    "Project analyzed by inspector agent and metadata saved",
+                    "Scheduling background project inspection",
                     project=project.name,
                 )
         except Exception as e:
@@ -187,6 +179,34 @@ if __name__ == "__main__":
             from agentsmithy_server.api.server import app
 
             app.state.shutdown_event = shutdown_event
+
+            # Optionally run project inspector in background (non-blocking)
+            inspector_task = None
+            if should_inspect:
+                async def _run_inspector():
+                    try:
+                        inspector = ProjectInspectorAgent(
+                            LLMFactory.create(
+                                "openai",
+                                model=os.getenv("AGENTSMITHY_INSPECTOR_MODEL"),
+                                agent_name="project_inspector",
+                            ),
+                            None,
+                        )
+                        await inspector.inspect_and_save(project)
+                        startup_logger.info(
+                            "Project analyzed by inspector agent and metadata saved",
+                            project=project.name,
+                        )
+                    except Exception as e:
+                        import traceback as _tb
+                        startup_logger.error(
+                            "Background project inspection failed",
+                            error=str(e),
+                            traceback="".join(_tb.format_exception(type(e), e, e.__traceback__)),
+                        )
+                inspector_task = asyncio.create_task(_run_inspector())
+                app.state.inspector_task = inspector_task
 
             # Monitor shutdown event
             shutdown_task = asyncio.create_task(shutdown_event.wait())
