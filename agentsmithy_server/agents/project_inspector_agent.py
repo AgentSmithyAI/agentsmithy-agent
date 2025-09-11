@@ -59,7 +59,7 @@ class ProjectInspectorAgent(BaseAgent):
                 "(1) list_files at root (non-recursive);"
                 "(2) read_file manifests;"
                 "(3) if needed, do targeted list_files on source code directories;"
-                "(4) incpect avalilable build tools, package managers, linters, and other tools;"
+                "(4) inspect available build tools, package managers, linters, and other tools;"
                 "(5) when ready, call return_inspection with final JSON."
             )
         )
