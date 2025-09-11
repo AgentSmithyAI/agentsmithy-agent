@@ -5,13 +5,18 @@ Bootstraps a Uvicorn ASGI server for agentsmithy_server.api.server:app.
 Requires a .env (DEFAULT_MODEL and OPENAI_API_KEY) and a --workdir path.
 """
 
+import asyncio
 import os
+import signal
 import sys
 from argparse import ArgumentParser
 from pathlib import Path
 
 # Add the project root to Python path
 sys.path.insert(0, str(Path(__file__).parent))
+
+# Global flag for graceful shutdown
+shutdown_event = asyncio.Event()
 
 if __name__ == "__main__":
     # Setup basic logging for startup
@@ -30,6 +35,17 @@ if __name__ == "__main__":
             datefmt="%H:%M:%S",
         )
         startup_logger = logging.getLogger("server.startup")
+
+    # Signal handlers for graceful shutdown
+    def signal_handler(signum, frame):
+        """Handle shutdown signals gracefully."""
+        sig_name = signal.Signals(signum).name
+        startup_logger.info(f"Received {sig_name}, initiating graceful shutdown...")
+        shutdown_event.set()
+
+    # Register signal handlers
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
 
     # Check if .env file exists
     if not os.path.exists(".env"):
@@ -86,10 +102,20 @@ if __name__ == "__main__":
         )
 
         chosen_port = ensure_singleton_and_select_port(
-            get_current_project(), base_port=int(os.getenv("SERVER_PORT", "11434"))
+            get_current_project(),
+            base_port=int(os.getenv("SERVER_PORT", "11434")),
+            host=settings.server_host,
+            max_probe=20,
         )
+        # Keep settings in sync with the chosen port for logging/uvicorn
+        try:
+            settings.server_port = chosen_port  # type: ignore[attr-defined]
+        except Exception:
+            pass
 
         # Treat workdir as the active project; inspect and save metadata if missing
+        should_inspect = False
+        project = None
         try:
             import asyncio
 
@@ -102,20 +128,10 @@ if __name__ == "__main__":
             project = get_current_project()
             project.root.mkdir(parents=True, exist_ok=True)
             project.ensure_state_dir()
-            if not project.has_metadata():
-                # Use a tool-capable model for inspector; allow env override
-                import os as _os
-
-                inspector_model = _os.getenv("AGENTSMITHY_INSPECTOR_MODEL")
-                llm_provider = LLMFactory.create(
-                    "openai",
-                    model=inspector_model,
-                    agent_name="project_inspector",
-                )
-                inspector = ProjectInspectorAgent(llm_provider, None)
-                asyncio.run(inspector.inspect_and_save(project))
+            should_inspect = not project.has_metadata()
+            if should_inspect:
                 startup_logger.info(
-                    "Project analyzed by inspector agent and metadata saved",
+                    "Scheduling background project inspection",
                     project=project.name,
                 )
         except Exception as e:
@@ -134,8 +150,8 @@ if __name__ == "__main__":
 
         startup_logger.info(
             "Starting AgentSmithy Server",
-            server_url=f"http://{settings.server_host}:{settings.server_port}",
-            docs_url=f"http://{settings.server_host}:{settings.server_port}/docs",
+            server_url=f"http://{settings.server_host}:{chosen_port}",
+            docs_url=f"http://{settings.server_host}:{chosen_port}/docs",
             workdir=str(workdir_path),
             state_dir=str(state_dir),
         )
@@ -147,14 +163,68 @@ if __name__ == "__main__":
         reload_enabled_env = os.getenv("SERVER_RELOAD", "false").lower()
         reload_enabled = reload_enabled_env in {"1", "true", "yes", "on"}
 
-        uvicorn.run(
+        # Create custom server to pass shutdown event
+        config = uvicorn.Config(
             "agentsmithy_server.api.server:app",
             host=settings.server_host,
-            port=settings.server_port,
+            port=chosen_port,
             reload=reload_enabled,
             log_config=LOGGING_CONFIG,
             env_file=".env",
         )
+        server = uvicorn.Server(config)
+
+        async def run_server():
+            # Pass shutdown event to the app
+            from agentsmithy_server.api.server import app
+
+            app.state.shutdown_event = shutdown_event
+
+            # Optionally run project inspector in background (non-blocking)
+            inspector_task = None
+            if should_inspect:
+                async def _run_inspector():
+                    try:
+                        inspector = ProjectInspectorAgent(
+                            LLMFactory.create(
+                                "openai",
+                                model=os.getenv("AGENTSMITHY_INSPECTOR_MODEL"),
+                                agent_name="project_inspector",
+                            ),
+                            None,
+                        )
+                        await inspector.inspect_and_save(project)
+                        startup_logger.info(
+                            "Project analyzed by inspector agent and metadata saved",
+                            project=project.name,
+                        )
+                    except Exception as e:
+                        import traceback as _tb
+                        startup_logger.error(
+                            "Background project inspection failed",
+                            error=str(e),
+                            traceback="".join(_tb.format_exception(type(e), e, e.__traceback__)),
+                        )
+                inspector_task = asyncio.create_task(_run_inspector())
+                app.state.inspector_task = inspector_task
+
+            # Monitor shutdown event
+            shutdown_task = asyncio.create_task(shutdown_event.wait())
+            serve_task = asyncio.create_task(server.serve())
+
+            # Wait for either shutdown or server to complete
+            done, pending = await asyncio.wait(
+                {shutdown_task, serve_task}, return_when=asyncio.FIRST_COMPLETED
+            )
+
+            # If shutdown was triggered, stop the server
+            if shutdown_task in done:
+                startup_logger.info("Stopping server due to shutdown signal...")
+                server.should_exit = True
+                await serve_task
+
+        # Run server with asyncio
+        asyncio.run(run_server())
     except ImportError as e:
         startup_logger.error(
             "Error importing required modules",
