@@ -1,8 +1,9 @@
 """Tests for WebSearchTool."""
 
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch, Mock
 import sys
+from unittest.mock import AsyncMock, Mock, patch
+
+import pytest
 
 from agentsmithy_server.tools.web_search import WebSearchTool
 
@@ -32,7 +33,7 @@ async def test_web_search_success():
     mock_ddgs_instance = AsyncMock()
     mock_ddgs_class = Mock(return_value=mock_ddgs_instance)
     mock_ddgs_module.AsyncDDGS = mock_ddgs_class
-    
+
     # Set up async context manager
     mock_ddgs_instance.__aenter__.return_value = mock_ddgs_instance
     mock_ddgs_instance.__aexit__.return_value = None
@@ -90,7 +91,7 @@ async def test_web_search_exception():
     mock_ddgs_instance = AsyncMock()
     mock_ddgs_class = Mock(return_value=mock_ddgs_instance)
     mock_ddgs_module.AsyncDDGS = mock_ddgs_class
-    
+
     # Set up async context manager
     mock_ddgs_instance.__aenter__.return_value = mock_ddgs_instance
     mock_ddgs_instance.__aexit__.return_value = None
@@ -111,14 +112,17 @@ async def test_web_search_default_num_results():
     tool = WebSearchTool()
     tool._sse_callback = AsyncMock()
 
-    mock_results = [{"title": f"Result {i}", "href": f"url{i}", "body": f"snippet{i}"} for i in range(5)]
+    mock_results = [
+        {"title": f"Result {i}", "href": f"url{i}", "body": f"snippet{i}"}
+        for i in range(5)
+    ]
 
     # Mock the duckduckgo_search module
     mock_ddgs_module = Mock()
     mock_ddgs_instance = AsyncMock()
     mock_ddgs_class = Mock(return_value=mock_ddgs_instance)
     mock_ddgs_module.AsyncDDGS = mock_ddgs_class
-    
+
     # Set up async context manager
     mock_ddgs_instance.__aenter__.return_value = mock_ddgs_instance
     mock_ddgs_instance.__aexit__.return_value = None

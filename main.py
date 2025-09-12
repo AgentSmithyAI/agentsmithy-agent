@@ -183,6 +183,7 @@ if __name__ == "__main__":
             # Optionally run project inspector in background (non-blocking)
             inspector_task = None
             if should_inspect:
+
                 async def _run_inspector():
                     try:
                         inspector = ProjectInspectorAgent(
@@ -200,11 +201,15 @@ if __name__ == "__main__":
                         )
                     except Exception as e:
                         import traceback as _tb
+
                         startup_logger.error(
                             "Background project inspection failed",
                             error=str(e),
-                            traceback="".join(_tb.format_exception(type(e), e, e.__traceback__)),
+                            traceback="".join(
+                                _tb.format_exception(type(e), e, e.__traceback__)
+                            ),
                         )
+
                 inspector_task = asyncio.create_task(_run_inspector())
                 app.state.inspector_task = inspector_task
 

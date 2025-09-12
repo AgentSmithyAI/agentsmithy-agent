@@ -32,30 +32,37 @@ class WebSearchTool(BaseTool):  # type: ignore[override]
 
         try:
             # Import here to avoid loading the library if not used
-            from duckduckgo_search import DDGS
             import asyncio
+
+            from duckduckgo_search import DDGS
 
             # Run synchronous search in thread pool
             def sync_search():
                 results = []
                 # Use different backend and add headers to avoid rate limiting
-                with DDGS(headers={
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-                }) as ddgs:
+                with DDGS(
+                    headers={
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                    }
+                ) as ddgs:
                     # Try different backends if one fails
-                    for backend in ['html', 'lite']:
+                    for backend in ["html", "lite"]:
                         try:
-                            search_results = list(ddgs.text(
-                                query, 
-                                max_results=num_results,
-                                backend=backend
-                            ))
+                            search_results = list(
+                                ddgs.text(
+                                    query, max_results=num_results, backend=backend
+                                )
+                            )
                             for result in search_results:
                                 results.append(
                                     {
                                         "title": result.get("title", ""),
-                                        "url": result.get("href", result.get("link", "")),
-                                        "snippet": result.get("body", result.get("snippet", "")),
+                                        "url": result.get(
+                                            "href", result.get("link", "")
+                                        ),
+                                        "snippet": result.get(
+                                            "body", result.get("snippet", "")
+                                        ),
                                     }
                                 )
                             if results:  # If we got results, stop trying other backends
