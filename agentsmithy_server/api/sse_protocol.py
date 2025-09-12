@@ -17,6 +17,7 @@ from agentsmithy_server.core.events import (
     ReasoningEndEvent,
     ReasoningEvent,
     ReasoningStartEvent,
+    SearchEvent,
     ToolCallEvent,
 )
 
@@ -31,6 +32,7 @@ __all__ = [
     "ReasoningEndEvent",
     "ToolCallEvent",
     "FileEditEvent",
+    "SearchEvent",
     "ErrorEvent",
     "DoneEvent",
     "EventFactory",

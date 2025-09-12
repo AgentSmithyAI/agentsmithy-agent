@@ -21,6 +21,7 @@ class EventType(str, Enum):
     REASONING_END = "reasoning_end"
     TOOL_CALL = "tool_call"
     FILE_EDIT = "file_edit"
+    SEARCH = "search"
     ERROR = "error"
     DONE = "done"
 
@@ -94,6 +95,12 @@ class ErrorEvent(BaseEvent):
 
 
 @dataclass
+class SearchEvent(BaseEvent):
+    type: Literal[EventType.SEARCH] = EventType.SEARCH
+    query: str = ""
+
+
+@dataclass
 class DoneEvent(BaseEvent):
     type: Literal[EventType.DONE] = EventType.DONE
     done: bool = True
@@ -146,6 +153,10 @@ class EventFactory:
         return ErrorEvent(error=message, dialog_id=dialog_id)
 
     @staticmethod
+    def search(query: str, dialog_id: str | None = None) -> SearchEvent:
+        return SearchEvent(query=query, dialog_id=dialog_id)
+
+    @staticmethod
     def done(dialog_id: str | None = None) -> DoneEvent:
         return DoneEvent(dialog_id=dialog_id)
 
@@ -172,6 +183,8 @@ class EventFactory:
             return FileEditEvent(**data)
         if et == EventType.ERROR:
             return ErrorEvent(**data)
+        if et == EventType.SEARCH:
+            return SearchEvent(**data)
         if et == EventType.DONE or data.get("done"):
             return DoneEvent(**data)
         if "content" in data:
