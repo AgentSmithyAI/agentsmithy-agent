@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from typing import Any
 
 import aiohttp
@@ -10,7 +9,9 @@ from .base_tool import BaseTool
 
 
 class WebFetchArgs(BaseModel):
-    url: HttpUrl = Field(..., description="URL to fetch. Automatically chooses HTTP or JS render.")
+    url: HttpUrl = Field(
+        ..., description="URL to fetch. Automatically chooses HTTP or JS render."
+    )
 
 
 class WebFetchTool(BaseTool):  # type: ignore[override]
@@ -25,7 +26,6 @@ class WebFetchTool(BaseTool):  # type: ignore[override]
         args = WebFetchArgs(**kwargs)
         # Step 1: Try plain HTTP fetch quickly
         http_res = await self._fetch_http(args)
-        use_js = False
 
         if http_res.get("type") == "web_browse_result":
             # If we successfully fetched text-like content, decide if this is good enough
@@ -44,16 +44,18 @@ class WebFetchTool(BaseTool):  # type: ignore[override]
                 # Very short HTML often indicates client-only shells
                 is_suspiciously_short = len(text) < 512 and "<html" in lowered
 
-                if ("html" in content_type) and (requires_js_markers or is_suspiciously_short):
-                    use_js = True
+                if ("html" in content_type) and (
+                    requires_js_markers or is_suspiciously_short
+                ):
+                    pass
                 else:
                     return http_res
             else:
                 # HTTP returned non-text or empty; try JS as fallback
-                use_js = True
+                pass
         else:
             # HTTP failed (timeout/network/etc.). Try JS before giving up.
-            use_js = True
+            pass
 
         # Step 2: JS rendering fallback if available
         js_res = await self._render_js(args)
@@ -101,7 +103,7 @@ class WebFetchTool(BaseTool):  # type: ignore[override]
                         "encoding": encoding,
                         "text": text,
                     }
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 return {
                     "type": "web_browse_error",
                     "mode": "http",
@@ -120,7 +122,7 @@ class WebFetchTool(BaseTool):  # type: ignore[override]
 
     async def _render_js(self, args: WebFetchArgs) -> dict[str, Any]:
         try:
-            from playwright.async_api import async_playwright  # type: ignore
+            from playwright.async_api import async_playwright
         except Exception as e:
             return {
                 "type": "web_browse_error",
@@ -134,7 +136,7 @@ class WebFetchTool(BaseTool):  # type: ignore[override]
             }
 
         try:
-            async with async_playwright() as p:  # type: ignore
+            async with async_playwright() as p:
                 browser = await p.chromium.launch(headless=True)
                 context = await browser.new_context(
                     user_agent=(
