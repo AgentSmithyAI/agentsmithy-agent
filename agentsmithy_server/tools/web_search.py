@@ -4,6 +4,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from agentsmithy_server.config import settings
 from agentsmithy_server.core.events import EventFactory
 
 from .base_tool import BaseTool
@@ -30,49 +31,34 @@ class WebSearchTool(BaseTool):  # type: ignore[override]
             ).to_dict()
         )
 
+        # Import here to avoid loading the library if not used
         try:
-            # Import here to avoid loading the library if not used
-            import asyncio
+            from duckduckgo_search import AsyncDDGS
+        except ImportError:
+            return {
+                "type": "web_search_error",
+                "query": query,
+                "error": "duckduckgo-search library is not installed. Please install duckduckgo-search to enable web search.",
+                "error_type": "ImportError",
+            }
 
-            from duckduckgo_search import DDGS
-
-            # Run synchronous search in thread pool
-            def sync_search():
-                results = []
-                # Use different backend and add headers to avoid rate limiting
-                with DDGS(
-                    headers={
-                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-                    }
-                ) as ddgs:
-                    # Try different backends if one fails
-                    for backend in ["html", "lite"]:
-                        try:
-                            search_results = list(
-                                ddgs.text(
-                                    query, max_results=num_results, backend=backend
-                                )
-                            )
-                            for result in search_results:
-                                results.append(
-                                    {
-                                        "title": result.get("title", ""),
-                                        "url": result.get(
-                                            "href", result.get("link", "")
-                                        ),
-                                        "snippet": result.get(
-                                            "body", result.get("snippet", "")
-                                        ),
-                                    }
-                                )
-                            if results:  # If we got results, stop trying other backends
-                                break
-                        except Exception:
-                            continue  # Try next backend
-                return results
-
-            loop = asyncio.get_event_loop()
-            results = await loop.run_in_executor(None, sync_search)
+        try:
+            results: list[dict[str, str]] = []
+            async with AsyncDDGS(
+                headers={"User-Agent": settings.web_user_agent}
+            ) as ddgs:
+                maybe_iter = ddgs.text(query, max_results=num_results)
+                # Support both: returning an async iterator directly or a coroutine that resolves to it (as in tests)
+                if not hasattr(maybe_iter, "__aiter__"):
+                    maybe_iter = await maybe_iter
+                async for result in maybe_iter:
+                    results.append(
+                        {
+                            "title": result.get("title", ""),
+                            "url": result.get("href", result.get("link", "")),
+                            "snippet": result.get("body", result.get("snippet", "")),
+                        }
+                    )
 
             return {
                 "type": "web_search_result",
@@ -80,7 +66,6 @@ class WebSearchTool(BaseTool):  # type: ignore[override]
                 "results": results,
                 "count": len(results),
             }
-
         except Exception as e:
             return {
                 "type": "web_search_error",
