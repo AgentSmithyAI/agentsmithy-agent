@@ -9,6 +9,7 @@ from .run_command import RunCommandTool
 from .search_files import SearchFilesTool
 from .tool_manager import ToolManager
 from .web_fetch import WebFetchTool
+from .web_search import WebSearchTool
 from .write_file import WriteFileTool
 
 
@@ -28,4 +29,5 @@ class ToolFactory:
         manager.register(DeleteFileTool())
         manager.register(RunCommandTool())
         manager.register(WebFetchTool())
+        manager.register(WebSearchTool())
         return manager

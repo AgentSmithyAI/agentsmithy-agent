@@ -52,6 +52,7 @@ class ChatService:
         if isinstance(chunk, dict) and chunk.get("type") in {
             "file_edit",
             "tool_call",
+            "search",
             "error",
             "chat",
             "reasoning",
@@ -92,6 +93,11 @@ class ChatService:
                 yield SSEEventFactory.tool_call(
                     name=chunk.get("name", ""),
                     args=chunk.get("args", {}),
+                    dialog_id=dialog_id,
+                ).to_sse()
+            elif chunk["type"] == "search":
+                yield SSEEventFactory.search(
+                    query=chunk.get("query", ""),
                     dialog_id=dialog_id,
                 ).to_sse()
             else:
@@ -140,6 +146,10 @@ class ChatService:
                 elif tool_event.get("type") == "error":
                     sse = SSEEventFactory.error(
                         message=tool_event.get("error", ""), dialog_id=dialog_id
+                    ).to_sse()
+                elif tool_event.get("type") == "search":
+                    sse = SSEEventFactory.search(
+                        query=tool_event.get("query", ""), dialog_id=dialog_id
                     ).to_sse()
                 else:
                     sse = SSEEventFactory.chat(
