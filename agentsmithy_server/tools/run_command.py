@@ -11,6 +11,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from agentsmithy_server.utils.logger import agent_logger
+
 from .base_tool import BaseTool
 
 
@@ -163,13 +165,55 @@ class RunCommandTool(BaseTool):  # type: ignore[override]
                     env=env,
                 )
             else:
-                # Without shell, split command into argv using shlex (POSIX); on Windows, shlex is still acceptable for simple cases
-                # Convert to argv list
+                # Build argv for shell=False
                 if os.name == "nt":
-                    # On Windows, if user provided quotes, shlex.split with posix=False preserves quoting rules better
-                    argv = shlex.split(args.command, posix=False)
+                    argv_tmp = shlex.split(args.command, posix=False)
                 else:
-                    argv = shlex.split(args.command, posix=True)
+                    argv_tmp = shlex.split(args.command, posix=True)
+
+                # Detect Python executable and '-c' usage based on argv_tmp, but reconstruct code from the original string
+                is_python = False
+                try:
+                    exe_base = Path(argv_tmp[0]).name.lower() if argv_tmp else ""
+                    is_python = (
+                        exe_base.startswith("python")
+                        or exe_base == Path(sys.executable).name.lower()
+                    )
+                except Exception:
+                    is_python = False
+
+                if is_python and "-c" in argv_tmp:
+                    # Locate '-c' in the original string and keep everything after it as a single code argument
+                    try:
+                        c_pos = args.command.index("-c")
+                    except ValueError:
+                        c_pos = -1
+                    if c_pos != -1:
+                        j = c_pos + 2
+                        # Skip following whitespace
+                        while j < len(args.command) and args.command[j].isspace():
+                            j += 1
+                        prefix = args.command[:j].strip()
+                        code_str = args.command[j:]
+                        # Normalize accidental literal newlines in code string to escaped form for Python -c
+                        if "\n" in code_str:
+                            code_str = code_str.replace("\n", r"\n")
+                        # Parse prefix (up to and including -c) to argv, then append code verbatim
+                        if os.name == "nt":
+                            prefix_argv = shlex.split(prefix, posix=False)
+                        else:
+                            prefix_argv = shlex.split(prefix, posix=True)
+                        argv = prefix_argv + [code_str]
+                    else:
+                        # Fallback: join the remainder tokens after '-c' (may lose quotes, but last resort)
+                        c_index = argv_tmp.index("-c")
+                        argv = argv_tmp[: c_index + 1] + [
+                            " ".join(argv_tmp[c_index + 1 :])
+                        ]
+                else:
+                    argv = argv_tmp
+
+                agent_logger.debug("run_command exec", argv=argv, shell=args.shell)
                 proc = await asyncio.create_subprocess_exec(
                     *argv,
                     stdout=asyncio.subprocess.PIPE,
@@ -183,6 +227,10 @@ class RunCommandTool(BaseTool):  # type: ignore[override]
                     proc.communicate(), timeout=float(args.timeout)
                 )
                 exit_code = proc.returncode
+                try:
+                    agent_logger.debug("run_command done", exit_code=exit_code)
+                except Exception:
+                    pass
             except TimeoutError:
                 # Kill and collect any partial output
                 try:
@@ -241,6 +289,13 @@ class RunCommandTool(BaseTool):  # type: ignore[override]
 
             stdout_text, stdout_trunc, stdout_trunc_bytes = _decode_and_truncate(out_b)
             stderr_text, stderr_trunc, stderr_trunc_bytes = _decode_and_truncate(err_b)
+
+            try:
+                agent_logger.debug(
+                    "run_command outputs", stdout=stdout_text, stderr=stderr_text
+                )
+            except Exception:
+                pass
 
             return {
                 "type": "run_command_result",

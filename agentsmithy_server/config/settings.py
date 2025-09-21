@@ -65,6 +65,15 @@ class Settings(BaseSettings):
         default=True, description="Enable streaming responses"
     )
 
+    # Web/HTTP Configuration
+    web_user_agent: str = Field(
+        default=(
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+        ),
+        description="Default User-Agent for outbound HTTP requests and headless browser contexts",
+    )
+
     # Logging Configuration
     log_level: str = Field(
         default="INFO", description="Logging level (DEBUG, INFO, WARNING, ERROR)"

@@ -422,14 +422,23 @@ def _apply_marker_style_blocks(diff_text: str, file_path: Path) -> str:
             replace_buf.append(line)
         elif state == "replace_after_marker":
             # Collecting replacement content after +++++++ REPLACE marker
-            # This is the rest of the diff content
+            # Stop if we encounter a closing marker like '>>>>>>>' on its own line
+            if re.match(r"^>{3,}\s*$", line):
+                # finalize this replacement block
+                state = "idle"
+                if pending_search:
+                    replace_block = "\n".join(replace_buf)
+                    apply_one(pending_search, replace_block)
+                    pending_search = ""
+                replace_buf = []
+                continue
+            # Otherwise, this is the rest of the diff content
             replace_buf.append(line)
 
     # Handle case where diff ends in replace_after_marker state
     if state == "replace_after_marker" and pending_search:
         replace_block = "\n".join(replace_buf)
         apply_one(pending_search, replace_block)
-
     # Apply all replacements in order
     replacements.sort(key=lambda r: r["start"])
 
