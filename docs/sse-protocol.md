@@ -141,11 +141,38 @@ Signals the end of the stream.
 
 ## Client Handling Skeleton
 
-```javascript
-const es = new EventSource('/api/chat');
+SSE is streamed over a POST request. Use `fetch` with streaming reader:
 
-es.onmessage = (event) => {
-  const data = JSON.parse(event.data);
+```javascript
+async function streamChat(body) {
+  const res = await fetch('/api/chat', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Accept': 'text/event-stream',
+    },
+    body: JSON.stringify(body),
+  });
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const chunks = buffer.split('\n\n');
+    // keep last partial chunk in buffer
+    buffer = chunks.pop() || '';
+    for (const chunk of chunks) {
+      if (!chunk.startsWith('data: ')) continue;
+      const json = JSON.parse(chunk.slice(6));
+      handleEvent(json);
+    }
+  }
+}
+
+function handleEvent(data) {
   switch (data.type) {
     case 'chat_start':
       handleChatStart(data);
@@ -180,8 +207,79 @@ es.onmessage = (event) => {
     default:
       handleChat(data);
   }
-};
+}
 ```
+
+## Web fetching and search
+
+- **Search (`web_search`)**: does not emit a dedicated SSE event; you'll only see the `tool_call` for `web_search`. The actual search results are returned as a tool result and summarized by the model into `chat` chunks.
+- **Page fetching (`web_fetch`)**: currently does not emit a dedicated SSE event for payloads. You will see:
+
+  - `tool_call` with `name: "web_fetch"` and the URL args when fetch begins
+  - optional `error` if the tool fails
+  - any file modifications the tool decides to make as `file_edit`
+  - the fetched content is returned in the tool result (added to the model conversation internally) and typically summarized back to the client via `chat` messages
+
+Example sequence for a fetch:
+
+```
+data: {"type": "tool_call", "name": "web_fetch", "args": {"url": "https://example.com"}, "dialog_id": "01J..."}
+
+data: {"type": "chat_start", "dialog_id": "01J..."}
+
+data: {"type": "chat", "content": "Fetched https://example.com. The page mentions...", "dialog_id": "01J..."}
+
+data: {"type": "chat_end", "dialog_id": "01J..."}
+
+data: {"type": "done", "done": true, "dialog_id": "01J..."}
+```
+
+Note: Large raw page payloads are not streamed as SSE to avoid overwhelming the client; instead, the model is expected to extract and stream relevant summaries via `chat` events. If you need first-class streaming of fetch payloads, consider adding a dedicated event type and emitting it from the `web_fetch` tool.
+
+Example `tool_call` for web search:
+
+```
+data: {"type": "tool_call", "name": "web_search", "args": {"query": "fastapi sse", "num_results": 5}, "dialog_id": "01J..."}
+```
+
+## Tool result types (non-SSE)
+
+Tools return structured JSON results that are not emitted as SSE events directly. These results are injected back into the model conversation and may lead to `chat`/`file_edit` events.
+
+Common result types include:
+
+- `web_browse_result` / `web_browse_error` — from `web_fetch`
+- `web_search_result` / `web_search_error` — from `web_search`
+- `read_file_result` / `read_file_error`
+- `write_file_result` / `replace_file_result` / `delete_file_result`
+- `search_files_result` / `search_files_error`
+- `list_files_result` / `list_files_error`
+- `run_command_result` / `run_command_error` / `run_command_timeout`
+- `tool_error` — generic tool failure wrapper
+
+These appear inside the tool execution pipeline and are summarized to the client via `chat` and `file_edit` where applicable.
+
+## What is streamed vs not
+
+Streamed as SSE (arrive incrementally over the connection):
+
+- `chat_start`, `chat` (chunks), `chat_end`
+- `reasoning_start`, `reasoning` (chunks), `reasoning_end`
+- `tool_call` (when a tool invocation begins; includes tool name and args)
+- `file_edit` (when a tool edits/creates/deletes a file)
+- `error` (on failure) followed by `done`
+- `done` (always sent to close the stream)
+
+Not streamed (returned as tool results and consumed by the model):
+
+- `web_browse_result` / `web_browse_error` (from `web_fetch`)
+- `web_search_result` / `web_search_error` (from `web_search`)
+- `read_file_result`, `write_file_result`, `replace_file_result`, `delete_file_result`
+- `search_files_result`, `list_files_result`
+- `run_command_result`, `run_command_error`, `run_command_timeout`
+- `tool_error`
+
+Rationale: heavy payloads (like full HTML) are not streamed as SSE by default to avoid flooding UIs. The model reads tool results and emits concise `chat` updates instead. If your client needs raw payload streaming, introduce a dedicated SSE type and emit it from the tool.
 
 ## Example Stream
 

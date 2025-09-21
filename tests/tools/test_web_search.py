@@ -56,12 +56,8 @@ async def test_web_search_success():
     assert result["results"][0]["snippet"] == "This is a test result snippet 1"
     assert result["count"] == 2
 
-    # Verify SSE callback was called with search event
-    tool._sse_callback.assert_called_once()
-    call_args = tool._sse_callback.call_args[0][0]
-    assert call_args["type"] == "search"
-    assert call_args["query"] == "test query"
-    assert call_args["dialog_id"] == "test-dialog"
+    # Tool no longer emits a separate SSE 'search' event
+    tool._sse_callback.assert_not_called()
 
 
 @pytest.mark.asyncio

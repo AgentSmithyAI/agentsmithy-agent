@@ -52,7 +52,7 @@ class ChatService:
         if isinstance(chunk, dict) and chunk.get("type") in {
             "file_edit",
             "tool_call",
-            "search",
+            # "search",  # deprecated: no longer emitted as SSE
             "error",
             "chat",
             "reasoning",
@@ -95,11 +95,8 @@ class ChatService:
                     args=chunk.get("args", {}),
                     dialog_id=dialog_id,
                 ).to_sse()
-            elif chunk["type"] == "search":
-                yield SSEEventFactory.search(
-                    query=chunk.get("query", ""),
-                    dialog_id=dialog_id,
-                ).to_sse()
+            # elif chunk["type"] == "search":
+            #     pass  # ignore deprecated search event if any legacy tool emits it
             else:
                 # Emit error and signal abort
                 yield SSEEventFactory.error(
@@ -147,10 +144,8 @@ class ChatService:
                     sse = SSEEventFactory.error(
                         message=tool_event.get("error", ""), dialog_id=dialog_id
                     ).to_sse()
-                elif tool_event.get("type") == "search":
-                    sse = SSEEventFactory.search(
-                        query=tool_event.get("query", ""), dialog_id=dialog_id
-                    ).to_sse()
+                # elif tool_event.get("type") == "search":
+                #     continue  # ignore deprecated search event
                 else:
                     sse = SSEEventFactory.chat(
                         content=str(tool_event), dialog_id=dialog_id

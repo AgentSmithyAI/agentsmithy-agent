@@ -12,7 +12,7 @@ A local AI server similar to Cursor, built using LangGraph for orchestration, RA
 - 🤖 **Universal agent** orchestrated with LangGraph
 - 📚 **RAG (Retrieval-Augmented Generation)** for context handling
 - 🔄 **Streaming responses** via Server-Sent Events (SSE)
-- 🧰 **Tool-aware workflow** with structured SSE events (chat/reasoning/tool_call/file_edit)
+- 🧰 **Tool-aware workflow** with structured SSE events (chat/reasoning/tool_call/file_edit/search)
 - 🔌 **Flexible LLM provider interface** (OpenAI supported out of the box)
 - 🗄️ **ChromaDB** vector store for context persistence
 
@@ -42,13 +42,19 @@ git clone <repo-url>
 cd agentsmithy-local
 ```
 
-2. Create a virtual environment:
+2. Create a virtual environment (option A: Makefile-managed):
+```bash
+make install         # creates .venv and installs requirements
+make install-dev     # optional: adds dev tooling (ruff, black, mypy, pytest)
+```
+
+Or create it manually (option B):
 ```bash
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 ```
 
-3. Install dependencies:
+3. Install dependencies (skip if you used `make install`):
 ```bash
 pip install -r requirements.txt
 ```
@@ -81,15 +87,19 @@ python main.py --workdir /abs/path/to/workspace
 
 The server starts at base port `11434` (auto-increments if busy). Check startup logs for the actual URL, e.g., `http://localhost:11434`.
 
+Notes:
+- `--workdir` should point to the project directory you want to work with. The server stores state in `<workdir>/.agentsmithy`.
+- If a server is already running for the same project, startup will abort with a helpful message.
+
 ### Startup Parameters
 
-- `--workdir` (required): absolute path to the workspace directory. On startup, the server ensures `/abs/path/to/workspace/.agentsmithy` exists. Project-specific data (e.g., RAG index) is stored under each project's `.agentsmithy` directory inside the workspace. The server keeps this path in-process; no env var is used.
+- `--workdir` (required): absolute path to the project directory. On startup, the server ensures `/abs/path/to/workspace/.agentsmithy` exists. Project-specific data (e.g., RAG index, dialogs, status.json) is stored under each project's `.agentsmithy` directory. The server keeps this path in-process; no env var is used.
 
 ### Projects and RAG Storage
 
 - Workspace root state: `<workdir>/.agentsmithy`
-- Per-project state: `<workdir>/<project>/.agentsmithy`
-- RAG (ChromaDB) persistence per project: `<workdir>/<project>/.agentsmithy/rag/chroma_db`
+- Per-project state: `<workdir>/.agentsmithy`
+- RAG (ChromaDB) persistence per project: `<workdir>/.agentsmithy/rag/chroma_db`
 
 ### Testing the API
 
@@ -125,10 +135,44 @@ curl -X POST http://localhost:11434/api/chat \
      }'
 ```
 
+#### Browser/Node streaming client example
+The endpoint is `POST /api/chat` (SSE over POST). Use `fetch` with a streaming reader:
+
+```javascript
+// Browser example
+const res = await fetch('http://localhost:11434/api/chat', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'Accept': 'text/event-stream',
+  },
+  body: JSON.stringify({
+    messages: [{ role: 'user', content: 'Help me refactor this code' }],
+    stream: true,
+  }),
+});
+
+const reader = res.body.getReader();
+const decoder = new TextDecoder();
+let buffer = '';
+while (true) {
+  const { value, done } = await reader.read();
+  if (done) break;
+  buffer += decoder.decode(value, { stream: true });
+  for (const chunk of buffer.split('\n\n')) {
+    if (!chunk.trim()) continue;
+    if (!chunk.startsWith('data: ')) continue;
+    const json = JSON.parse(chunk.slice(6));
+    // handle events by json.type
+  }
+  buffer = '';
+}
+```
+
 ## API Endpoints
 
 ### POST /api/chat
-Main chat endpoint.
+Main chat endpoint (supports SSE when `Accept: text/event-stream` and `stream: true`).
 
 **Request:**
 ```json
@@ -173,21 +217,32 @@ data: {"type": "done", "done": true, "dialog_id": "01J..."}
 ### GET /health
 Server health check.
 
+### Dialogs API
+Manage per-project conversations persisted under `<workdir>/.agentsmithy/dialogs`.
+
+- `GET /api/dialogs`
+- `POST /api/dialogs`
+- `GET /api/dialogs/current`
+- `PATCH /api/dialogs/current?id=<id>`
+- `GET /api/dialogs/{dialog_id}`
+- `PATCH /api/dialogs/{dialog_id}`
+- `DELETE /api/dialogs/{dialog_id}`
+
 ## Development
 
 ### Tooling
 
-- Linters/formatters: Ruff + Black
+- Linters/formatters: Ruff + Black + isort
 - Type checking: mypy
 - Tests: pytest
 
 ### Setup (recommended)
 
 ```bash
-# create venv and install runtime deps
+# create .venv and install runtime deps
 make install
 
-# install dev tools
+# install dev tools (ruff, black, mypy, pytest)
 make install-dev
 ```
 
@@ -243,6 +298,7 @@ agentsmithy-local/
 │   ├── rag/                 # RAG system
 │   └── utils/               # Utilities
 ├── requirements.txt         # Dependencies
+├── .env.example             # Copy to .env and fill values
 └── README.md               # Documentation
 ```
 

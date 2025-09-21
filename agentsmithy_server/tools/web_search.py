@@ -24,12 +24,7 @@ class WebSearchTool(BaseTool):  # type: ignore[override]
         query = kwargs["query"]
         num_results = kwargs.get("num_results", 5)
 
-        # Emit search event
-        await self.emit_event(
-            EventFactory.from_dict(
-                {"type": "search", "query": query}, dialog_id=self._dialog_id
-            ).to_dict()
-        )
+        # Do not emit a separate SSE search event; rely on tool_call and chat
 
         # Import here to avoid loading the library if not used
         mode = None
