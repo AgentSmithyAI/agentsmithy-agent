@@ -5,6 +5,8 @@ from typing import Any
 import aiohttp
 from pydantic import BaseModel, Field, HttpUrl
 
+from agentsmithy_server.config import settings
+
 from .base_tool import BaseTool
 
 
@@ -66,12 +68,7 @@ class WebFetchTool(BaseTool):  # type: ignore[override]
 
     async def _fetch_http(self, args: WebFetchArgs) -> dict[str, Any]:
         timeout = aiohttp.ClientTimeout(total=12.0)
-        headers = {
-            "User-Agent": (
-                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
-            )
-        }
+        headers = {"User-Agent": settings.web_user_agent}
         async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
             try:
                 async with session.get(str(args.url), allow_redirects=True) as resp:
@@ -138,12 +135,7 @@ class WebFetchTool(BaseTool):  # type: ignore[override]
         try:
             async with async_playwright() as p:
                 browser = await p.chromium.launch(headless=True)
-                context = await browser.new_context(
-                    user_agent=(
-                        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                        "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
-                    )
-                )
+                context = await browser.new_context(user_agent=settings.web_user_agent)
                 page = await context.new_page()
                 # Keep tight time budget to avoid hanging renders
                 page.set_default_navigation_timeout(5000)
