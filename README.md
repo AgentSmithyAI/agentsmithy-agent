@@ -12,7 +12,7 @@ A local AI server similar to Cursor, built using LangGraph for orchestration, RA
 - 🤖 **Universal agent** orchestrated with LangGraph
 - 📚 **RAG (Retrieval-Augmented Generation)** for context handling
 - 🔄 **Streaming responses** via Server-Sent Events (SSE)
-- 🧰 **Tool-aware workflow** with structured SSE events (chat/reasoning/tool_call/file_edit/search)
+- 🧰 **Tool-aware workflow** with structured SSE events (chat/reasoning/tool_call/file_edit)
 - 🔌 **Flexible LLM provider interface** (OpenAI supported out of the box)
 - 🗄️ **ChromaDB** vector store for context persistence
 
