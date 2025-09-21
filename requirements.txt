@@ -27,6 +27,9 @@ dulwich==0.22.7
 # Web Search
 duckduckgo-search==7.1.1
 
+# Web rendering (mandatory)
+playwright==1.55.0
+
 # Development
 pytest==8.4.1
 pytest-asyncio==1.0.0

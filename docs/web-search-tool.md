@@ -8,7 +8,7 @@ The `WebSearchTool` enables AI agents to search the web using DuckDuckGo search 
 
 - **Free Web Search**: Uses DuckDuckGo API without requiring API keys
 - **Async Support**: Runs synchronous searches in a thread pool for async compatibility
-- **Streaming Events**: Emits search events through SSE for real-time UI updates
+- **Streaming Events**: No dedicated SSE event; rely on `tool_call` and subsequent `chat` updates
 - **Rate Limiting**: Handles rate limits gracefully with appropriate error messages
 
 ## Installation
@@ -72,17 +72,9 @@ result = await tool_manager.run_tool(
 }
 ```
 
-## Streaming Events
+## Streaming
 
-The tool emits a `search` event when a search is initiated:
-
-```json
-{
-    "type": "search",
-    "query": "Python programming tutorials",
-    "dialog_id": "dialog-123"
-}
-```
+When `web_search` is invoked, the stream includes a `tool_call` for `web_search`. The search results are returned in the tool result and summarized via `chat` messages; no `search` SSE event is emitted.
 
 ## Rate Limiting
 

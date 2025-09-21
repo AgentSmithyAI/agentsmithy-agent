@@ -28,11 +28,9 @@ async def test_web_search_success():
         },
     ]
 
-    # Mock the duckduckgo_search module
-    mock_ddgs_module = Mock()
+    # Mock AsyncDDGS class used in the tool module
     mock_ddgs_instance = AsyncMock()
     mock_ddgs_class = Mock(return_value=mock_ddgs_instance)
-    mock_ddgs_module.AsyncDDGS = mock_ddgs_class
 
     # Set up async context manager
     mock_ddgs_instance.__aenter__.return_value = mock_ddgs_instance
@@ -45,7 +43,7 @@ async def test_web_search_success():
 
     mock_ddgs_instance.text.return_value = async_gen()
 
-    with patch.dict(sys.modules, {"duckduckgo_search": mock_ddgs_module}):
+    with patch("agentsmithy_server.tools.web_search.AsyncDDGS", mock_ddgs_class):
         result = await tool._arun(query="test query", num_results=2)
 
     assert result["type"] == "web_search_result"
@@ -56,28 +54,20 @@ async def test_web_search_success():
     assert result["results"][0]["snippet"] == "This is a test result snippet 1"
     assert result["count"] == 2
 
-    # Verify SSE callback was called with search event
-    tool._sse_callback.assert_called_once()
-    call_args = tool._sse_callback.call_args[0][0]
-    assert call_args["type"] == "search"
-    assert call_args["query"] == "test query"
-    assert call_args["dialog_id"] == "test-dialog"
+    # Tool no longer emits a separate SSE 'search' event
+    tool._sse_callback.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_web_search_import_error():
-    """Test web search when duckduckgo-search is not installed."""
-    tool = WebSearchTool()
-    tool._sse_callback = AsyncMock()
-
-    # Remove duckduckgo_search from sys.modules to simulate it not being installed
+    """duckduckgo-search is mandatory; simulate ImportError should raise at import time."""
     with patch.dict(sys.modules, {"duckduckgo_search": None}):
-        result = await tool._arun(query="test query")
+        import importlib
 
-    assert result["type"] == "web_search_error"
-    assert result["query"] == "test query"
-    assert "duckduckgo-search library is not installed" in result["error"]
-    assert result["error_type"] == "ImportError"
+        with pytest.raises(ImportError):
+            import agentsmithy_server.tools.web_search as ws
+
+            importlib.reload(ws)
 
 
 @pytest.mark.asyncio
@@ -86,18 +76,16 @@ async def test_web_search_exception():
     tool = WebSearchTool()
     tool._sse_callback = AsyncMock()
 
-    # Mock the duckduckgo_search module
-    mock_ddgs_module = Mock()
+    # Mock AsyncDDGS class used in the tool module
     mock_ddgs_instance = AsyncMock()
     mock_ddgs_class = Mock(return_value=mock_ddgs_instance)
-    mock_ddgs_module.AsyncDDGS = mock_ddgs_class
 
     # Set up async context manager
     mock_ddgs_instance.__aenter__.return_value = mock_ddgs_instance
     mock_ddgs_instance.__aexit__.return_value = None
     mock_ddgs_instance.text.side_effect = Exception("Network error")
 
-    with patch.dict(sys.modules, {"duckduckgo_search": mock_ddgs_module}):
+    with patch("agentsmithy_server.tools.web_search.AsyncDDGS", mock_ddgs_class):
         result = await tool._arun(query="test query")
 
     assert result["type"] == "web_search_error"
@@ -117,11 +105,9 @@ async def test_web_search_default_num_results():
         for i in range(5)
     ]
 
-    # Mock the duckduckgo_search module
-    mock_ddgs_module = Mock()
+    # Mock AsyncDDGS class used in the tool module
     mock_ddgs_instance = AsyncMock()
     mock_ddgs_class = Mock(return_value=mock_ddgs_instance)
-    mock_ddgs_module.AsyncDDGS = mock_ddgs_class
 
     # Set up async context manager
     mock_ddgs_instance.__aenter__.return_value = mock_ddgs_instance
@@ -133,7 +119,7 @@ async def test_web_search_default_num_results():
 
     mock_ddgs_instance.text.return_value = async_gen()
 
-    with patch.dict(sys.modules, {"duckduckgo_search": mock_ddgs_module}):
+    with patch("agentsmithy_server.tools.web_search.AsyncDDGS", mock_ddgs_class):
         result = await tool._arun(query="test query")
 
     # Default is 5 results

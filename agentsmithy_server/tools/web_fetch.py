@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 import aiohttp
+from playwright.async_api import async_playwright
 from pydantic import BaseModel, Field, HttpUrl
 
 from agentsmithy_server.config import settings
@@ -59,7 +60,7 @@ class WebFetchTool(BaseTool):  # type: ignore[override]
             # HTTP failed (timeout/network/etc.). Try JS before giving up.
             pass
 
-        # Step 2: JS rendering fallback if available
+        # Step 2: JS rendering fallback (Playwright must be installed)
         js_res = await self._render_js(args)
         if js_res.get("type") == "web_browse_result":
             return js_res
@@ -118,20 +119,6 @@ class WebFetchTool(BaseTool):  # type: ignore[override]
                 }
 
     async def _render_js(self, args: WebFetchArgs) -> dict[str, Any]:
-        try:
-            from playwright.async_api import async_playwright
-        except Exception as e:
-            return {
-                "type": "web_browse_error",
-                "mode": "js",
-                "url": str(args.url),
-                "error": (
-                    "Playwright unavailable. Install 'pip install playwright' and run "
-                    "'playwright install chromium'."
-                ),
-                "error_type": type(e).__name__,
-            }
-
         try:
             async with async_playwright() as p:
                 browser = await p.chromium.launch(headless=True)
