@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -24,15 +23,26 @@ async def lifespan(app: FastAPI):
         dialogs = index.get("dialogs") or []
         if not dialogs:
             project.create_dialog(title="default", set_current=True)
+
+        # Get shutdown event from app state if available
+        if hasattr(app.state, "shutdown_event"):
+            from agentsmithy_server.api.deps import set_shutdown_event
+
+            set_shutdown_event(app.state.shutdown_event)
+            api_logger.info("Shutdown event registered with chat service")
     except Exception as e:
         api_logger.error("Dialog state init failed", exception=e)
 
     yield
 
-    # Shutdown: placeholder for resource cleanup (e.g., vector stores)
+    # Shutdown: cleanup active streams and resources
     try:
-        # Add cleanup hooks if needed
-        await asyncio.sleep(0)
+        api_logger.info("Starting shutdown cleanup")
+        from agentsmithy_server.api.deps import get_chat_service
+
+        chat_service = get_chat_service()
+        await chat_service.shutdown()
+        api_logger.info("Chat service shutdown completed")
     except Exception as e:
         api_logger.error("Shutdown cleanup failed", exception=e)
 

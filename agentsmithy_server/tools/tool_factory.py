@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from .delete_file import DeleteFileTool
 from .list_files import ListFilesTool
-from .patch_file import PatchFileTool
 from .read_file import ReadFileTool
 from .replace_in_file import ReplaceInFileTool
 from .return_inspection import ReturnInspectionTool
@@ -25,7 +24,6 @@ class ToolFactory:
         manager.register(ReplaceInFileTool())  # Now includes enhanced features
         manager.register(ListFilesTool())
         manager.register(SearchFilesTool())
-        manager.register(PatchFileTool())  # keep for unified diff workflow
         manager.register(ReturnInspectionTool())
         manager.register(DeleteFileTool())
         manager.register(RunCommandTool())
