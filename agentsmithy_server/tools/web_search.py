@@ -5,7 +5,6 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from agentsmithy_server.config import settings
-from agentsmithy_server.core.events import EventFactory
 
 from .base_tool import BaseTool
 
@@ -27,30 +26,39 @@ class WebSearchTool(BaseTool):  # type: ignore[override]
         # Do not emit a separate SSE search event; rely on tool_call and chat
 
         # Import here to avoid loading the library if not used
-        mode = None
+        mode: str | None = None
         AsyncDDGS = None
         DDGS = None
         try:
-            from duckduckgo_search import AsyncDDGS as _AsyncDDGS  # type: ignore
-            AsyncDDGS = _AsyncDDGS
-            mode = "async"
-        except ImportError as e_async:
-            try:
-                from duckduckgo_search import DDGS as _DDGS  # type: ignore
-                DDGS = _DDGS
+            import duckduckgo_search as _ddg_module
+
+            AsyncDDGS = getattr(_ddg_module, "AsyncDDGS", None)
+            DDGS = getattr(_ddg_module, "DDGS", None)
+            if AsyncDDGS is not None:
+                mode = "async"
+            elif DDGS is not None:
                 mode = "sync"
-            except ImportError as e_sync:
+            else:
                 return {
                     "type": "web_search_error",
                     "query": query,
-                    "error": "duckduckgo-search is not available (missing package or symbol). Install duckduckgo-search or upgrade to a version that provides required interfaces.",
+                    "error": "duckduckgo-search does not provide required interfaces (AsyncDDGS or DDGS).",
                     "error_type": "ImportError",
                 }
+        except ImportError:
+            return {
+                "type": "web_search_error",
+                "query": query,
+                "error": "duckduckgo-search is not available (missing package). Install duckduckgo-search.",
+                "error_type": "ImportError",
+            }
 
         try:
             results: list[dict[str, str]] = []
             if mode == "async" and AsyncDDGS is not None:
-                async with AsyncDDGS(headers={"User-Agent": settings.web_user_agent}) as ddgs:  # type: ignore
+                async with AsyncDDGS(
+                    headers={"User-Agent": settings.web_user_agent}
+                ) as ddgs:
                     maybe_iter = ddgs.text(query, max_results=num_results)
                     # Support both: returning an async iterator directly or a coroutine that resolves to it (as in tests)
                     if not hasattr(maybe_iter, "__aiter__"):
@@ -60,26 +68,37 @@ class WebSearchTool(BaseTool):  # type: ignore[override]
                             {
                                 "title": result.get("title", ""),
                                 "url": result.get("href", result.get("link", "")),
-                                "snippet": result.get("body", result.get("snippet", "")),
+                                "snippet": result.get(
+                                    "body", result.get("snippet", "")
+                                ),
                             }
                         )
-            else:
+            elif mode == "sync" and DDGS is not None:
                 import asyncio as _asyncio
 
                 def run_sync() -> list[dict[str, str]]:
                     local_results: list[dict[str, str]] = []
-                    with DDGS(headers={"User-Agent": settings.web_user_agent}) as ddgs:  # type: ignore
+                    with DDGS(headers={"User-Agent": settings.web_user_agent}) as ddgs:
                         for result in ddgs.text(query, max_results=num_results):
                             local_results.append(
                                 {
                                     "title": result.get("title", ""),
                                     "url": result.get("href", result.get("link", "")),
-                                    "snippet": result.get("body", result.get("snippet", "")),
+                                    "snippet": result.get(
+                                        "body", result.get("snippet", "")
+                                    ),
                                 }
                             )
                     return local_results
 
                 results = await _asyncio.to_thread(run_sync)
+            else:
+                return {
+                    "type": "web_search_error",
+                    "query": query,
+                    "error": "duckduckgo-search interfaces not available (no AsyncDDGS/DDGS)",
+                    "error_type": "ImportError",
+                }
 
             return {
                 "type": "web_search_result",
