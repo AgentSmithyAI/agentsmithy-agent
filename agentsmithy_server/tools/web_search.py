@@ -32,33 +32,59 @@ class WebSearchTool(BaseTool):  # type: ignore[override]
         )
 
         # Import here to avoid loading the library if not used
+        mode = None
+        AsyncDDGS = None
+        DDGS = None
         try:
-            from duckduckgo_search import AsyncDDGS
-        except ImportError:
-            return {
-                "type": "web_search_error",
-                "query": query,
-                "error": "duckduckgo-search library is not installed. Please install duckduckgo-search to enable web search.",
-                "error_type": "ImportError",
-            }
+            from duckduckgo_search import AsyncDDGS as _AsyncDDGS  # type: ignore
+            AsyncDDGS = _AsyncDDGS
+            mode = "async"
+        except ImportError as e_async:
+            try:
+                from duckduckgo_search import DDGS as _DDGS  # type: ignore
+                DDGS = _DDGS
+                mode = "sync"
+            except ImportError as e_sync:
+                return {
+                    "type": "web_search_error",
+                    "query": query,
+                    "error": "duckduckgo-search is not available (missing package or symbol). Install duckduckgo-search or upgrade to a version that provides required interfaces.",
+                    "error_type": "ImportError",
+                }
 
         try:
             results: list[dict[str, str]] = []
-            async with AsyncDDGS(
-                headers={"User-Agent": settings.web_user_agent}
-            ) as ddgs:
-                maybe_iter = ddgs.text(query, max_results=num_results)
-                # Support both: returning an async iterator directly or a coroutine that resolves to it (as in tests)
-                if not hasattr(maybe_iter, "__aiter__"):
-                    maybe_iter = await maybe_iter
-                async for result in maybe_iter:
-                    results.append(
-                        {
-                            "title": result.get("title", ""),
-                            "url": result.get("href", result.get("link", "")),
-                            "snippet": result.get("body", result.get("snippet", "")),
-                        }
-                    )
+            if mode == "async" and AsyncDDGS is not None:
+                async with AsyncDDGS(headers={"User-Agent": settings.web_user_agent}) as ddgs:  # type: ignore
+                    maybe_iter = ddgs.text(query, max_results=num_results)
+                    # Support both: returning an async iterator directly or a coroutine that resolves to it (as in tests)
+                    if not hasattr(maybe_iter, "__aiter__"):
+                        maybe_iter = await maybe_iter
+                    async for result in maybe_iter:
+                        results.append(
+                            {
+                                "title": result.get("title", ""),
+                                "url": result.get("href", result.get("link", "")),
+                                "snippet": result.get("body", result.get("snippet", "")),
+                            }
+                        )
+            else:
+                import asyncio as _asyncio
+
+                def run_sync() -> list[dict[str, str]]:
+                    local_results: list[dict[str, str]] = []
+                    with DDGS(headers={"User-Agent": settings.web_user_agent}) as ddgs:  # type: ignore
+                        for result in ddgs.text(query, max_results=num_results):
+                            local_results.append(
+                                {
+                                    "title": result.get("title", ""),
+                                    "url": result.get("href", result.get("link", "")),
+                                    "snippet": result.get("body", result.get("snippet", "")),
+                                }
+                            )
+                    return local_results
+
+                results = await _asyncio.to_thread(run_sync)
 
             return {
                 "type": "web_search_result",
