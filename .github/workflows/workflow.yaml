@@ -80,15 +80,16 @@ jobs:
       new_release_published: ${{ steps.semantic.outputs.new_release_published }}
       new_release_version: ${{ steps.semantic.outputs.new_release_version }}
     runs-on: ubuntu-latest
-    # Run semantic-release only on main/master branches
-    if: startsWith(github.ref, 'refs/heads/master') || startsWith(github.ref, 'refs/heads/main')
     needs: [lint, test]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Semantic Release
         id: semantic
+        if: startsWith(github.ref, 'refs/heads/master') || startsWith(github.ref, 'refs/heads/main')
         uses: cycjimmy/semantic-release-action@v4
         with:
           semantic_version: ${{ env.SEMANTIC_VERSION }}
@@ -125,6 +126,7 @@ jobs:
         include:
           - runner: ubuntu-latest
             label: linux-amd64
+            ext: ""
           # NOTE: Linux ARM64 on GitHub-hosted runners is not available on the free plan.
           # TODO: Enable when upgrading plan or using a self-hosted ARM64 runner.
           # - runner: ubuntu-24.04-arm64
@@ -134,10 +136,13 @@ jobs:
           #   label: linux-arm64
           - runner: windows-latest
             label: windows-amd64
+            ext: ".exe"
           - runner: macos-14
             label: macos-arm64
+            ext: ""
           - runner: macos-13
             label: macos-amd64
+            ext: ""
     steps:
       - name: Checkout code at release SHA or tag
         uses: actions/checkout@v4
@@ -197,8 +202,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          EXT=""
-          if [ "${{ runner.os }}" = "Windows" ]; then EXT=".exe"; fi
+          EXT="${{ matrix.ext }}"
           SRC="dist/agentsmithy${EXT}"
           LATEST_NAME="dist/agentsmithy-${{ matrix.label }}-latest${EXT}"
           VER_NAME="dist/agentsmithy-${{ matrix.label }}-${{ steps.ver.outputs.version }}${EXT}"
@@ -210,8 +214,8 @@ jobs:
         with:
           name: agentsmithy-${{ matrix.label }}-${{ steps.ver.outputs.version }}
           path: |
-            dist/agentsmithy-${{ matrix.label }}-${{ steps.ver.outputs.version }}${EXT}
-            dist/agentsmithy-${{ matrix.label }}-latest${EXT}
+            dist/agentsmithy-${{ matrix.label }}-${{ steps.ver.outputs.version }}${{ matrix.ext }}
+            dist/agentsmithy-${{ matrix.label }}-latest${{ matrix.ext }}
   release_upload:
     name: Publish Release Assets
     runs-on: ubuntu-latest
