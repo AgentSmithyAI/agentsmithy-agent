@@ -1,3 +1,10 @@
+## [1.0.2](https://github.com/AgentSmithyAI/agentsmithy-agent/compare/v1.0.1...v1.0.2) (2025-09-22)
+
+
+### Bug Fixes
+
+* Fix github workflow ([#15](https://github.com/AgentSmithyAI/agentsmithy-agent/issues/15)) ([4c834ae](https://github.com/AgentSmithyAI/agentsmithy-agent/commit/4c834ae085d3b03bdbec7e3ab9d726e697ccd4f3))
+
 ## [1.0.1](https://github.com/AgentSmithyAI/agentsmithy-local/compare/v1.0.0...v1.0.1) (2025-09-22)
 
 
