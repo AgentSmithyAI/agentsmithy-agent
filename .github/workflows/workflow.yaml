@@ -173,16 +173,11 @@ jobs:
             fi
           else
             echo "No version available: not a new semantic release or tag push" >&2
-            exit 0  # Skip without error
+            TAG=""
+            VER=""
           fi
           echo "tag=$TAG" >> $GITHUB_OUTPUT
           echo "version=$VER" >> $GITHUB_OUTPUT
-      - name: Skip if no version
-        if: steps.ver.outputs.version == ''
-        shell: bash
-        run: |
-          echo "Skipping build: no version determined"
-          exit 0
       - name: Install build dependencies
         if: steps.ver.outputs.version != ''
         shell: bash
