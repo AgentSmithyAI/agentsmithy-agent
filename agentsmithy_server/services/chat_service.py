@@ -174,6 +174,34 @@ class ChatService:
 
         return sse_events
 
+    def _append_user_and_prepare_context(
+        self,
+        query: str,
+        context: dict[str, Any] | None,
+        dialog_id: str | None,
+        project: Any | None,
+    ) -> dict[str, Any]:
+        """Append user message and enrich context with dialog history (no limit)."""
+        ctx: dict[str, Any] = dict(context or {})
+        if not project or not dialog_id:
+            return ctx
+
+        try:
+            history = project.get_dialog_history(dialog_id)
+            history.add_user_message(query)
+        except Exception as e:
+            api_logger.error("Failed to append user message", exception=e)
+
+        # Load full history (no memory limit as per current decision)
+        messages = []
+        try:
+            messages = history.get_messages()
+        except Exception as e:
+            api_logger.error("Failed to load dialog history", exception=e)
+
+        ctx["dialog"] = {"id": dialog_id, "messages": messages}
+        return ctx
+
     async def stream_chat(
         self,
         query: str,
@@ -199,6 +227,12 @@ class ChatService:
 
         try:
             api_logger.debug("Processing request with orchestrator", streaming=True)
+            # Centralize history: append user and inject dialog messages into context
+            if project_dialog:
+                project_obj, pdialog_id = project_dialog
+                context = self._append_user_and_prepare_context(
+                    query, context, dialog_id or pdialog_id, project_obj
+                )
             result = await orchestrator.process_request(
                 query=query, context=context, stream=True
             )
@@ -362,8 +396,60 @@ class ChatService:
             if current_task and current_task in self._active_streams:
                 self._active_streams.discard(current_task)
 
-    async def chat(self, query: str, context: dict[str, Any]) -> dict[str, Any]:
+    async def chat(
+        self,
+        query: str,
+        context: dict[str, Any],
+        dialog_id: str | None = None,
+        project: Any | None = None,
+    ) -> dict[str, Any]:
         orchestrator = self._get_orchestrator()
-        return await orchestrator.process_request(
+        # Centralize history: append user and inject dialog messages into context
+        context = self._append_user_and_prepare_context(
+            query, context, dialog_id, project
+        )
+        result = await orchestrator.process_request(
             query=query, context=context, stream=False
         )
+
+        # Persist non-streaming assistant/tool messages
+        try:
+            if project and dialog_id:
+                history = project.get_dialog_history(dialog_id)
+                assistant_text = ""
+                resp = result.get("response")
+                conversation = []
+
+                if isinstance(resp, str):
+                    assistant_text = resp
+                elif isinstance(resp, dict):
+                    assistant_text = str(
+                        resp.get("content") or resp.get("explanation") or ""
+                    )
+                    conversation = resp.get("conversation", [])
+
+                if conversation:
+                    for msg in conversation:
+                        if hasattr(msg, "tool_calls") and getattr(
+                            msg, "tool_calls", None
+                        ):
+                            history.add_message(msg)
+                        elif hasattr(msg, "tool_call_id") and getattr(
+                            msg, "tool_call_id", None
+                        ):
+                            history.add_message(msg)
+
+                if assistant_text:
+                    conv_contents = (
+                        [getattr(m, "content", "") for m in conversation]
+                        if conversation
+                        else []
+                    )
+                    if assistant_text not in conv_contents:
+                        history.add_ai_message(assistant_text)
+        except Exception as e:
+            api_logger.error(
+                "Failed to append assistant message (non-stream)", exception=e
+            )
+
+        return result
