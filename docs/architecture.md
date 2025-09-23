@@ -46,8 +46,8 @@ High level:
 
 ### Dialogs Persistence (MVP)
 - Registry: `<project>/.agentsmithy/dialogs/index.json`
-  - `current_dialog_id`, `dialogs[]` (id, title, created/updated/last_message timestamps)
-- Messages: `<project>/.agentsmithy/dialogs/<dialog_id>/messages.jsonl` (LDJSON: `{role, content, ts}`)
+  - `current_dialog_id`, `dialogs[]` (id, title, created/updated timestamps)
+- Messages: `<project>/.agentsmithy/dialogs/messages.sqlite` (SQLite database via LangChain's SQLChatMessageHistory)
 - On server startup: if no dialogs exist, a default dialog is created and set current
 
 ## Request Flow

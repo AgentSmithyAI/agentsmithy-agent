@@ -15,7 +15,7 @@ Contents of `.agentsmithy`:
 
 ### Dialogs (MVP)
 
-User/assistant conversation logs are stored per-dialog under `.agentsmithy/dialogs/<dialog_id>/`.
+User/assistant conversation logs are stored in a SQLite database.
 
 - `.agentsmithy/dialogs/index.json` — registry of dialogs:
   - `current_dialog_id`: string | null
@@ -24,10 +24,10 @@ User/assistant conversation logs are stored per-dialog under `.agentsmithy/dialo
     - `title`: string | null
     - `created_at`: ISO timestamp
     - `updated_at`: ISO timestamp
-    - `last_message_at`: ISO timestamp | null
 
-- `.agentsmithy/dialogs/<dialog_id>/messages.jsonl` — line-delimited JSON, one message per line:
-  - `{"role":"user|assistant", "content":"...", "ts":"2025-08-21T12:34:56Z"}`
+- `.agentsmithy/dialogs/messages.sqlite` — SQLite database with message history
+  - Messages are stored using LangChain's SQLChatMessageHistory
+  - Each dialog_id is a separate session in the database
 
 On first startup (or first chat), if no dialogs exist, a default dialog is created and set current.
 

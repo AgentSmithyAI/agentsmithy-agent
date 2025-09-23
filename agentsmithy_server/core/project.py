@@ -106,7 +106,6 @@ class Project:
             "title": title or None,
             "created_at": now,
             "updated_at": now,
-            "last_message_at": None,
         }
         # Ensure dialogs is a list
         dialogs_list = list(index.get("dialogs", []))
@@ -119,14 +118,14 @@ class Project:
 
     def list_dialogs(
         self,
-        sort_by: str = "last_message_at",
+        sort_by: str = "updated_at",
         descending: bool = True,
         limit: int | None = None,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
         """Return dialogs with optional sorting and filtering.
 
-        sort_by: one of ["last_message_at", "updated_at", "created_at"].
+        sort_by: one of ["updated_at", "created_at"].
         """
         index = self.load_dialogs_index()
         items: list[dict[str, Any]] = list(index.get("dialogs", []))
@@ -178,7 +177,6 @@ class Project:
                 "title": fields.get("title"),
                 "created_at": now,
                 "updated_at": now,
-                "last_message_at": fields.get("last_message_at"),
             }
             dialogs_list.append(meta)
         index["dialogs"] = dialogs_list
@@ -211,14 +209,9 @@ class Project:
         index["dialogs"] = dialogs_list
 
         if index.get("current_dialog_id") == dialog_id:
-            # Choose a new current dialog: pick most recent by last_message_at/updated_at
+            # Choose a new current dialog: pick most recent by updated_at
             def _key(d: dict[str, Any]):
-                return (
-                    d.get("last_message_at")
-                    or d.get("updated_at")
-                    or d.get("created_at")
-                    or ""
-                )
+                return d.get("updated_at") or d.get("created_at") or ""
 
             new_current = None
             if dialogs_list:
