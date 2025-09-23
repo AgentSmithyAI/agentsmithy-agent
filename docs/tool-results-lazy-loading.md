@@ -4,6 +4,14 @@
 
 This feature implements lazy loading of tool execution results to optimize LLM context usage and improve performance. Instead of storing full tool results in the dialog history, we store only references and metadata, loading full results on demand.
 
+## Known Issues and Solutions
+
+### Project Object Serialization
+The `project` object passed in context might be serialized to a dictionary after `context_builder.build_context()`. To handle this:
+- The code checks if `project` has the `dialogs_dir` attribute before using it
+- The original `project` object is preserved after context building in `universal_agent.py`
+- The `project` is removed from context before LLM formatting to avoid serialization
+
 ## Implementation Details
 
 ### 1. Tool Results Storage (`ToolResultsStorage`)
