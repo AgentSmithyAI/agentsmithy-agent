@@ -1,3 +1,10 @@
+## [1.0.3](https://github.com/AgentSmithyAI/agentsmithy-agent/compare/v1.0.2...v1.0.3) (2025-09-23)
+
+
+### Bug Fixes
+
+* Remove "latest" tag from release artefacts ([#16](https://github.com/AgentSmithyAI/agentsmithy-agent/issues/16)) ([1d81b37](https://github.com/AgentSmithyAI/agentsmithy-agent/commit/1d81b372bd3036f29e5ff5987c46ae4031ee2014))
+
 ## [1.0.2](https://github.com/AgentSmithyAI/agentsmithy-agent/compare/v1.0.1...v1.0.2) (2025-09-22)
 
 
