@@ -11,6 +11,7 @@ import signal
 import sys
 from argparse import ArgumentParser
 from pathlib import Path
+from typing import Any
 
 # Add the project root to Python path
 sys.path.insert(0, str(Path(__file__).parent))
@@ -26,7 +27,7 @@ if __name__ == "__main__":
     try:
         from agentsmithy_server.utils.logger import StructuredLogger
 
-        startup_logger = StructuredLogger("server.startup")
+        startup_logger: Any = StructuredLogger("server.startup")
     except ImportError:
         # Fallback to basic colored logging
         logging.basicConfig(
@@ -109,7 +110,7 @@ if __name__ == "__main__":
         )
         # Keep settings in sync with the chosen port for logging/uvicorn
         try:
-            settings.server_port = chosen_port  # type: ignore[attr-defined]
+            settings.server_port = chosen_port
         except Exception:
             pass
 
