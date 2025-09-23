@@ -99,20 +99,28 @@ async def chat(
 
                 dialog_history = project.get_dialog_history(dialog_id)
 
+                # Append any tool-related messages from the returned conversation
+                # We avoid index-based diffs to be robust to prior truncation
                 if conversation:
-                    existing_msg_count = len(recent_messages)
-                    for msg in conversation[existing_msg_count + 1 :]:
-                        if hasattr(msg, "tool_calls") and msg.tool_calls:
-                            dialog_history.history.add_message(msg)  # type: ignore
-                        elif hasattr(msg, "tool_call_id"):
-                            dialog_history.history.add_message(msg)  # type: ignore
+                    for msg in conversation:
+                        if hasattr(msg, "tool_calls") and getattr(
+                            msg, "tool_calls", None
+                        ):
+                            dialog_history.add_message(msg)  # type: ignore[arg-type]
+                        elif hasattr(msg, "tool_call_id") and getattr(
+                            msg, "tool_call_id", None
+                        ):
+                            dialog_history.add_message(msg)  # type: ignore[arg-type]
 
-                if assistant_text and (
-                    not conversation
-                    or assistant_text
-                    not in [getattr(m, "content", "") for m in conversation]
-                ):
-                    dialog_history.add_ai_message(assistant_text)
+                if assistant_text:
+                    # Avoid duplication if conversation already contains the same assistant content
+                    conv_contents = (
+                        [getattr(m, "content", "") for m in conversation]
+                        if conversation
+                        else []
+                    )
+                    if assistant_text not in conv_contents:
+                        dialog_history.add_ai_message(assistant_text)
             except Exception as e:
                 api_logger.error(
                     "Failed to append assistant message (non-stream)", exception=e

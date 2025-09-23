@@ -196,6 +196,11 @@ class Project:
         This operation removes `.agentsmithy/dialogs/<dialog_id>` recursively.
         """
         self.ensure_dialogs_dir()
+        # Clear messages from SQLite for this dialog_id
+        try:
+            DialogHistory(self, dialog_id).clear()
+        except Exception:
+            pass
         # Remove directory if exists
         ddir = self.get_dialog_dir(dialog_id)
         if ddir.exists():

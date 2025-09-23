@@ -9,6 +9,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from agentsmithy_server.agents.base_agent import BaseAgent
 from agentsmithy_server.core.project import Project
 from agentsmithy_server.core.project_runtime import set_scan_status
+from agentsmithy_server.prompts import INSPECTOR_SYSTEM, build_inspector_human
 from agentsmithy_server.tools import ToolExecutor, ToolFactory
 
 
@@ -21,7 +22,7 @@ class ProjectInspectorAgent(BaseAgent):
         self.tool_executor = ToolExecutor(self.tool_manager, self.llm_provider)
 
     def get_default_system_prompt(self) -> str:
-        return "Project Inspector Agent"
+        return INSPECTOR_SYSTEM
 
     def get_agent_name(self) -> str:
         return "project_inspector"
@@ -41,28 +42,8 @@ class ProjectInspectorAgent(BaseAgent):
             )
         except Exception:
             pass
-        system = SystemMessage(
-            content=(
-                "You are a software project inspector.\n"
-                "Goal: Inspect the repository to infer primary languages, frameworks, build tooling, test setup, and architectural structure.\n"
-                "Constraints:\n"
-                "- Use available tools.\n"
-                "- STRICT: When you are DONE, you MUST call the tool `return_inspection` with the final JSON object. Do not print JSON directly.\n"
-                "- Prefer scanning top-level files (package manifests, build files) and representative source directories.\n"
-                "- Keep file reads minimal and targeted.\n"
-            )
-        )
-        human = HumanMessage(
-            content=(
-                f"The project root is: {project.root}.\n"
-                "Step plan:"
-                "(1) list_files at root (non-recursive);"
-                "(2) read_file manifests;"
-                "(3) if needed, do targeted list_files on source code directories;"
-                "(4) inspect available build tools, package managers, linters, and other tools;"
-                "(5) when ready, call return_inspection with final JSON."
-            )
-        )
+        system = SystemMessage(content=INSPECTOR_SYSTEM)
+        human = HumanMessage(content=build_inspector_human(str(project.root)))
 
         result = await self.tool_executor.process_with_tools_async([system, human])
         # Diagnostics for large tool traffic

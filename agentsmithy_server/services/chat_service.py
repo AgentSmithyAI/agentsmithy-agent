@@ -24,6 +24,25 @@ class ChatService:
         self._active_streams: set[asyncio.Task] = set()
         self._shutdown_event: asyncio.Event | None = None
 
+    def _flush_assistant_buffer(
+        self,
+        project_dialog: tuple[Any, str] | None,
+        dialog_id: str | None,
+        assistant_buffer: list[str],
+    ) -> None:
+        """Persist accumulated assistant text to dialog history (best-effort)."""
+        try:
+            if assistant_buffer and project_dialog:
+                project_obj, pdialog_id = project_dialog
+                target_dialog_id = dialog_id or pdialog_id
+                if target_dialog_id and hasattr(project_obj, "get_dialog_history"):
+                    history = project_obj.get_dialog_history(target_dialog_id)
+                    content = "".join(assistant_buffer)
+                    if content:
+                        history.add_ai_message(content)
+        except Exception as e:
+            api_logger.error("Failed to append assistant message (stream)", exception=e)
+
     def _get_orchestrator(self) -> AgentOrchestrator:
         if self._orchestrator is None:
             self._orchestrator = AgentOrchestrator()
@@ -193,6 +212,10 @@ class ChatService:
                 # Check for shutdown signal
                 if self._shutdown_event and self._shutdown_event.is_set():
                     api_logger.info("Shutdown detected, terminating stream")
+                    # Flush any accumulated assistant content before exit
+                    self._flush_assistant_buffer(
+                        project_dialog, dialog_id, assistant_buffer
+                    )
                     yield SSEEventFactory.error(
                         message="Server is shutting down", dialog_id=dialog_id
                     ).to_sse()
@@ -222,6 +245,10 @@ class ChatService:
                                     "processed_chunk", None, chunk_number=chunk_count
                                 )
                             except StreamAbortError:
+                                # Flush buffer before terminating
+                                self._flush_assistant_buffer(
+                                    project_dialog, dialog_id, assistant_buffer
+                                )
                                 yield SSEEventFactory.done(dialog_id=dialog_id).to_sse()
                                 return
                         api_logger.info(f"Finished streaming {chunk_count} chunks")
@@ -232,7 +259,12 @@ class ChatService:
                             ):
                                 yield sse_event
                         except StreamAbortError:
-                            pass
+                            # Flush buffer before terminating
+                            self._flush_assistant_buffer(
+                                project_dialog, dialog_id, assistant_buffer
+                            )
+                            yield SSEEventFactory.done(dialog_id=dialog_id).to_sse()
+                            return
 
                 for key in state.keys():
                     if key.endswith("_agent") and state[key] and key != "response":
@@ -252,6 +284,10 @@ class ChatService:
                                         ):
                                             yield sse_event
                                     except StreamAbortError:
+                                        # Flush buffer before terminating
+                                        self._flush_assistant_buffer(
+                                            project_dialog, dialog_id, assistant_buffer
+                                        )
                                         yield SSEEventFactory.done(
                                             dialog_id=dialog_id
                                         ).to_sse()
@@ -289,28 +325,25 @@ class ChatService:
                                         ):
                                             yield sse_event
                                     except StreamAbortError:
-                                        pass
+                                        # Flush buffer before terminating
+                                        self._flush_assistant_buffer(
+                                            project_dialog, dialog_id, assistant_buffer
+                                        )
+                                        yield SSEEventFactory.done(
+                                            dialog_id=dialog_id
+                                        ).to_sse()
+                                        return
 
             # Persist streamed assistant text to dialog history (if available)
-            try:
-                if assistant_buffer and project_dialog:
-                    project_obj, pdialog_id = project_dialog
-                    target_dialog_id = dialog_id or pdialog_id
-                    if target_dialog_id and hasattr(project_obj, "get_dialog_history"):
-                        history = project_obj.get_dialog_history(target_dialog_id)
-                        content = "".join(assistant_buffer)
-                        if content:
-                            history.add_ai_message(content)
-            except Exception as e:
-                api_logger.error(
-                    "Failed to append assistant message (stream)", exception=e
-                )
+            self._flush_assistant_buffer(project_dialog, dialog_id, assistant_buffer)
 
             api_logger.info("SSE generation completed", total_events=event_count)
             yield SSEEventFactory.done(dialog_id=dialog_id).to_sse()
 
         except asyncio.CancelledError:
             api_logger.info("Stream cancelled due to shutdown")
+            # Flush buffer before exit
+            self._flush_assistant_buffer(project_dialog, dialog_id, assistant_buffer)
             yield SSEEventFactory.error(
                 message="Request cancelled due to server shutdown", dialog_id=dialog_id
             ).to_sse()
@@ -318,6 +351,8 @@ class ChatService:
             raise
         except Exception as e:
             api_logger.error("Error in SSE generation", exception=e)
+            # Flush buffer on error before signaling done
+            self._flush_assistant_buffer(project_dialog, dialog_id, assistant_buffer)
             error_msg = f"Error processing request: {str(e)}"
             api_logger.error(f"Yielding error event: {error_msg}")
             yield SSEEventFactory.error(message=error_msg, dialog_id=dialog_id).to_sse()

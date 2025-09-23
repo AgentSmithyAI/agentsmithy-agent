@@ -6,6 +6,7 @@ with one session per `dialog_id`.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -50,10 +51,37 @@ class DialogHistory:
     def add_user_message(self, content: str) -> None:
         """Add a user message to the history."""
         self.history.add_user_message(content)
+        # Touch dialog metadata updated_at
+        try:
+            self.project.upsert_dialog_meta(self.dialog_id)
+        except Exception:
+            pass
 
     def add_ai_message(self, content: str) -> None:
         """Add an AI message to the history."""
         self.history.add_ai_message(content)
+        # Touch dialog metadata updated_at
+        try:
+            self.project.upsert_dialog_meta(self.dialog_id)
+        except Exception:
+            pass
+
+    def add_message(self, message: BaseMessage) -> None:
+        """Add a generic LangChain BaseMessage to the history."""
+        self.history.add_message(message)
+        try:
+            self.project.upsert_dialog_meta(self.dialog_id)
+        except Exception:
+            pass
+
+    def add_messages(self, messages: Iterable[BaseMessage]) -> None:
+        """Add multiple messages atomically where possible."""
+        for msg in messages:
+            self.history.add_message(msg)
+        try:
+            self.project.upsert_dialog_meta(self.dialog_id)
+        except Exception:
+            pass
 
     def get_messages(self, limit: int | None = None) -> list[BaseMessage]:
         """Get messages from history, optionally limiting to last N messages."""
@@ -65,3 +93,7 @@ class DialogHistory:
     def clear(self) -> None:
         """Clear all messages from the history."""
         self.history.clear()
+        try:
+            self.project.upsert_dialog_meta(self.dialog_id)
+        except Exception:
+            pass
