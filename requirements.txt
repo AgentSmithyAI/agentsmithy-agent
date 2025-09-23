@@ -11,6 +11,7 @@ langchain-community==0.3.27
 langchain-core==0.3.68
 langgraph==0.5.2
 langchain-text-splitters==0.3.8
+SQLAlchemy==2.0.36
 
 # RAG and Vector Store
 langchain-chroma==0.2.4

@@ -1,11 +1,15 @@
-"""File-based dialog history management using LangChain."""
+"""SQLite-backed dialog history management using LangChain.
+
+Stores a per-project database under `.agentsmithy/dialogs/messages.sqlite`,
+with one session per `dialog_id`.
+"""
 
 from __future__ import annotations
 
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from langchain_community.chat_message_histories import FileChatMessageHistory
+from langchain_community.chat_message_histories import SQLChatMessageHistory
 from langchain_core.messages import BaseMessage
 
 if TYPE_CHECKING:
@@ -13,27 +17,33 @@ if TYPE_CHECKING:
 
 
 class DialogHistory:
-    """Manages dialog history using file storage through LangChain's FileChatMessageHistory."""
+    """Manages dialog history using SQLite via LangChain's SQLChatMessageHistory."""
 
     def __init__(self, project: Project, dialog_id: str):
         self.project = project
         self.dialog_id = dialog_id
-        self._history: FileChatMessageHistory | None = None
+        self._history: SQLChatMessageHistory | None = None
 
     @property
-    def history_file_path(self) -> Path:
-        """Get the history file path for this dialog."""
-        dialog_dir = self.project.get_dialog_dir(self.dialog_id)
-        dialog_dir.mkdir(parents=True, exist_ok=True)
-        return dialog_dir / "messages.json"
+    def db_path(self) -> Path:
+        """Get the SQLite DB path for all dialogs of this project."""
+        dialogs_root = self.project.dialogs_dir
+        dialogs_root.mkdir(parents=True, exist_ok=True)
+        return dialogs_root / "messages.sqlite"
 
     @property
-    def history(self) -> FileChatMessageHistory:
-        """Lazy-load the FileChatMessageHistory instance."""
+    def history(self) -> SQLChatMessageHistory:
+        """Lazy-load the SQLChatMessageHistory instance bound to dialog_id."""
         if self._history is None:
-            self._history = FileChatMessageHistory(
-                file_path=str(self.history_file_path),
-                ensure_ascii=False,  # Allow non-ASCII characters
+            # Ensure parent dir exists
+            self.db_path.parent.mkdir(parents=True, exist_ok=True)
+
+            # Construct SQLite URL; use absolute path
+            db_url = f"sqlite:///{self.db_path}"
+
+            self._history = SQLChatMessageHistory(
+                session_id=self.dialog_id,
+                connection_string=db_url,
             )
         return self._history
 
