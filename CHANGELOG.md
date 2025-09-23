@@ -16,6 +16,12 @@
   - Add explicit instructions not to use for recently executed tools
   - Prevent unnecessary tool calls that waste tokens and time
 
+* **history**: Fix duplicate tool calls due to unclear result summaries
+  - Correct argument names in summary generation to match actual tool schemas
+  - Increase preview size from 200 to 500 characters for better context
+  - Improve preview to show complete lines instead of cutting mid-line
+  - Ensure model can see what files were read/written from summaries
+
 ## [1.0.3](https://github.com/AgentSmithyAI/agentsmithy-agent/compare/v1.0.2...v1.0.3) (2025-09-23)
 
 

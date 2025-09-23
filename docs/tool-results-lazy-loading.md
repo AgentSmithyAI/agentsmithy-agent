@@ -19,6 +19,13 @@ The model might incorrectly use `get_previous_result` to retrieve results of too
 - Examples of proper usage scenarios are provided
 - Error messages reinforce the correct usage pattern
 
+### Duplicate Tool Calls
+The model might execute the same tool multiple times due to unclear result summaries. To prevent this:
+- Tool result summaries now correctly use actual argument names from each tool
+- Preview size increased from 200 to 500 characters for better context
+- Preview shows complete lines instead of cutting mid-line
+- Clear file paths and result counts in summaries help model understand what was executed
+
 ## Implementation Details
 
 ### 1. Tool Results Storage (`ToolResultsStorage`)
