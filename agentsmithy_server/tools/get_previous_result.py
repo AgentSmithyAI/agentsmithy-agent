@@ -19,22 +19,27 @@ class GetPreviousResultArgs(BaseModel):
     """Arguments for get_previous_result tool."""
 
     tool_call_id: str = Field(
-        description="The ID of the previous tool call to retrieve results for"
+        description="The ID of a PREVIOUS tool call from EARLIER in the conversation (not from the current task) whose full results you need to retrieve"
     )
 
 
 class GetPreviousResultTool(BaseTool):  # type: ignore[override]
     """Retrieve results from previous tool executions in this dialog.
 
-    This tool allows the model to access full results from previous tool
-    executions that were stored with references in the conversation history.
+    This tool allows the model to access full results from PREVIOUS tool
+    executions that were performed EARLIER in the conversation. It should
+    NOT be used to retrieve results of tools that were just executed in
+    the current task context.
     """
 
     name: str = "get_previous_result"
     description: str = (
-        "Retrieve the full result of a previous tool execution. "
-        "Use this when you need to access detailed output from a previous "
-        "tool call that shows only a summary or reference in the conversation."
+        "Retrieve the full result of a PREVIOUS tool execution from EARLIER in the conversation. "
+        "ONLY use this when you need specific data from a tool that was executed BEFORE the current task, "
+        "and that data is REQUIRED to complete your current objective. "
+        "DO NOT use this to retrieve results of tools you JUST executed - you already have their output. "
+        "Example: If the user asks about 'the file you read earlier' or 'what was in that search result', "
+        "then you should use this tool to retrieve those historical results."
     )
     args_schema: type[BaseModel] = GetPreviousResultArgs
 
@@ -76,7 +81,7 @@ class GetPreviousResultTool(BaseTool):  # type: ignore[override]
                     "type": "error",
                     "error": f"Tool result not found: {tool_call_id}",
                     "available_tool_call_ids": available_ids,
-                    "hint": "Use one of the available tool_call_ids listed above",
+                    "hint": "Use one of the available tool_call_ids listed above. Remember: this tool is for retrieving results from EARLIER in the conversation, not for tools you just executed.",
                 }
 
             agent_logger.info(
