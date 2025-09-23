@@ -77,14 +77,16 @@ class ToolResultsStorage:
         """Generate a human-readable summary of the tool execution."""
         # Tool-specific summary generation
         if tool_name == "read_file":
-            file_path = args.get("target_file", "unknown")
+            # ReadFileTool uses 'path' argument, not 'target_file'
+            file_path = args.get("path", args.get("target_file", "unknown"))
             content = result.get("content", "")
             lines = content.count("\n") + 1 if content else 0
             return f"Read file: {file_path} ({lines} lines)"
 
-        elif tool_name == "write_file":
-            file_path = args.get("file_path", "unknown")
-            content = args.get("contents", "")
+        elif tool_name == "write_file" or tool_name == "write_to_file":
+            # WriteFileTool uses 'path' and 'content' arguments
+            file_path = args.get("path", args.get("file_path", "unknown"))
+            content = args.get("content", args.get("contents", ""))
             lines = content.count("\n") + 1 if content else 0
             return f"Wrote file: {file_path} ({lines} lines)"
 
@@ -95,12 +97,14 @@ class ToolResultsStorage:
             return f"Ran command: {command} - {status}"
 
         elif tool_name == "search_files":
-            pattern = args.get("pattern", "unknown")
+            # SearchFilesTool uses 'regex' argument
+            pattern = args.get("regex", args.get("pattern", "unknown"))
             matches = result.get("matches", [])
             return f"Searched for '{pattern}' - found {len(matches)} matches"
 
         elif tool_name == "list_files":
-            path = args.get("target_directory", ".")
+            # ListFilesTool uses 'path' argument
+            path = args.get("path", args.get("target_directory", "."))
             files = result.get("files", [])
             dirs = result.get("directories", [])
             return f"Listed {path} - {len(files)} files, {len(dirs)} directories"
@@ -255,7 +259,7 @@ class ToolResultsStorage:
         return results
 
     def get_truncated_preview(
-        self, result: dict[str, Any], max_length: int = 200
+        self, result: dict[str, Any], max_length: int = 500
     ) -> str:
         """Generate a truncated preview of the result for inline display.
 
@@ -274,10 +278,29 @@ class ToolResultsStorage:
         if "content" in result and isinstance(result["content"], str):
             content = result["content"]
             if len(content) > max_length:
-                # Try to break at a newline
-                newline_pos = content.find("\n", max_length // 2)
-                if newline_pos > 0 and newline_pos < max_length:
-                    return content[:newline_pos] + "\n... (truncated)"
+                # Try to show meaningful content
+                lines = content.split("\n")
+                preview_lines: list[str] = []
+                current_length = 0
+
+                # Add lines until we reach max_length
+                for line in lines:
+                    if current_length + len(line) + 1 > max_length and preview_lines:
+                        break
+                    preview_lines.append(line)
+                    current_length += len(line) + 1
+
+                # If we have at least some content, return it
+                if preview_lines:
+                    preview = "\n".join(preview_lines)
+                    # Add ellipsis if there's more content
+                    if len(lines) > len(preview_lines):
+                        preview += (
+                            f"\n... ({len(lines) - len(preview_lines)} more lines)"
+                        )
+                    return preview
+
+                # Fallback to simple truncation
                 return content[:max_length] + "... (truncated)"
             return content
 
