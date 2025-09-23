@@ -9,6 +9,13 @@
   - Add `get_previous_result` tool for model to access previous results
   - Reduce context bloat from large tool outputs
 
+### Bug Fixes
+
+* **tools**: Improve get_previous_result tool to prevent misuse
+  - Update tool description to clarify it's only for results from earlier in conversation
+  - Add explicit instructions not to use for recently executed tools
+  - Prevent unnecessary tool calls that waste tokens and time
+
 ## [1.0.3](https://github.com/AgentSmithyAI/agentsmithy-agent/compare/v1.0.2...v1.0.3) (2025-09-23)
 
 

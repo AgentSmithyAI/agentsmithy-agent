@@ -12,6 +12,13 @@ The `project` object passed in context might be serialized to a dictionary after
 - The original `project` object is preserved after context building in `universal_agent.py`
 - The `project` is removed from context before LLM formatting to avoid serialization
 
+### Model Misusing get_previous_result Tool
+The model might incorrectly use `get_previous_result` to retrieve results of tools it just executed. To prevent this:
+- The tool description explicitly states it's for results from EARLIER in the conversation
+- Clear instructions that it should NOT be used for tools just executed
+- Examples of proper usage scenarios are provided
+- Error messages reinforce the correct usage pattern
+
 ## Implementation Details
 
 ### 1. Tool Results Storage (`ToolResultsStorage`)
