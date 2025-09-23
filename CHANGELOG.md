@@ -1,3 +1,14 @@
+## [Unreleased]
+
+### Features
+
+* **history**: Implement lazy loading of tool results to optimize LLM context usage
+  - Add separate storage for tool execution results 
+  - Store only references and metadata in dialog history
+  - Add API endpoints to retrieve tool results on demand
+  - Add `get_previous_result` tool for model to access previous results
+  - Reduce context bloat from large tool outputs
+
 ## [1.0.3](https://github.com/AgentSmithyAI/agentsmithy-agent/compare/v1.0.2...v1.0.3) (2025-09-23)
 
 

@@ -1,15 +1,22 @@
 from __future__ import annotations
 
 import json
+import uuid
 from collections.abc import AsyncGenerator
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from langchain_core.messages import BaseMessage, ToolMessage
 
 from agentsmithy_server.core.llm_provider import LLMProvider
+from agentsmithy_server.core.tool_results_storage import (
+    ToolResultsStorage,
+)
 from agentsmithy_server.utils.logger import agent_logger
 
 from .tool_manager import ToolManager
+
+if TYPE_CHECKING:
+    from agentsmithy_server.core.project import Project
 
 
 class ToolExecutor:
@@ -25,9 +32,21 @@ class ToolExecutor:
         self.llm_provider = llm_provider
         # Optional SSE callback to emit structured events upstream if needed
         self._sse_callback = None
+        self._project: Project | None = None
+        self._dialog_id: str | None = None
+        self._tool_results_storage: ToolResultsStorage | None = None
 
     def set_sse_callback(self, callback):
         self._sse_callback = callback
+
+    def set_context(self, project: Project | None, dialog_id: str | None) -> None:
+        """Set project and dialog context for tool results storage."""
+        self._project = project
+        self._dialog_id = dialog_id
+        if project and dialog_id:
+            self._tool_results_storage = ToolResultsStorage(project, dialog_id)
+        else:
+            self._tool_results_storage = None
 
     async def emit_event(self, event: dict[str, Any]) -> None:
         if self._sse_callback is not None:
@@ -93,11 +112,48 @@ class ToolExecutor:
                 aggregated_tool_results.append({"name": name, "result": result})
                 aggregated_tool_calls.append({"name": name, "args": args})
 
-                # Append ToolMessage with serialized result back to model
-                tool_message = ToolMessage(
-                    content=json.dumps(result, ensure_ascii=False),
-                    tool_call_id=call.get("id", ""),
-                )
+                # Store result and create reference
+                tool_call_id = call.get("id", "") or f"call_{uuid.uuid4().hex[:8]}"
+
+                if self._tool_results_storage:
+                    # Store the full result
+                    result_ref = await self._tool_results_storage.store_result(
+                        tool_call_id=tool_call_id,
+                        tool_name=name,
+                        args=args,
+                        result=result,
+                    )
+
+                    # Create a minimal message with reference
+                    metadata = await self._tool_results_storage.get_metadata(
+                        tool_call_id
+                    )
+                    tool_message_content = {
+                        "tool_call_id": tool_call_id,
+                        "tool_name": name,
+                        "status": (
+                            "error" if result.get("type") == "tool_error" else "success"
+                        ),
+                        "metadata": {
+                            "size_bytes": metadata.size_bytes if metadata else 0,
+                            "summary": metadata.summary if metadata else "",
+                            "truncated_preview": self._tool_results_storage.get_truncated_preview(
+                                result
+                            ),
+                        },
+                        "result_ref": result_ref.to_dict(),
+                    }
+                    tool_message = ToolMessage(
+                        content=json.dumps(tool_message_content, ensure_ascii=False),
+                        tool_call_id=tool_call_id,
+                    )
+                else:
+                    # Fallback to old behavior if no storage available
+                    tool_message = ToolMessage(
+                        content=json.dumps(result, ensure_ascii=False),
+                        tool_call_id=tool_call_id,
+                    )
+
                 conversation.append(tool_message)
 
     async def _process_streaming(
@@ -312,11 +368,53 @@ class ToolExecutor:
                                 "checkpoint": checkpoint,
                             }
 
-                    # Add tool message to conversation
-                    tool_message = ToolMessage(
-                        content=json.dumps(result, ensure_ascii=False),
-                        tool_call_id=tool_id,
-                    )
+                    # Store result and create reference
+                    if not tool_id:
+                        tool_id = f"call_{uuid.uuid4().hex[:8]}"
+
+                    if self._tool_results_storage:
+                        # Store the full result
+                        result_ref = await self._tool_results_storage.store_result(
+                            tool_call_id=tool_id,
+                            tool_name=name,
+                            args=args,
+                            result=result,
+                        )
+
+                        # Create a minimal message with reference
+                        metadata = await self._tool_results_storage.get_metadata(
+                            tool_id
+                        )
+                        tool_message_content = {
+                            "tool_call_id": tool_id,
+                            "tool_name": name,
+                            "status": (
+                                "error"
+                                if result.get("type") == "tool_error"
+                                else "success"
+                            ),
+                            "metadata": {
+                                "size_bytes": metadata.size_bytes if metadata else 0,
+                                "summary": metadata.summary if metadata else "",
+                                "truncated_preview": self._tool_results_storage.get_truncated_preview(
+                                    result
+                                ),
+                            },
+                            "result_ref": result_ref.to_dict(),
+                        }
+                        tool_message = ToolMessage(
+                            content=json.dumps(
+                                tool_message_content, ensure_ascii=False
+                            ),
+                            tool_call_id=tool_id,
+                        )
+                    else:
+                        # Fallback to old behavior if no storage available
+                        tool_message = ToolMessage(
+                            content=json.dumps(result, ensure_ascii=False),
+                            tool_call_id=tool_id,
+                        )
+
                     conversation.append(tool_message)
 
                 except json.JSONDecodeError as e:

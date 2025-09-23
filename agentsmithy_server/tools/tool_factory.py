@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from .delete_file import DeleteFileTool
+from .get_previous_result import GetPreviousResultTool
 from .list_files import ListFilesTool
 from .read_file import ReadFileTool
 from .replace_in_file import ReplaceInFileTool
@@ -30,4 +31,5 @@ class ToolFactory:
         manager.register(RunCommandTool())
         manager.register(WebFetchTool())
         manager.register(WebSearchTool())
+        manager.register(GetPreviousResultTool())
         return manager

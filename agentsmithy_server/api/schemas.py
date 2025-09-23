@@ -48,3 +48,12 @@ class DialogListParams(BaseModel):
     order: str = "desc"  # asc|desc
     limit: int | None = 50
     offset: int = 0
+
+
+class ToolResultResponse(BaseModel):
+    tool_call_id: str
+    tool_name: str
+    args: dict[str, Any]
+    result: dict[str, Any]
+    timestamp: str
+    metadata: dict[str, Any] = {}

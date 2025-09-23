@@ -1,11 +1,18 @@
 """Base agent class for all specialized agents."""
 
+import json
 from abc import ABC, abstractmethod
 from typing import Any
 
-from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+from langchain_core.messages import (
+    BaseMessage,
+    HumanMessage,
+    SystemMessage,
+    ToolMessage,
+)
 
 from agentsmithy_server.core import LLMProvider
+from agentsmithy_server.core.tool_results_storage import ToolResultsStorage
 from agentsmithy_server.rag import ContextBuilder
 from agentsmithy_server.utils.logger import agent_logger
 
@@ -81,10 +88,30 @@ class BaseAgent(ABC):
             raise
 
     def _prepare_messages(
-        self, query: str, context: dict[str, Any]
+        self,
+        query: str,
+        context: dict[str, Any],
+        load_tool_results: bool | list[str] = False,
     ) -> list[BaseMessage]:
-        """Prepare messages for LLM."""
+        """Prepare messages for LLM with lazy loading of tool results.
+
+        Args:
+            query: User query
+            context: Context including dialog history and project
+            load_tool_results:
+                - False: Don't load any tool results (default)
+                - True: Load all tool results
+                - list[str]: Load specific tool_call_ids
+        """
         messages: list[BaseMessage] = [SystemMessage(content=self.system_prompt)]
+
+        # Extract project and dialog_id for tool results loading
+        project = context.get("project")
+        dialog_id = context.get("dialog", {}).get("id")
+        tool_results_storage = None
+        # Check if project is a Project object (not a dict from context formatting)
+        if project and dialog_id and hasattr(project, "dialogs_dir"):
+            tool_results_storage = ToolResultsStorage(project, dialog_id)
 
         # Add dialog history as actual messages (not as context text)
         if context and context.get("dialog") and context["dialog"].get("messages"):
@@ -94,8 +121,44 @@ class BaseAgent(ABC):
 
             # Add historical messages
             for msg in dialog_messages:
-                # If it's already a BaseMessage object, just add it
+                # If it's already a BaseMessage object, process it
                 if hasattr(msg, "content") and hasattr(msg, "type"):
+                    # Special handling for ToolMessage
+                    if isinstance(msg, ToolMessage):
+                        try:
+                            # Ensure content is a string before parsing
+                            content = msg.content
+                            if isinstance(content, str):
+                                content_data = json.loads(content)
+                            else:
+                                # Skip if content is not a string
+                                messages.append(msg)
+                                continue
+                            # Check if this is a new-style message with result_ref
+                            if (
+                                isinstance(content_data, dict)
+                                and "result_ref" in content_data
+                            ):
+                                # Decide whether to load full result
+                                tool_call_id = content_data.get("tool_call_id", "")
+                                should_load = load_tool_results is True or (
+                                    isinstance(load_tool_results, list)
+                                    and tool_call_id in load_tool_results
+                                )
+
+                                if should_load and tool_results_storage:
+                                    # Load full result synchronously (we're not in async context)
+                                    # For now, keep the reference version
+                                    # TODO: Make this method async to support full loading
+                                    agent_logger.debug(
+                                        "Tool result loading requested but not in async context",
+                                        tool_call_id=tool_call_id,
+                                    )
+                                # Otherwise keep the reference-only version
+                        except (json.JSONDecodeError, TypeError):
+                            # Old-style ToolMessage with full result, keep as is
+                            pass
+
                     messages.append(msg)
                 # Otherwise convert from dict (backward compatibility)
                 elif isinstance(msg, dict):
@@ -107,6 +170,12 @@ class BaseAgent(ABC):
             # Remove dialog from context to avoid duplication
             context = dict(context)
             context.pop("dialog", None)
+
+        # Remove project object from context before formatting
+        # (it's only needed for tool results loading, not for LLM)
+        if "project" in context:
+            context = dict(context)
+            context.pop("project", None)
 
         # Add remaining context if available
         formatted_context = self.context_builder.format_context_for_prompt(context)

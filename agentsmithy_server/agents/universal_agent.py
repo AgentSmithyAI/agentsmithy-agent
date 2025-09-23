@@ -37,10 +37,13 @@ class UniversalAgent(BaseAgent):
         return "universal_agent"
 
     def _prepare_messages(
-        self, query: str, context: dict[str, Any]
+        self,
+        query: str,
+        context: dict[str, Any],
+        load_tool_results: bool | list[str] = False,
     ) -> list[BaseMessage]:
         """Delegate message preparation to BaseAgent without extra enforcement."""
-        return super()._prepare_messages(query, context)
+        return super()._prepare_messages(query, context, load_tool_results)
 
     async def process(
         self, query: str, context: dict[str, Any] | None = None, stream: bool = False
@@ -55,14 +58,32 @@ class UniversalAgent(BaseAgent):
             context_keys=list((context or {}).keys()),
         )
 
-        # Extract dialog_id from context and pass to tools
+        # Extract dialog_id and project from context
         dialog_id = None
+        project = None
         if context and context.get("dialog"):
             dialog_id = context["dialog"].get("id")
             self.tool_manager.set_dialog_id(dialog_id)
 
+        if context and context.get("project"):
+            project = context["project"]
+
+        # Set context for tool executor to enable results storage
+        if hasattr(self.tool_executor, "set_context"):
+            self.tool_executor.set_context(project, dialog_id)
+
+        # Set context for get_previous_result tool
+        get_prev_tool = self.tool_manager.get("get_previous_result")
+        if get_prev_tool and hasattr(get_prev_tool, "set_context"):
+            get_prev_tool.set_context(project, dialog_id)
+
         # Build context
         full_context = await self.context_builder.build_context(query, context)
+
+        # Preserve the original project object in the full context
+        # as build_context might have serialized it
+        if project:
+            full_context["project"] = project
 
         # Prepare messages
         messages = self._prepare_messages(query, full_context)

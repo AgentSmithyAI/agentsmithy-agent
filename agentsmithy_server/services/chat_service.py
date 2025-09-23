@@ -195,6 +195,8 @@ class ChatService:
             api_logger.error("Failed to load dialog history", exception=e)
 
         ctx["dialog"] = {"id": dialog_id, "messages": messages}
+        # Add project reference for tool results storage
+        ctx["project"] = project
         return ctx
 
     async def stream_chat(
