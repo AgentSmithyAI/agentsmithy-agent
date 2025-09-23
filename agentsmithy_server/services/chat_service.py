@@ -297,10 +297,10 @@ class ChatService:
                     project_obj, pdialog_id = project_dialog
                     target_dialog_id = dialog_id or pdialog_id
                     if target_dialog_id and hasattr(project_obj, "get_dialog_history"):
-                        history = project_obj.get_dialog_history(target_dialog_id)  # type: ignore[attr-defined]
+                        history = project_obj.get_dialog_history(target_dialog_id)
                         content = "".join(assistant_buffer)
                         if content:
-                            history.add_ai_message(content)  # type: ignore[attr-defined]
+                            history.add_ai_message(content)
             except Exception as e:
                 api_logger.error(
                     "Failed to append assistant message (stream)", exception=e
