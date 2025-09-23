@@ -199,10 +199,8 @@ jobs:
           set -euo pipefail
           EXT="${{ matrix.ext }}"
           SRC="dist/agentsmithy${EXT}"
-          LATEST_NAME="dist/agentsmithy-${{ matrix.label }}-latest${EXT}"
           VER_NAME="dist/agentsmithy-${{ matrix.label }}-${{ steps.ver.outputs.version }}${EXT}"
           mv "$SRC" "$VER_NAME"
-          cp "$VER_NAME" "$LATEST_NAME"
       - name: Upload artifacts
         if: steps.ver.outputs.version != ''
         uses: actions/upload-artifact@v4
@@ -210,7 +208,6 @@ jobs:
           name: agentsmithy-${{ matrix.label }}-${{ steps.ver.outputs.version }}
           path: |
             dist/agentsmithy-${{ matrix.label }}-${{ steps.ver.outputs.version }}${{ matrix.ext }}
-            dist/agentsmithy-${{ matrix.label }}-latest${{ matrix.ext }}
   release_upload:
     name: Publish Release Assets
     runs-on: ubuntu-latest
@@ -249,25 +246,6 @@ jobs:
           tag_name: ${{ steps.tag.outputs.tag }}
           files: |
             agentsmithy-*
-      - name: Publish to GitHub Packages
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          VER="${{ steps.tag.outputs.version }}"
-          for f in agentsmithy-*; do
-            if [[ "$f" == *latest* ]]; then continue; fi
-            echo "Uploading $f to GitHub Packages version $VER"
-            BASENAME=$(basename "$f")
-            curl -sS -f -L -X PUT \
-              -H "Authorization: Bearer $GH_TOKEN" \
-              -H "Accept: application/vnd.github+json" \
-              -H "Content-Type: application/octet-stream" \
-              -H "X-GitHub-Api-Version: 2022-11-28" \
-              --data-binary @"$f" \
-              "https://uploads.github.com/repos/${{ github.repository }}/packages/generic/agentsmithy/${VER}/${BASENAME}"
-          done
 
 
 
