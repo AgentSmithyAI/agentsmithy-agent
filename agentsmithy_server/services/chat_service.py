@@ -291,7 +291,21 @@ class ChatService:
                                     except StreamAbortError:
                                         pass
 
-            # Persist handled by router after buffer is returned via closure
+            # Persist streamed assistant text to dialog history (if available)
+            try:
+                if assistant_buffer and project_dialog:
+                    project_obj, pdialog_id = project_dialog
+                    target_dialog_id = dialog_id or pdialog_id
+                    if target_dialog_id and hasattr(project_obj, "get_dialog_history"):
+                        history = project_obj.get_dialog_history(target_dialog_id)  # type: ignore[attr-defined]
+                        content = "".join(assistant_buffer)
+                        if content:
+                            history.add_ai_message(content)  # type: ignore[attr-defined]
+            except Exception as e:
+                api_logger.error(
+                    "Failed to append assistant message (stream)", exception=e
+                )
+
             api_logger.info("SSE generation completed", total_events=event_count)
             yield SSEEventFactory.done(dialog_id=dialog_id).to_sse()
 
