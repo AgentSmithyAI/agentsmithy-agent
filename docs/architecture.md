@@ -44,6 +44,11 @@ High level:
 - Project entity owns `state_dir` and RAG paths per project
 - Runtime manages singleton server per project and writes `.agentsmithy/status.json`
 
+### Persistence (`agentsmithy_server/db/*`, `core/tool_results_storage.py`)
+- `db/base.py` provides `get_engine` and `get_session` for SQLite under the project `.agentsmithy/dialogs/messages.sqlite`
+- `db/models.py` declares ORM models (e.g., `ToolResultORM`, `BaseORM`)
+- `core/tool_results_storage.py` uses ORM for storing tool results and lazily ensures tables via `BaseORM.metadata.create_all` — внешних миграций не требуется
+
 ### Dialogs Persistence (MVP)
 - Registry: `<project>/.agentsmithy/dialogs/index.json`
   - `current_dialog_id`, `dialogs[]` (id, title, created/updated timestamps)

@@ -28,6 +28,7 @@ User/assistant conversation logs are stored in a SQLite database.
 - `.agentsmithy/dialogs/messages.sqlite` — SQLite database with message history
   - Messages are stored using LangChain's SQLChatMessageHistory
   - Each dialog_id is a separate session in the database
+  - Tool results хранятся в таблице `tool_results` (SQLAlchemy ORM). Таблицы создаются автоматически при первом использовании; внешние миграции не требуются.
 
 On first startup (or first chat), if no dialogs exist, a default dialog is created and set current.
 

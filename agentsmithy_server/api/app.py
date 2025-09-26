@@ -39,10 +39,11 @@ async def lifespan(app: FastAPI):
     # Shutdown: cleanup active streams and resources
     try:
         api_logger.info("Starting shutdown cleanup")
-        from agentsmithy_server.api.deps import get_chat_service
+        from agentsmithy_server.api.deps import dispose_db_engine, get_chat_service
 
         chat_service = get_chat_service()
         await chat_service.shutdown()
+        dispose_db_engine()
         api_logger.info("Chat service shutdown completed")
     except Exception as e:
         api_logger.error("Shutdown cleanup failed", exception=e)
@@ -63,6 +64,14 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # Force-create DB engine early to warm up (optional; safe to remove)
+    try:
+        from agentsmithy_server.api.deps import get_db_engine
+
+        _ = get_db_engine()
+    except Exception:
+        pass
 
     app.include_router(chat_router)
     app.include_router(health_router)

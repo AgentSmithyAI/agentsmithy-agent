@@ -14,11 +14,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 # SQLAlchemy ORM setup
-from sqlalchemy import Integer, String, Text, create_engine, select
+from sqlalchemy import select
 from sqlalchemy.engine import Engine
-from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 
 from agentsmithy_server.core.dialog_history import DialogHistory
+from agentsmithy_server.db import BaseORM, ToolResultORM
+from agentsmithy_server.db.base import get_engine, get_session
 from agentsmithy_server.utils.logger import agent_logger
 
 if TYPE_CHECKING:
@@ -61,30 +62,27 @@ class ToolResultsStorage:
     via ORM models. Rows are scoped by `dialog_id`.
     """
 
-    def __init__(self, project: Project, dialog_id: str):
+    def __init__(self, project: Project, dialog_id: str, engine: Engine | None = None):
         self.project = project
         self.dialog_id = dialog_id
         # Reuse the same SQLite file as dialog history
         self._db_path: Path = DialogHistory(project, dialog_id).db_path
-        self._engine: Engine | None = None
+        self._engine: Engine | None = engine
 
     # --- SQLAlchemy ORM model definitions ---
 
     def _get_engine(self) -> Engine:
         if self._engine is None:
-            # Ensure parent directory exists
-            self._db_path.parent.mkdir(parents=True, exist_ok=True)
-            db_url = f"sqlite+pysqlite:///{self._db_path}"
-            # check_same_thread False since we may touch from async contexts
-            self._engine = create_engine(
-                db_url, connect_args={"check_same_thread": False}
-            )
+            self._engine = get_engine(self._db_path)
         return self._engine
 
     def _ensure_db(self) -> None:
-        """Ensure the SQLite tables exist using SQLAlchemy metadata."""
+        """Ensure the SQLite tables exist using SQLAlchemy metadata.
+
+        This is safe to call multiple times; it only creates missing tables.
+        """
         engine = self._get_engine()
-        _Base.metadata.create_all(engine)
+        BaseORM.metadata.create_all(engine)
 
     # ---------- Storage logic (class-owned) ----------
 
@@ -138,7 +136,7 @@ class ToolResultsStorage:
             result.get("error") if result.get("type") == "tool_error" else None
         )
         engine = self._get_engine()
-        with Session(engine) as session:
+        with get_session(engine) as session:
             session.merge(
                 ToolResultORM(
                     tool_call_id=tool_call_id,
@@ -172,7 +170,7 @@ class ToolResultsStorage:
         self._ensure_db()
         try:
             engine = self._get_engine()
-            with Session(engine) as session:
+            with get_session(engine) as session:
                 stmt = select(
                     ToolResultORM.tool_name,
                     ToolResultORM.args_json,
@@ -200,7 +198,7 @@ class ToolResultsStorage:
         self._ensure_db()
         try:
             engine = self._get_engine()
-            with Session(engine) as session:
+            with get_session(engine) as session:
                 stmt = select(
                     ToolResultORM.tool_name,
                     ToolResultORM.timestamp,
@@ -230,7 +228,7 @@ class ToolResultsStorage:
         self._ensure_db()
         try:
             engine = self._get_engine()
-            with Session(engine) as session:
+            with get_session(engine) as session:
                 stmt = (
                     select(ToolResultORM.tool_call_id)
                     .where(ToolResultORM.dialog_id == self.dialog_id)
@@ -279,21 +277,3 @@ class ToolResultsStorage:
             return json_str
         except Exception:
             return str(result)[:max_length]
-
-
-class _Base(DeclarativeBase):
-    pass
-
-
-class ToolResultORM(_Base):
-    __tablename__ = "tool_results"
-
-    tool_call_id: Mapped[str] = mapped_column(String, primary_key=True)
-    dialog_id: Mapped[str] = mapped_column(String, index=True)
-    tool_name: Mapped[str] = mapped_column(String)
-    args_json: Mapped[str] = mapped_column(Text)
-    result_json: Mapped[str] = mapped_column(Text)
-    timestamp: Mapped[str] = mapped_column(String)
-    size_bytes: Mapped[int] = mapped_column(Integer)
-    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
-    error: Mapped[str | None] = mapped_column(Text, nullable=True)
