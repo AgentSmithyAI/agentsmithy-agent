@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from agentsmithy_server.tools.support.file_restrictions import (
+from agentsmithy_server.tools.guards.file_restrictions import (
     FileRestrictions,
     get_file_restrictions,
 )
