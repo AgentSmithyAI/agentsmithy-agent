@@ -13,14 +13,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from agentsmithy_server.utils.logger import agent_logger
-from agentsmithy_server.core.dialog_history import DialogHistory
-
 # SQLAlchemy ORM setup
-from sqlalchemy import Integer, String, Text, select
-from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
+from sqlalchemy import Integer, String, Text, create_engine, select
 from sqlalchemy.engine import Engine
-from sqlalchemy import create_engine
+from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
+
+from agentsmithy_server.core.dialog_history import DialogHistory
+from agentsmithy_server.utils.logger import agent_logger
 
 if TYPE_CHECKING:
     from agentsmithy_server.core.project import Project
@@ -135,7 +134,9 @@ class ToolResultsStorage:
         packed_result = json.dumps(result, ensure_ascii=False)
         summary = self._generate_summary(tool_name, args, result)
         size_bytes = len(packed_result.encode("utf-8"))
-        error_value = result.get("error") if result.get("type") == "tool_error" else None
+        error_value = (
+            result.get("error") if result.get("type") == "tool_error" else None
+        )
         engine = self._get_engine()
         with Session(engine) as session:
             session.merge(
@@ -230,9 +231,11 @@ class ToolResultsStorage:
         try:
             engine = self._get_engine()
             with Session(engine) as session:
-                stmt = select(ToolResultORM.tool_call_id).where(
-                    ToolResultORM.dialog_id == self.dialog_id
-                ).order_by(ToolResultORM.timestamp.asc())
+                stmt = (
+                    select(ToolResultORM.tool_call_id)
+                    .where(ToolResultORM.dialog_id == self.dialog_id)
+                    .order_by(ToolResultORM.timestamp.asc())
+                )
                 rows = session.execute(stmt).all()
             results: list[ToolResultMetadata] = []
             for (tcid,) in rows:
@@ -263,7 +266,9 @@ class ToolResultsStorage:
                 if preview_lines:
                     preview = "\n".join(preview_lines)
                     if len(lines) > len(preview_lines):
-                        preview += f"\n... ({len(lines) - len(preview_lines)} more lines)"
+                        preview += (
+                            f"\n... ({len(lines) - len(preview_lines)} more lines)"
+                        )
                     return preview
                 return content[:max_length] + "... (truncated)"
             return content
@@ -385,7 +390,9 @@ class ToolResultORM(_Base):
         # Store row via ORM
         summary = self._generate_summary(tool_name, args, result)
         size_bytes = len(packed_result.encode("utf-8"))
-        error_value = result.get("error") if result.get("type") == "tool_error" else None
+        error_value = (
+            result.get("error") if result.get("type") == "tool_error" else None
+        )
 
         self._ensure_db()
         engine = self._get_engine()
@@ -456,7 +463,9 @@ class ToolResultORM(_Base):
                     "timestamp": ts,
                 }
                 agent_logger.debug(
-                    "Retrieved tool result", tool_call_id=tool_call_id, tool_name=tool_name
+                    "Retrieved tool result",
+                    tool_call_id=tool_call_id,
+                    tool_name=tool_name,
                 )
                 return data
         except Exception as e:
@@ -512,9 +521,11 @@ class ToolResultORM(_Base):
         try:
             engine = self._get_engine()
             with Session(engine) as session:
-                stmt = select(ToolResultORM.tool_call_id).where(
-                    ToolResultORM.dialog_id == self.dialog_id
-                ).order_by(ToolResultORM.timestamp.asc())
+                stmt = (
+                    select(ToolResultORM.tool_call_id)
+                    .where(ToolResultORM.dialog_id == self.dialog_id)
+                    .order_by(ToolResultORM.timestamp.asc())
+                )
                 rows = session.execute(stmt).all()
             results: list[ToolResultMetadata] = []
             for (tool_call_id,) in rows:

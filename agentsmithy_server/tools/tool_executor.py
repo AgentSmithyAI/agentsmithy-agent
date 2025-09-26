@@ -69,7 +69,11 @@ class ToolExecutor:
         contain only a reference and length so that history stays compact.
         """
         try:
-            if not (self._project and self._dialog_id and hasattr(self._project, "get_dialog_history")):
+            if not (
+                self._project
+                and self._dialog_id
+                and hasattr(self._project, "get_dialog_history")
+            ):
                 return
 
             # Build a minimized envelope
@@ -111,11 +115,17 @@ class ToolExecutor:
     def _append_ai_message_with_tool_calls_to_history(self, ai_message: Any) -> None:
         """Append the assistant message that declares tool_calls to history."""
         try:
-            if self._project and self._dialog_id and hasattr(self._project, "get_dialog_history"):
+            if (
+                self._project
+                and self._dialog_id
+                and hasattr(self._project, "get_dialog_history")
+            ):
                 history = self._project.get_dialog_history(self._dialog_id)  # type: ignore[attr-defined]
                 history.add_message(ai_message)
         except Exception as e:
-            agent_logger.error("Failed to append AI tool_calls message to history", error=str(e))
+            agent_logger.error(
+                "Failed to append AI tool_calls message to history", error=str(e)
+            )
 
     def process_with_tools(
         self, messages: list[BaseMessage], stream: bool = True
@@ -199,7 +209,9 @@ class ToolExecutor:
                                 result
                             ),
                             "result_present": True,
-                            "result_length_bytes": len(inline_result_json.encode("utf-8")),
+                            "result_length_bytes": len(
+                                inline_result_json.encode("utf-8")
+                            ),
                         },
                         "result_ref": result_ref.to_dict(),
                         "inline_result": inline_result,
@@ -395,19 +407,28 @@ class ToolExecutor:
                 call_id = tool_call.get("id", "")
                 if not call_id:
                     # If the provider hasn't supplied an id, skip this call to avoid API mismatch
-                    agent_logger.error("Missing tool_call id in streamed chunks; skipping call", tool_name=name_preview)
+                    agent_logger.error(
+                        "Missing tool_call id in streamed chunks; skipping call",
+                        tool_name=name_preview,
+                    )
                     continue
-                tool_calls_payload.append({
-                    "name": name_preview,
-                    "args": args_preview,
-                    "id": call_id,
-                })
+                tool_calls_payload.append(
+                    {
+                        "name": name_preview,
+                        "args": args_preview,
+                        "id": call_id,
+                    }
+                )
 
             # Create AI message with tool_calls set at construction
-            ai_message = AIMessage(content=accumulated_content or "", tool_calls=tool_calls_payload)
+            ai_message = AIMessage(
+                content=accumulated_content or "", tool_calls=tool_calls_payload
+            )
             # Ensure tool_calls are also present in additional_kwargs for SQL history round-trip
             try:
-                existing_kwargs = dict(getattr(ai_message, "additional_kwargs", {}) or {})
+                existing_kwargs = dict(
+                    getattr(ai_message, "additional_kwargs", {}) or {}
+                )
                 existing_kwargs["tool_calls"] = tool_calls_payload
                 ai_message.additional_kwargs = existing_kwargs  # type: ignore[attr-defined]
             except Exception:
@@ -461,7 +482,9 @@ class ToolExecutor:
 
                     # Store result and create reference (tool_id must be present)
                     if not tool_id:
-                        raise RuntimeError("Missing tool_call id; cannot attach tool output")
+                        raise RuntimeError(
+                            "Missing tool_call id; cannot attach tool output"
+                        )
 
                     if self._tool_results_storage:
                         # Store the full result
@@ -477,7 +500,9 @@ class ToolExecutor:
                             tool_id
                         )
                         inline_result = result
-                        inline_result_json = json.dumps(inline_result, ensure_ascii=False)
+                        inline_result_json = json.dumps(
+                            inline_result, ensure_ascii=False
+                        )
                         tool_message_content = {
                             "tool_call_id": tool_id,
                             "tool_name": name,
@@ -493,7 +518,9 @@ class ToolExecutor:
                                     result
                                 ),
                                 "result_present": True,
-                                "result_length_bytes": len(inline_result_json.encode("utf-8")),
+                                "result_length_bytes": len(
+                                    inline_result_json.encode("utf-8")
+                                ),
                             },
                             "result_ref": result_ref.to_dict(),
                             "inline_result": inline_result,
