@@ -1,7 +1,8 @@
 """Storage system for tool execution results.
 
-Stores tool results separately from dialog history to enable lazy loading
-and reduce LLM context usage.
+Stores tool results in a dedicated SQLite table (per project) and keeps
+references in dialog history to reduce LLM context usage while allowing
+on-demand retrieval of full results.
 """
 
 from __future__ import annotations
@@ -13,6 +14,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from agentsmithy_server.utils.logger import agent_logger
+from agentsmithy_server.core.dialog_history import DialogHistory
+
+# SQLAlchemy ORM setup
+from sqlalchemy import Integer, String, Text, select
+from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
+from sqlalchemy.engine import Engine
+from sqlalchemy import create_engine
 
 if TYPE_CHECKING:
     from agentsmithy_server.core.project import Project
@@ -48,28 +56,260 @@ class ToolResultReference:
 
 
 class ToolResultsStorage:
-    """Manages storage of tool execution results.
+    """Manages storage of tool execution results using SQLAlchemy ORM.
 
-    Results are stored as JSON files under:
-    .agentsmithy/dialogs/{dialog_id}/tool_results/{tool_call_id}.json
+    Data is stored in the same SQLite database as dialog history and accessed
+    via ORM models. Rows are scoped by `dialog_id`.
     """
 
     def __init__(self, project: Project, dialog_id: str):
         self.project = project
         self.dialog_id = dialog_id
-        self.storage_dir = project.dialogs_dir / dialog_id / "tool_results"
+        # Reuse the same SQLite file as dialog history
+        self._db_path: Path = DialogHistory(project, dialog_id).db_path
+        self._engine: Engine | None = None
 
-    def ensure_storage_dir(self) -> None:
-        """Ensure the storage directory exists."""
-        self.storage_dir.mkdir(parents=True, exist_ok=True)
+    # --- SQLAlchemy ORM model definitions ---
 
-    def _get_result_path(self, tool_call_id: str) -> Path:
-        """Get the file path for a tool result."""
-        return self.storage_dir / f"{tool_call_id}.json"
+    def _get_engine(self) -> Engine:
+        if self._engine is None:
+            # Ensure parent directory exists
+            self._db_path.parent.mkdir(parents=True, exist_ok=True)
+            db_url = f"sqlite+pysqlite:///{self._db_path}"
+            # check_same_thread False since we may touch from async contexts
+            self._engine = create_engine(
+                db_url, connect_args={"check_same_thread": False}
+            )
+        return self._engine
 
-    def _get_metadata_path(self, tool_call_id: str) -> Path:
-        """Get the file path for tool result metadata."""
-        return self.storage_dir / f"{tool_call_id}.meta.json"
+    def _ensure_db(self) -> None:
+        """Ensure the SQLite tables exist using SQLAlchemy metadata."""
+        engine = self._get_engine()
+        _Base.metadata.create_all(engine)
+
+    # ---------- Storage logic (class-owned) ----------
+
+    def _generate_summary(
+        self, tool_name: str, args: dict[str, Any], result: dict[str, Any]
+    ) -> str:
+        # Tool-specific summary generation
+        if tool_name == "read_file":
+            file_path = args.get("path", args.get("target_file", "unknown"))
+            content = result.get("content", "")
+            lines = content.count("\n") + 1 if content else 0
+            return f"Read file: {file_path} ({lines} lines)"
+        elif tool_name == "write_file" or tool_name == "write_to_file":
+            file_path = args.get("path", args.get("file_path", "unknown"))
+            content = args.get("content", args.get("contents", ""))
+            lines = content.count("\n") + 1 if content else 0
+            return f"Wrote file: {file_path} ({lines} lines)"
+        elif tool_name == "run_command":
+            command = args.get("command", "unknown")
+            exit_code = result.get("exit_code", -1)
+            status = "success" if exit_code == 0 else f"failed (exit {exit_code})"
+            return f"Ran command: {command} - {status}"
+        elif tool_name == "search_files":
+            pattern = args.get("regex", args.get("pattern", "unknown"))
+            matches = result.get("matches", [])
+            return f"Searched for '{pattern}' - found {len(matches)} matches"
+        elif tool_name == "list_files":
+            path = args.get("path", args.get("target_directory", "."))
+            files = result.get("files", [])
+            dirs = result.get("directories", [])
+            return f"Listed {path} - {len(files)} files, {len(dirs)} directories"
+        else:
+            return f"Executed {tool_name}"
+
+    async def store_result(
+        self,
+        tool_call_id: str,
+        tool_name: str,
+        args: dict[str, Any],
+        result: dict[str, Any],
+        timestamp: datetime | None = None,
+    ) -> ToolResultReference:
+        self._ensure_db()
+        if timestamp is None:
+            timestamp = datetime.now(UTC)
+        packed_args = json.dumps(args, ensure_ascii=False)
+        packed_result = json.dumps(result, ensure_ascii=False)
+        summary = self._generate_summary(tool_name, args, result)
+        size_bytes = len(packed_result.encode("utf-8"))
+        error_value = result.get("error") if result.get("type") == "tool_error" else None
+        engine = self._get_engine()
+        with Session(engine) as session:
+            session.merge(
+                ToolResultORM(
+                    tool_call_id=tool_call_id,
+                    dialog_id=self.dialog_id,
+                    tool_name=tool_name,
+                    args_json=packed_args,
+                    result_json=packed_result,
+                    timestamp=timestamp.isoformat(),
+                    size_bytes=size_bytes,
+                    summary=summary,
+                    error=error_value,
+                )
+            )
+            session.commit()
+
+        agent_logger.info(
+            "Stored tool result",
+            tool_call_id=tool_call_id,
+            tool_name=tool_name,
+            size_bytes=size_bytes,
+            summary=summary,
+        )
+
+        return ToolResultReference(
+            storage_type="tool_results",
+            dialog_id=self.dialog_id,
+            tool_call_id=tool_call_id,
+        )
+
+    async def get_result(self, tool_call_id: str) -> dict[str, Any] | None:
+        self._ensure_db()
+        try:
+            engine = self._get_engine()
+            with Session(engine) as session:
+                stmt = select(
+                    ToolResultORM.tool_name,
+                    ToolResultORM.args_json,
+                    ToolResultORM.result_json,
+                    ToolResultORM.timestamp,
+                ).where(ToolResultORM.tool_call_id == tool_call_id)
+                row = session.execute(stmt).first()
+                if not row:
+                    return None
+                tool_name, args_json, result_json, ts = row
+                return {
+                    "tool_call_id": tool_call_id,
+                    "tool_name": tool_name,
+                    "args": json.loads(args_json or "{}"),
+                    "result": json.loads(result_json or "{}"),
+                    "timestamp": ts,
+                }
+        except Exception as e:
+            agent_logger.error(
+                "Failed to load tool result", tool_call_id=tool_call_id, error=str(e)
+            )
+            return None
+
+    async def get_metadata(self, tool_call_id: str) -> ToolResultMetadata | None:
+        self._ensure_db()
+        try:
+            engine = self._get_engine()
+            with Session(engine) as session:
+                stmt = select(
+                    ToolResultORM.tool_name,
+                    ToolResultORM.timestamp,
+                    ToolResultORM.size_bytes,
+                    ToolResultORM.summary,
+                    ToolResultORM.error,
+                ).where(ToolResultORM.tool_call_id == tool_call_id)
+                row = session.execute(stmt).first()
+                if not row:
+                    return None
+                tool_name, ts, size_bytes, summary, error = row
+                return ToolResultMetadata(
+                    tool_call_id=tool_call_id,
+                    tool_name=tool_name,
+                    timestamp=ts,
+                    size_bytes=int(size_bytes or 0),
+                    summary=summary,
+                    error=error,
+                )
+        except Exception as e:
+            agent_logger.error(
+                "Failed to load tool metadata", tool_call_id=tool_call_id, error=str(e)
+            )
+            return None
+
+    async def list_results(self) -> list[ToolResultMetadata]:
+        self._ensure_db()
+        try:
+            engine = self._get_engine()
+            with Session(engine) as session:
+                stmt = select(ToolResultORM.tool_call_id).where(
+                    ToolResultORM.dialog_id == self.dialog_id
+                ).order_by(ToolResultORM.timestamp.asc())
+                rows = session.execute(stmt).all()
+            results: list[ToolResultMetadata] = []
+            for (tcid,) in rows:
+                md = await self.get_metadata(tcid)
+                if md:
+                    results.append(md)
+            return results
+        except Exception as e:
+            agent_logger.error("Failed to list tool results", error=str(e))
+            return []
+
+    def get_truncated_preview(
+        self, result: dict[str, Any], max_length: int = 500
+    ) -> str:
+        if result.get("type") == "tool_error":
+            return f"Error: {result.get('error', 'Unknown error')}"
+        if "content" in result and isinstance(result["content"], str):
+            content = result["content"]
+            if len(content) > max_length:
+                lines = content.split("\n")
+                preview_lines: list[str] = []
+                current_length = 0
+                for line in lines:
+                    if current_length + len(line) + 1 > max_length and preview_lines:
+                        break
+                    preview_lines.append(line)
+                    current_length += len(line) + 1
+                if preview_lines:
+                    preview = "\n".join(preview_lines)
+                    if len(lines) > len(preview_lines):
+                        preview += f"\n... ({len(lines) - len(preview_lines)} more lines)"
+                    return preview
+                return content[:max_length] + "... (truncated)"
+            return content
+        try:
+            json_str = json.dumps(result, ensure_ascii=False, indent=2)
+            if len(json_str) > max_length:
+                return json_str[:max_length] + "... (truncated)"
+            return json_str
+        except Exception:
+            return str(result)[:max_length]
+
+
+class _Base(DeclarativeBase):
+    pass
+
+
+class ToolResultORM(_Base):
+    __tablename__ = "tool_results"
+
+    tool_call_id: Mapped[str] = mapped_column(String, primary_key=True)
+    dialog_id: Mapped[str] = mapped_column(String, index=True)
+    tool_name: Mapped[str] = mapped_column(String)
+    args_json: Mapped[str] = mapped_column(Text)
+    result_json: Mapped[str] = mapped_column(Text)
+    timestamp: Mapped[str] = mapped_column(String)
+    size_bytes: Mapped[int] = mapped_column(Integer)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    def _get_engine(self) -> Engine:
+        if self._engine is None:
+            # Ensure parent directory exists
+            self._db_path.parent.mkdir(parents=True, exist_ok=True)
+            db_url = f"sqlite+pysqlite:///{self._db_path}"
+            # check_same_thread False since we may touch from async contexts
+            self._engine = create_engine(
+                db_url, connect_args={"check_same_thread": False}
+            )
+        return self._engine
+
+    def _ensure_db(self) -> None:
+        """Ensure the SQLite tables exist using SQLAlchemy metadata."""
+        engine = self._get_engine()
+        _Base.metadata.create_all(engine)
+
+    # File-based helpers are removed in SQLite implementation
 
     def _generate_summary(
         self, tool_name: str, args: dict[str, Any], result: dict[str, Any]
@@ -133,49 +373,46 @@ class ToolResultsStorage:
         Returns:
             Reference to the stored result
         """
-        self.ensure_storage_dir()
+        self._ensure_db()
 
         if timestamp is None:
             timestamp = datetime.now(UTC)
 
-        # Store the full result
-        result_data = {
-            "tool_call_id": tool_call_id,
-            "tool_name": tool_name,
-            "args": args,
-            "result": result,
-            "timestamp": timestamp.isoformat(),
-        }
+        # Prepare JSON payloads
+        packed_args = json.dumps(args, ensure_ascii=False)
+        packed_result = json.dumps(result, ensure_ascii=False)
 
-        result_path = self._get_result_path(tool_call_id)
-        result_json = json.dumps(result_data, ensure_ascii=False, indent=2)
-        result_path.write_text(result_json, encoding="utf-8")
-
-        # Store metadata separately for quick access
+        # Store row via ORM
         summary = self._generate_summary(tool_name, args, result)
+        size_bytes = len(packed_result.encode("utf-8"))
+        error_value = result.get("error") if result.get("type") == "tool_error" else None
+
+        self._ensure_db()
+        engine = self._get_engine()
+        with Session(engine) as session:
+            session.merge(
+                ToolResultORM(
+                    tool_call_id=tool_call_id,
+                    dialog_id=self.dialog_id,
+                    tool_name=tool_name,
+                    args_json=packed_args,
+                    result_json=packed_result,
+                    timestamp=timestamp.isoformat(),
+                    size_bytes=size_bytes,
+                    summary=summary,
+                    error=error_value,
+                )
+            )
+            session.commit()
+
         metadata = ToolResultMetadata(
             tool_call_id=tool_call_id,
             tool_name=tool_name,
             timestamp=timestamp.isoformat(),
-            size_bytes=len(result_json.encode("utf-8")),
+            size_bytes=size_bytes,
             summary=summary,
-            error=result.get("error") if result.get("type") == "tool_error" else None,
+            error=error_value,
         )
-
-        metadata_path = self._get_metadata_path(tool_call_id)
-        metadata_json = json.dumps(
-            {
-                "tool_call_id": metadata.tool_call_id,
-                "tool_name": metadata.tool_name,
-                "timestamp": metadata.timestamp,
-                "size_bytes": metadata.size_bytes,
-                "summary": metadata.summary,
-                "error": metadata.error,
-            },
-            ensure_ascii=False,
-            indent=2,
-        )
-        metadata_path.write_text(metadata_json, encoding="utf-8")
 
         agent_logger.info(
             "Stored tool result",
@@ -197,23 +434,34 @@ class ToolResultsStorage:
         Returns:
             The complete tool result data, or None if not found
         """
-        result_path = self._get_result_path(tool_call_id)
-        if not result_path.exists():
-            return None
-
+        self._ensure_db()
         try:
-            data = json.loads(result_path.read_text(encoding="utf-8"))
-            agent_logger.debug(
-                "Retrieved tool result",
-                tool_call_id=tool_call_id,
-                tool_name=data.get("tool_name"),
-            )
-            return data
+            engine = self._get_engine()
+            with Session(engine) as session:
+                stmt = select(
+                    ToolResultORM.tool_name,
+                    ToolResultORM.args_json,
+                    ToolResultORM.result_json,
+                    ToolResultORM.timestamp,
+                ).where(ToolResultORM.tool_call_id == tool_call_id)
+                row = session.execute(stmt).first()
+                if not row:
+                    return None
+                tool_name, args_json, result_json, ts = row
+                data = {
+                    "tool_call_id": tool_call_id,
+                    "tool_name": tool_name,
+                    "args": json.loads(args_json or "{}"),
+                    "result": json.loads(result_json or "{}"),
+                    "timestamp": ts,
+                }
+                agent_logger.debug(
+                    "Retrieved tool result", tool_call_id=tool_call_id, tool_name=tool_name
+                )
+                return data
         except Exception as e:
             agent_logger.error(
-                "Failed to load tool result",
-                tool_call_id=tool_call_id,
-                error=str(e),
+                "Failed to load tool result", tool_call_id=tool_call_id, error=str(e)
             )
             return None
 
@@ -225,18 +473,32 @@ class ToolResultsStorage:
         Returns:
             Tool result metadata, or None if not found
         """
-        metadata_path = self._get_metadata_path(tool_call_id)
-        if not metadata_path.exists():
-            return None
-
+        self._ensure_db()
         try:
-            data = json.loads(metadata_path.read_text(encoding="utf-8"))
-            return ToolResultMetadata(**data)
+            engine = self._get_engine()
+            with Session(engine) as session:
+                stmt = select(
+                    ToolResultORM.tool_name,
+                    ToolResultORM.timestamp,
+                    ToolResultORM.size_bytes,
+                    ToolResultORM.summary,
+                    ToolResultORM.error,
+                ).where(ToolResultORM.tool_call_id == tool_call_id)
+                row = session.execute(stmt).first()
+                if not row:
+                    return None
+                tool_name, ts, size_bytes, summary, error = row
+                return ToolResultMetadata(
+                    tool_call_id=tool_call_id,
+                    tool_name=tool_name,
+                    timestamp=ts,
+                    size_bytes=int(size_bytes or 0),
+                    summary=summary,
+                    error=error,
+                )
         except Exception as e:
             agent_logger.error(
-                "Failed to load tool metadata",
-                tool_call_id=tool_call_id,
-                error=str(e),
+                "Failed to load tool metadata", tool_call_id=tool_call_id, error=str(e)
             )
             return None
 
@@ -246,17 +508,23 @@ class ToolResultsStorage:
         Returns:
             List of metadata for all stored results
         """
-        if not self.storage_dir.exists():
+        self._ensure_db()
+        try:
+            engine = self._get_engine()
+            with Session(engine) as session:
+                stmt = select(ToolResultORM.tool_call_id).where(
+                    ToolResultORM.dialog_id == self.dialog_id
+                ).order_by(ToolResultORM.timestamp.asc())
+                rows = session.execute(stmt).all()
+            results: list[ToolResultMetadata] = []
+            for (tool_call_id,) in rows:
+                md = await self.get_metadata(tool_call_id)
+                if md:
+                    results.append(md)
+            return results
+        except Exception as e:
+            agent_logger.error("Failed to list tool results", error=str(e))
             return []
-
-        results = []
-        for meta_file in sorted(self.storage_dir.glob("*.meta.json")):
-            tool_call_id = meta_file.stem.replace(".meta", "")
-            metadata = await self.get_metadata(tool_call_id)
-            if metadata:
-                results.append(metadata)
-
-        return results
 
     def get_truncated_preview(
         self, result: dict[str, Any], max_length: int = 500

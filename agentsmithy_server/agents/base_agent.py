@@ -120,6 +120,7 @@ class BaseAgent(ABC):
             dialog_messages = context["dialog"]["messages"]
 
             # Add historical messages
+            seen_tool_call_ids: set[str] = set()
             for msg in dialog_messages:
                 # If it's already a BaseMessage object, process it
                 if hasattr(msg, "content") and hasattr(msg, "type"):
@@ -154,6 +155,8 @@ class BaseAgent(ABC):
                                         "Tool result loading requested but not in async context",
                                         tool_call_id=tool_call_id,
                                     )
+                                # History contains only references; no inline results expected.
+                                # Keep as-is; the model will use get_previous_result if needed.
                                 # Otherwise keep the reference-only version
                         except (json.JSONDecodeError, TypeError):
                             # Old-style ToolMessage with full result, keep as is

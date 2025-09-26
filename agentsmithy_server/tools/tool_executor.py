@@ -62,6 +62,61 @@ class ToolExecutor:
         tools = [t for t in self.tool_manager._tools.values()]
         return self.llm_provider.bind_tools(tools)
 
+    def _append_tool_message_to_history(self, tool_message: ToolMessage) -> None:
+        """Persist a slim reference-only ToolMessage to dialog history.
+
+        The saved message will exclude any inline result or truncated preview and
+        contain only a reference and length so that history stays compact.
+        """
+        try:
+            if not (self._project and self._dialog_id and hasattr(self._project, "get_dialog_history")):
+                return
+
+            # Build a minimized envelope
+            content = tool_message.content
+            slim_content: dict[str, Any] | None = None
+            try:
+                if isinstance(content, str):
+                    parsed = json.loads(content)
+                    if isinstance(parsed, dict) and "result_ref" in parsed:
+                        metadata = parsed.get("metadata", {}) or {}
+                        size_bytes = metadata.get("size_bytes", 0)
+                        slim_content = {
+                            "tool_call_id": parsed.get("tool_call_id"),
+                            "tool_name": parsed.get("tool_name"),
+                            "status": parsed.get("status"),
+                            "metadata": {
+                                "size_bytes": size_bytes,
+                            },
+                            "result_ref": parsed.get("result_ref"),
+                            # Explicitly indicate no inline result persisted
+                            "has_inline_result": False,
+                        }
+            except Exception:
+                slim_content = None
+
+            history = self._project.get_dialog_history(self._dialog_id)  # type: ignore[attr-defined]
+            if slim_content is not None:
+                persisted = ToolMessage(
+                    content=json.dumps(slim_content, ensure_ascii=False),
+                    tool_call_id=slim_content.get("tool_call_id", ""),
+                )
+                history.add_message(persisted)
+            else:
+                # Fallback: save original if we cannot minimize (should be rare)
+                history.add_message(tool_message)
+        except Exception as e:
+            agent_logger.error("Failed to append ToolMessage to history", error=str(e))
+
+    def _append_ai_message_with_tool_calls_to_history(self, ai_message: Any) -> None:
+        """Append the assistant message that declares tool_calls to history."""
+        try:
+            if self._project and self._dialog_id and hasattr(self._project, "get_dialog_history"):
+                history = self._project.get_dialog_history(self._dialog_id)  # type: ignore[attr-defined]
+                history.add_message(ai_message)
+        except Exception as e:
+            agent_logger.error("Failed to append AI tool_calls message to history", error=str(e))
+
     def process_with_tools(
         self, messages: list[BaseMessage], stream: bool = True
     ) -> AsyncGenerator[Any, None]:
@@ -128,6 +183,9 @@ class ToolExecutor:
                     metadata = await self._tool_results_storage.get_metadata(
                         tool_call_id
                     )
+                    # Prepare inline result for the model (not necessarily for history)
+                    inline_result = result
+                    inline_result_json = json.dumps(inline_result, ensure_ascii=False)
                     tool_message_content = {
                         "tool_call_id": tool_call_id,
                         "tool_name": name,
@@ -140,19 +198,26 @@ class ToolExecutor:
                             "truncated_preview": self._tool_results_storage.get_truncated_preview(
                                 result
                             ),
+                            "result_present": True,
+                            "result_length_bytes": len(inline_result_json.encode("utf-8")),
                         },
                         "result_ref": result_ref.to_dict(),
+                        "inline_result": inline_result,
+                        "has_inline_result": True,
                     }
                     tool_message = ToolMessage(
                         content=json.dumps(tool_message_content, ensure_ascii=False),
                         tool_call_id=tool_call_id,
                     )
+                    # Persist tool message to dialog history
+                    self._append_tool_message_to_history(tool_message)
                 else:
                     # Fallback to old behavior if no storage available
                     tool_message = ToolMessage(
                         content=json.dumps(result, ensure_ascii=False),
                         tool_call_id=tool_call_id,
                     )
+                    self._append_tool_message_to_history(tool_message)
 
                 conversation.append(tool_message)
 
@@ -319,8 +384,39 @@ class ToolExecutor:
             # Create AI message with tool calls for conversation history
             from langchain_core.messages import AIMessage
 
-            ai_message = AIMessage(content=accumulated_content or "")
-            ai_message.tool_calls = []
+            # Build tool_calls payload; require provider-supplied IDs
+            tool_calls_payload = []
+            for tool_call in accumulated_tool_calls:
+                name_preview = tool_call.get("name", "")
+                try:
+                    args_preview = json.loads(tool_call.get("args", "{}") or "{}")
+                except Exception:
+                    args_preview = {}
+                call_id = tool_call.get("id", "")
+                if not call_id:
+                    # If the provider hasn't supplied an id, skip this call to avoid API mismatch
+                    agent_logger.error("Missing tool_call id in streamed chunks; skipping call", tool_name=name_preview)
+                    continue
+                tool_calls_payload.append({
+                    "name": name_preview,
+                    "args": args_preview,
+                    "id": call_id,
+                })
+
+            # Create AI message with tool_calls set at construction
+            ai_message = AIMessage(content=accumulated_content or "", tool_calls=tool_calls_payload)
+            # Ensure tool_calls are also present in additional_kwargs for SQL history round-trip
+            try:
+                existing_kwargs = dict(getattr(ai_message, "additional_kwargs", {}) or {})
+                existing_kwargs["tool_calls"] = tool_calls_payload
+                ai_message.additional_kwargs = existing_kwargs  # type: ignore[attr-defined]
+            except Exception:
+                pass
+
+            # Append the assistant tool-call message BEFORE tool outputs
+            conversation.append(ai_message)
+            # Persist AI tool_calls message to history for next turns
+            self._append_ai_message_with_tool_calls_to_history(ai_message)
 
             # Execute tools and stream results
             for tool_call in accumulated_tool_calls:
@@ -338,11 +434,6 @@ class ToolExecutor:
 
                     if not name:
                         continue
-
-                    # Add to AI message for history
-                    ai_message.tool_calls.append(
-                        {"name": name, "args": args, "id": tool_id}
-                    )
 
                     # Emit tool_call as a structured chunk
                     yield {"type": "tool_call", "name": name, "args": args}
@@ -368,9 +459,9 @@ class ToolExecutor:
                                 "checkpoint": checkpoint,
                             }
 
-                    # Store result and create reference
+                    # Store result and create reference (tool_id must be present)
                     if not tool_id:
-                        tool_id = f"call_{uuid.uuid4().hex[:8]}"
+                        raise RuntimeError("Missing tool_call id; cannot attach tool output")
 
                     if self._tool_results_storage:
                         # Store the full result
@@ -385,6 +476,8 @@ class ToolExecutor:
                         metadata = await self._tool_results_storage.get_metadata(
                             tool_id
                         )
+                        inline_result = result
+                        inline_result_json = json.dumps(inline_result, ensure_ascii=False)
                         tool_message_content = {
                             "tool_call_id": tool_id,
                             "tool_name": name,
@@ -399,8 +492,12 @@ class ToolExecutor:
                                 "truncated_preview": self._tool_results_storage.get_truncated_preview(
                                     result
                                 ),
+                                "result_present": True,
+                                "result_length_bytes": len(inline_result_json.encode("utf-8")),
                             },
                             "result_ref": result_ref.to_dict(),
+                            "inline_result": inline_result,
+                            "has_inline_result": True,
                         }
                         tool_message = ToolMessage(
                             content=json.dumps(
@@ -408,12 +505,14 @@ class ToolExecutor:
                             ),
                             tool_call_id=tool_id,
                         )
+                        self._append_tool_message_to_history(tool_message)
                     else:
                         # Fallback to old behavior if no storage available
                         tool_message = ToolMessage(
                             content=json.dumps(result, ensure_ascii=False),
                             tool_call_id=tool_id,
                         )
+                        self._append_tool_message_to_history(tool_message)
 
                     conversation.append(tool_message)
 
@@ -428,5 +527,4 @@ class ToolExecutor:
                     yield {"type": "error", "error": error_msg}
                     return
 
-            # Add AI message with tool calls to conversation
-            conversation.append(ai_message)
+            # Assistant message already appended above
