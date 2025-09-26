@@ -106,11 +106,11 @@ async def get_tool_result(
 Add a new tool that allows the model to retrieve previous tool results:
 
 ```python
-# agentsmithy_server/tools/get_previous_result.py
+# agentsmithy_server/tools/get_tool_result.py
 class GetPreviousResultTool(BaseTool):
     """Retrieve results from previous tool executions in this dialog."""
     
-    name: str = "get_previous_result"
+    name: str = "get_tool_result"
     description: str = "Retrieve the full result of a previous tool execution"
     
     async def _arun(self, tool_call_id: str) -> dict[str, Any]:
@@ -136,7 +136,7 @@ class GetPreviousResultTool(BaseTool):
 
 ### Phase 4: API and Tools
 1. Create REST endpoint for retrieving tool results
-2. Implement `get_previous_result` tool
+2. Implement `get_tool_result` tool
 3. Add client-side support for fetching results
 
 ## Benefits

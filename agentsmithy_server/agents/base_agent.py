@@ -155,7 +155,7 @@ class BaseAgent(ABC):
                                         tool_call_id=tool_call_id,
                                     )
                                 # History contains only references; no inline results expected.
-                                # Keep as-is; the model will use get_previous_result if needed.
+                                # Keep as-is; the model will use get_tool_result if needed.
                                 # Otherwise keep the reference-only version
                         except (json.JSONDecodeError, TypeError):
                             # Old-style ToolMessage with full result, keep as is

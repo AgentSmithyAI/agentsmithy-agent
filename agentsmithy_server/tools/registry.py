@@ -28,6 +28,25 @@ class ToolRegistry:
         for tool in self._tools.values():
             tool.set_dialog_id(dialog_id)
 
+    def set_context(self, project: object | None, dialog_id: str | None) -> None:
+        """Propagate project and dialog context to all tools that support it.
+
+        Tools that implement a custom `set_context(project, dialog_id)` will
+        receive both the project object and dialog id. We also continue to call
+        `set_dialog_id` on all tools for backward compatibility.
+        """
+        # Backward-compatible propagation of dialog id
+        self.set_dialog_id(dialog_id)
+        # Optional propagation of project+dialog if tool supports it
+        for tool in self._tools.values():
+            try:
+                setter = getattr(tool, "set_context", None)
+                if callable(setter):
+                    setter(project, dialog_id)
+            except Exception:
+                # Best-effort propagation; ignore individual tool failures
+                continue
+
     def register(self, tool: BaseTool) -> None:
         # Ensure required attributes are present on the instance for LangChain binding
         def _field_default(field_name: str):

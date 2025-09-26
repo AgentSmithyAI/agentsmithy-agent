@@ -66,6 +66,7 @@ class UniversalAgent(BaseAgent):
         project = None
         if context and context.get("dialog"):
             dialog_id = context["dialog"].get("id")
+            # Propagate dialog_id early for all tools
             self.tool_manager.set_dialog_id(dialog_id)
 
         if context and context.get("project"):
@@ -75,10 +76,10 @@ class UniversalAgent(BaseAgent):
         if hasattr(self.tool_executor, "set_context"):
             self.tool_executor.set_context(project, dialog_id)
 
-        # Set context for get_previous_result tool
-        get_prev_tool = self.tool_manager.get("get_previous_result")
-        if get_prev_tool and hasattr(get_prev_tool, "set_context"):
-            get_prev_tool.set_context(project, dialog_id)
+        # Also propagate project+dialog context to tools that need it
+        if hasattr(self.tool_manager, "set_context"):
+            # Allows tools like get_tool_result to access storage
+            self.tool_manager.set_context(project, dialog_id)
 
         # Build context
         full_context = await self.context_builder.build_context(query, context)

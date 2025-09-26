@@ -16,10 +16,10 @@ if TYPE_CHECKING:
 
 
 class GetPreviousResultArgs(BaseModel):
-    """Arguments for get_previous_result tool."""
+    """Arguments for get_tool_result tool."""
 
     tool_call_id: str = Field(
-        description="The ID of a PREVIOUS tool call from EARLIER in the conversation (not from the current task) whose full results you need to retrieve"
+        description="The ID of a PREVIOUS tool call from EARLIER in the conversation whose results you need to retrieve"
     )
 
 
@@ -32,14 +32,13 @@ class GetPreviousResultTool(BaseTool):  # type: ignore[override]
     the current task context.
     """
 
-    name: str = "get_previous_result"
+    name: str = "get_tool_result"
     description: str = (
         "Retrieve the full result of a PREVIOUS tool execution from EARLIER in the conversation. "
         "ONLY use this when you need specific data from a tool that was executed BEFORE the current task, "
-        "and that data is REQUIRED to complete your current objective. "
-        "DO NOT use this to retrieve results of tools you JUST executed - you already have their output. "
-        "Example: If the user asks about 'the file you read earlier' or 'what was in that search result', "
-        "then you should use this tool to retrieve those historical results."
+        "and that data is REQUIRED to complete your current objective. Do not use this for retrieving results "
+        "of file operations, it's more correct to use the appropriate file operation tool again."
+        "Use it for non-idempotent tools, like web search."
     )
     args_schema: type[BaseModel] = GetPreviousResultArgs
 

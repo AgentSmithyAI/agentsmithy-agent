@@ -1,27 +1,3 @@
-## [Unreleased]
-
-### Features
-
-* **history**: Implement lazy loading of tool results to optimize LLM context usage
-  - Add separate storage for tool execution results 
-  - Store only references and metadata in dialog history
-  - Add API endpoints to retrieve tool results on demand
-  - Add `get_previous_result` tool for model to access previous results
-  - Reduce context bloat from large tool outputs
-
-### Bug Fixes
-
-* **tools**: Improve get_previous_result tool to prevent misuse
-  - Update tool description to clarify it's only for results from earlier in conversation
-  - Add explicit instructions not to use for recently executed tools
-  - Prevent unnecessary tool calls that waste tokens and time
-
-* **history**: Fix duplicate tool calls due to unclear result summaries
-  - Correct argument names in summary generation to match actual tool schemas
-  - Increase preview size from 200 to 500 characters for better context
-  - Improve preview to show complete lines instead of cutting mid-line
-  - Ensure model can see what files were read/written from summaries
-
 ## [1.0.3](https://github.com/AgentSmithyAI/agentsmithy-agent/compare/v1.0.2...v1.0.3) (2025-09-23)
 
 

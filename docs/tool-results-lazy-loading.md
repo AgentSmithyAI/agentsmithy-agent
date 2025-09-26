@@ -12,8 +12,8 @@ The `project` object passed in context might be serialized to a dictionary after
 - The original `project` object is preserved after context building in `universal_agent.py`
 - The `project` is removed from context before LLM formatting to avoid serialization
 
-### Model Misusing get_previous_result Tool
-The model might incorrectly use `get_previous_result` to retrieve results of tools it just executed. To prevent this:
+### Model Misusing get_tool_result Tool
+The model might incorrectly use `get_tool_result` to retrieve results of tools it just executed. To prevent this:
 - The tool description explicitly states it's for results from EARLIER in the conversation
 - Clear instructions that it should NOT be used for tools just executed
 - Examples of proper usage scenarios are provided
@@ -79,11 +79,11 @@ New endpoints for accessing tool results:
 
 ### 5. Get Previous Result Tool
 
-A new tool `get_previous_result` allows the model to retrieve previous tool results:
+A new tool `get_tool_result` allows the model to retrieve previous tool results:
 
 ```python
 # Usage by the model
-result = await get_previous_result(tool_call_id="call_abc123")
+result = await get_tool_result(tool_call_id="call_abc123")
 ```
 
 ## Benefits
