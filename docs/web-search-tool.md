@@ -21,22 +21,14 @@ pip install duckduckgo-search==7.1.1
 
 This dependency is already included in the project's `requirements.txt`.
 
-## Usage
+### Usage
 
-The tool is automatically registered in the `ToolFactory` and available to all agents:
+The tool is automatically registered in the builtin registry and available to all agents:
 
 ```python
-from agentsmithy_server.tools.tool_factory import ToolFactory
+from agentsmithy_server.tools import build_registry
 
-# Create tool manager with web search enabled
-tool_manager = ToolFactory.create_tool_manager()
-
-# Use the tool
-result = await tool_manager.run_tool(
-    "web_search",
-    query="Python programming tutorials",
-    num_results=5
-)
+registry = build_registry()
 ```
 
 ## Tool Arguments

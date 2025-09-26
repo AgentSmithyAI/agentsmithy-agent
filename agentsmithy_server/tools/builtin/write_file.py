@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 from agentsmithy_server.services.versioning import VersioningTracker
 
-from .base_tool import BaseTool
+from ..base_tool import BaseTool
 
 
 class WriteFileArgs(BaseModel):

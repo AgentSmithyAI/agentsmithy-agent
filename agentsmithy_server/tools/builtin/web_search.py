@@ -1,19 +1,31 @@
 from __future__ import annotations
 
+import importlib
+import sys
 from typing import Any, cast
 
-import duckduckgo_search as ddg
 from pydantic import BaseModel, Field
 
 from agentsmithy_server.config import settings
 
-from .base_tool import BaseTool
+from ..base_tool import BaseTool
+
+# Resolve duckduckgo_search robustly: honor tests that inject None into sys.modules
+_ddg_mod = sys.modules.get("duckduckgo_search", ...)
+if _ddg_mod is None:
+    # Test explicitly set module to None: treat as missing
+    raise ImportError("duckduckgo_search is required")
+elif _ddg_mod is ...:
+    try:
+        _ddg_mod = importlib.import_module("duckduckgo_search")
+    except Exception as e:  # pragma: no cover
+        raise ImportError("duckduckgo_search is required") from e
+
+ddg = _ddg_mod
 
 # Mandatory APIs from duckduckgo_search; DDGS required, AsyncDDGS optional
-_AsyncDDGS = getattr(ddg, "AsyncDDGS", None)
-_DDGS = getattr(ddg, "DDGS", None)
-AsyncDDGS = cast(Any, _AsyncDDGS)
-DDGS = cast(Any, _DDGS)
+AsyncDDGS = cast(Any, getattr(ddg, "AsyncDDGS", None))
+DDGS = cast(Any, getattr(ddg, "DDGS", None))
 
 
 class WebSearchArgs(BaseModel):

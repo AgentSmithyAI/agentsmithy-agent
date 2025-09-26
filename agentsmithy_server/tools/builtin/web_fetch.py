@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field, HttpUrl
 
 from agentsmithy_server.config import settings
 
-from .base_tool import BaseTool
+from ..base_tool import BaseTool
 
 
 class WebFetchArgs(BaseModel):

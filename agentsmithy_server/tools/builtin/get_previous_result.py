@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from agentsmithy_server.core.tool_results_storage import ToolResultsStorage
 from agentsmithy_server.utils.logger import agent_logger
 
-from .base_tool import BaseTool
+from ..base_tool import BaseTool
 
 if TYPE_CHECKING:
     from agentsmithy_server.core.project import Project

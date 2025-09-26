@@ -10,7 +10,8 @@ from agentsmithy_server.agents.base_agent import BaseAgent
 from agentsmithy_server.core.project import Project
 from agentsmithy_server.core.project_runtime import set_scan_status
 from agentsmithy_server.prompts import INSPECTOR_SYSTEM, build_inspector_human
-from agentsmithy_server.tools import ToolExecutor, ToolFactory
+from agentsmithy_server.tools import ToolExecutor
+from agentsmithy_server.tools.build_registry import build_registry
 
 
 class ProjectInspectorAgent(BaseAgent):
@@ -18,8 +19,9 @@ class ProjectInspectorAgent(BaseAgent):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.tool_manager = ToolFactory.create_tool_manager()
-        self.tool_executor = ToolExecutor(self.tool_manager, self.llm_provider)
+        # Build a minimal registry of builtin tools
+        self.tool_manager = build_registry()
+        self.executor = ToolExecutor(self.tool_manager, self.llm_provider)
 
     def get_default_system_prompt(self) -> str:
         return INSPECTOR_SYSTEM
@@ -45,7 +47,7 @@ class ProjectInspectorAgent(BaseAgent):
         system = SystemMessage(content=INSPECTOR_SYSTEM)
         human = HumanMessage(content=build_inspector_human(str(project.root)))
 
-        result = await self.tool_executor.process_with_tools_async([system, human])
+        result = await self.executor.process_with_tools_async([system, human])
         # Diagnostics for large tool traffic
         from agentsmithy_server.utils.logger import agent_logger as _alog
 

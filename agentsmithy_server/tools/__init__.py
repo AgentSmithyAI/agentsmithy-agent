@@ -6,17 +6,19 @@ compatible with our SSE protocol (e.g., diff events).
 """
 
 from .base_tool import BaseTool
-from .delete_file import DeleteFileTool
-from .run_command import RunCommandTool
+from .build_registry import build_registry
+
+# Re-export commonly used tools from builtin package
+from .builtin.delete_file import DeleteFileTool
+from .builtin.run_command import RunCommandTool
+from .registry import ToolRegistry
 from .tool_executor import ToolExecutor
-from .tool_factory import ToolFactory
-from .tool_manager import ToolManager
 
 __all__ = [
     "BaseTool",
-    "ToolManager",
+    "ToolRegistry",
     "ToolExecutor",
-    "ToolFactory",
+    "build_registry",
     "DeleteFileTool",
     "RunCommandTool",
 ]

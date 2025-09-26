@@ -1,12 +1,15 @@
 """Universal agent that handles all types of requests."""
 
+from __future__ import annotations
+
 from typing import Any
 
 from langchain_core.messages import BaseMessage
 
 from agentsmithy_server.agents.base_agent import BaseAgent
 from agentsmithy_server.prompts import UNIVERSAL_SYSTEM
-from agentsmithy_server.tools import ToolExecutor, ToolFactory
+from agentsmithy_server.tools import ToolExecutor
+from agentsmithy_server.tools.build_registry import build_registry
 from agentsmithy_server.utils.logger import agent_logger
 
 
@@ -17,7 +20,7 @@ class UniversalAgent(BaseAgent):
         super().__init__(*args, **kwargs)
 
         # Initialize tool manager with default tools
-        self.tool_manager = ToolFactory.create_tool_manager()
+        self.tool_manager = build_registry()
 
         # Initialize tool executor
         self.tool_executor = ToolExecutor(self.tool_manager, self.llm_provider)

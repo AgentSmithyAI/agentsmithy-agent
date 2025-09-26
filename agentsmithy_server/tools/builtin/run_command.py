@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 
 from agentsmithy_server.utils.logger import agent_logger
 
-from .base_tool import BaseTool
+from ..base_tool import BaseTool
 
 
 def _detect_shell() -> str | None:

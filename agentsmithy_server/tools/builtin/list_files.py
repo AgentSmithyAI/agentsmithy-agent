@@ -5,8 +5,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from .base_tool import BaseTool
-from .file_restrictions import get_file_restrictions
+from ..base_tool import BaseTool
+from ..support.file_restrictions import get_file_restrictions
 
 
 class ListFilesArgs(BaseModel):

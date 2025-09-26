@@ -13,7 +13,8 @@ from agentsmithy_server.core.tool_results_storage import (
 )
 from agentsmithy_server.utils.logger import agent_logger
 
-from .tool_manager import ToolManager
+from .integration.langchain_adapter import as_langchain_tools
+from .registry import ToolRegistry
 
 if TYPE_CHECKING:
     from agentsmithy_server.core.project import Project
@@ -27,7 +28,7 @@ class ToolExecutor:
     - process_with_tools_async(stream=False) -> dict
     """
 
-    def __init__(self, tool_manager: ToolManager, llm_provider: LLMProvider) -> None:
+    def __init__(self, tool_manager: ToolRegistry, llm_provider: LLMProvider) -> None:
         self.tool_manager = tool_manager
         self.llm_provider = llm_provider
         # Optional SSE callback to emit structured events upstream if needed
@@ -61,7 +62,7 @@ class ToolExecutor:
 
     def _bind_tools(self):
         # The provider returns an LLM object with tools bound (LangChain style)
-        tools = [t for t in self.tool_manager._tools.values()]
+        tools = as_langchain_tools(self.tool_manager)
         return self.llm_provider.bind_tools(tools)
 
     def _append_tool_message_to_history(self, tool_message: ToolMessage) -> None:
