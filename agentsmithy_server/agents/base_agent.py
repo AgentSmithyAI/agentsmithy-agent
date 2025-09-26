@@ -120,7 +120,6 @@ class BaseAgent(ABC):
             dialog_messages = context["dialog"]["messages"]
 
             # Add historical messages
-            seen_tool_call_ids: set[str] = set()
             for msg in dialog_messages:
                 # If it's already a BaseMessage object, process it
                 if hasattr(msg, "content") and hasattr(msg, "type"):

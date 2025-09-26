@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
 from langchain_core.messages import BaseMessage, ToolMessage
@@ -31,12 +31,14 @@ class ToolExecutor:
         self.tool_manager = tool_manager
         self.llm_provider = llm_provider
         # Optional SSE callback to emit structured events upstream if needed
-        self._sse_callback = None
+        self._sse_callback: Callable[[dict[str, Any]], Awaitable[None]] | None = None
         self._project: Project | None = None
         self._dialog_id: str | None = None
         self._tool_results_storage: ToolResultsStorage | None = None
 
-    def set_sse_callback(self, callback):
+    def set_sse_callback(
+        self, callback: Callable[[dict[str, Any]], Awaitable[None]] | None
+    ) -> None:
         self._sse_callback = callback
 
     def set_context(self, project: Project | None, dialog_id: str | None) -> None:
@@ -50,7 +52,7 @@ class ToolExecutor:
 
     async def emit_event(self, event: dict[str, Any]) -> None:
         if self._sse_callback is not None:
-            try:  # type: ignore[unreachable]
+            try:
                 await self._sse_callback(event)
             except Exception as e:
                 agent_logger.error(
@@ -99,7 +101,7 @@ class ToolExecutor:
             except Exception:
                 slim_content = None
 
-            history = self._project.get_dialog_history(self._dialog_id)  # type: ignore[attr-defined]
+            history = self._project.get_dialog_history(self._dialog_id)
             if slim_content is not None:
                 persisted = ToolMessage(
                     content=json.dumps(slim_content, ensure_ascii=False),
@@ -120,7 +122,7 @@ class ToolExecutor:
                 and self._dialog_id
                 and hasattr(self._project, "get_dialog_history")
             ):
-                history = self._project.get_dialog_history(self._dialog_id)  # type: ignore[attr-defined]
+                history = self._project.get_dialog_history(self._dialog_id)
                 history.add_message(ai_message)
         except Exception as e:
             agent_logger.error(
@@ -430,7 +432,7 @@ class ToolExecutor:
                     getattr(ai_message, "additional_kwargs", {}) or {}
                 )
                 existing_kwargs["tool_calls"] = tool_calls_payload
-                ai_message.additional_kwargs = existing_kwargs  # type: ignore[attr-defined]
+                ai_message.additional_kwargs = existing_kwargs
             except Exception:
                 pass
 
