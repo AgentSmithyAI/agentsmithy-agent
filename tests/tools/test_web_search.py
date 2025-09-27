@@ -1,6 +1,5 @@
 """Tests for WebSearchTool."""
 
-import sys
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
@@ -58,6 +57,7 @@ async def test_web_search_success():
 
     # Tool no longer emits a separate SSE 'search' event
     tool._sse_callback.assert_not_called()
+
 
 @pytest.mark.asyncio
 async def test_web_search_exception():

@@ -22,7 +22,10 @@ class BaseTool(LCBaseTool, ABC):  # type: ignore[override]
     # but should still pass inline results back to the model.
     ephemeral: bool = False
 
-    def __init__(self) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        # Ensure Pydantic/LangChain BaseTool initialization runs
+        super().__init__(*args, **kwargs)
+        # Internal, non-pydantic state
         self._sse_callback: SseCallback | None = None
         self._dialog_id: str | None = None
 
