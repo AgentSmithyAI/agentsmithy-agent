@@ -46,6 +46,8 @@ class GetPreviousResultTool(BaseTool):  # type: ignore[override]
         super().__init__()
         self._project: Project | None = None
         self._dialog_id: str | None = None
+        # This tool should not persist its own outputs
+        self.ephemeral = True
 
     def set_context(self, project: Project | None, dialog_id: str | None) -> None:
         """Set project and dialog context for accessing tool results."""

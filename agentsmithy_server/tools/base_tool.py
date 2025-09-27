@@ -18,6 +18,10 @@ class BaseTool(LCBaseTool, ABC):  # type: ignore[override]
 
     # Tool subclasses should declare: name: str, description: str, args_schema: type[BaseModel]
 
+    # If True, executor must not persist tool output to history/storage
+    # but should still pass inline results back to the model.
+    ephemeral: bool = False
+
     def __init__(self) -> None:
         self._sse_callback: SseCallback | None = None
         self._dialog_id: str | None = None

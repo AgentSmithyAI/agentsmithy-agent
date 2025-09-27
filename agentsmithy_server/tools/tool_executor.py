@@ -35,6 +35,7 @@ class ToolExecutor:
         self._sse_callback: Callable[[dict[str, Any]], Awaitable[None]] | None = None
         self._project: Project | None = None
         self._dialog_id: str | None = None
+        # Set via set_context(...)
         self._tool_results_storage: ToolResultsStorage | None = None
 
     def set_sse_callback(
@@ -64,6 +65,93 @@ class ToolExecutor:
         # The provider returns an LLM object with tools bound (LangChain style)
         tools = as_langchain_tools(self.tool_manager)
         return self.llm_provider.bind_tools(tools)
+
+    def _is_ephemeral_tool(self, name: str) -> bool:
+        """Check whether a tool should be treated as ephemeral (no persistence).
+
+        Centralizing this avoids sprinkling special-cases across flows.
+        """
+        try:
+            tool_obj = self.tool_manager.get(name)
+            return bool(getattr(tool_obj, "ephemeral", False))
+        except Exception:
+            return False
+
+    async def _build_tool_message(
+        self,
+        tool_call_id: str,
+        name: str,
+        args: dict[str, Any],
+        result: dict[str, Any],
+    ) -> tuple[ToolMessage, bool]:
+        """Create a ToolMessage for a tool result, optionally persisting it.
+
+        Returns a tuple of (tool_message, is_ephemeral). When ephemeral, the
+        message contains only inline results and no history/storage is written.
+        """
+        is_ephemeral = self._is_ephemeral_tool(name)
+
+        # If storage is available and tool is not ephemeral, persist and build reference
+        if self._tool_results_storage and not is_ephemeral:
+            result_ref = await self._tool_results_storage.store_result(
+                tool_call_id=tool_call_id,
+                tool_name=name,
+                args=args,
+                result=result,
+            )
+            metadata = await self._tool_results_storage.get_metadata(tool_call_id)
+
+            inline_result_json = json.dumps(result, ensure_ascii=False)
+            content = {
+                "tool_call_id": tool_call_id,
+                "tool_name": name,
+                "status": (
+                    "error" if result.get("type") == "tool_error" else "success"
+                ),
+                "metadata": {
+                    "size_bytes": metadata.size_bytes if metadata else 0,
+                    "summary": metadata.summary if metadata else "",
+                    "truncated_preview": self._tool_results_storage.get_truncated_preview(
+                        result
+                    ),
+                    "result_present": True,
+                    "result_length_bytes": len(inline_result_json.encode("utf-8")),
+                },
+                "result_ref": result_ref.to_dict(),
+                "inline_result": result,
+                "has_inline_result": True,
+            }
+            return (
+                ToolMessage(
+                    content=json.dumps(content, ensure_ascii=False),
+                    tool_call_id=tool_call_id,
+                ),
+                is_ephemeral,
+            )
+
+        # Inline-only message for ephemeral tools or when storage is unavailable
+        inline_result_json = json.dumps(result, ensure_ascii=False)
+        content = {
+            "tool_call_id": tool_call_id,
+            "tool_name": name,
+            "status": ("error" if result.get("type") == "tool_error" else "success"),
+            "metadata": {
+                "size_bytes": len(inline_result_json.encode("utf-8")),
+                "summary": "",
+                "truncated_preview": None,
+                "result_present": True,
+                "result_length_bytes": len(inline_result_json.encode("utf-8")),
+            },
+            "inline_result": result,
+            "has_inline_result": True,
+        }
+        return (
+            ToolMessage(
+                content=json.dumps(content, ensure_ascii=False),
+                tool_call_id=tool_call_id,
+            ),
+            True,
+        )
 
     def _append_tool_message_to_history(self, tool_message: ToolMessage) -> None:
         """Persist a slim reference-only ToolMessage to dialog history.
@@ -177,61 +265,20 @@ class ToolExecutor:
                 if not name:
                     continue
                 result = await self.tool_manager.run_tool(name, **args)
-                aggregated_tool_results.append({"name": name, "result": result})
-                aggregated_tool_calls.append({"name": name, "args": args})
+                # Check if tool output should be aggregated/persisted
+                is_ephemeral = self._is_ephemeral_tool(name)
+                if not is_ephemeral:
+                    aggregated_tool_results.append({"name": name, "result": result})
+                    aggregated_tool_calls.append({"name": name, "args": args})
 
                 # Store result and create reference
                 tool_call_id = call.get("id", "") or f"call_{uuid.uuid4().hex[:8]}"
 
-                if self._tool_results_storage:
-                    # Store the full result
-                    result_ref = await self._tool_results_storage.store_result(
-                        tool_call_id=tool_call_id,
-                        tool_name=name,
-                        args=args,
-                        result=result,
-                    )
-
-                    # Create a minimal message with reference
-                    metadata = await self._tool_results_storage.get_metadata(
-                        tool_call_id
-                    )
-                    # Prepare inline result for the model (not necessarily for history)
-                    inline_result = result
-                    inline_result_json = json.dumps(inline_result, ensure_ascii=False)
-                    tool_message_content = {
-                        "tool_call_id": tool_call_id,
-                        "tool_name": name,
-                        "status": (
-                            "error" if result.get("type") == "tool_error" else "success"
-                        ),
-                        "metadata": {
-                            "size_bytes": metadata.size_bytes if metadata else 0,
-                            "summary": metadata.summary if metadata else "",
-                            "truncated_preview": self._tool_results_storage.get_truncated_preview(
-                                result
-                            ),
-                            "result_present": True,
-                            "result_length_bytes": len(
-                                inline_result_json.encode("utf-8")
-                            ),
-                        },
-                        "result_ref": result_ref.to_dict(),
-                        "inline_result": inline_result,
-                        "has_inline_result": True,
-                    }
-                    tool_message = ToolMessage(
-                        content=json.dumps(tool_message_content, ensure_ascii=False),
-                        tool_call_id=tool_call_id,
-                    )
-                    # Persist tool message to dialog history
-                    self._append_tool_message_to_history(tool_message)
-                else:
-                    # Fallback to old behavior if no storage available
-                    tool_message = ToolMessage(
-                        content=json.dumps(result, ensure_ascii=False),
-                        tool_call_id=tool_call_id,
-                    )
+                tool_message, is_ephemeral = await self._build_tool_message(
+                    tool_call_id, name, args, result
+                )
+                # Persist to history only if non-ephemeral and storage path built with reference
+                if not is_ephemeral and self._tool_results_storage:
                     self._append_tool_message_to_history(tool_message)
 
                 conversation.append(tool_message)
@@ -464,6 +511,7 @@ class ToolExecutor:
 
                     # Execute tool
                     result = await self.tool_manager.run_tool(name, **args)
+                    is_ephemeral = self._is_ephemeral_tool(name)
 
                     # Immediately yield file_edit in the same stream if tool produced a file change
                     if isinstance(result, dict) and result.get("type") in {
@@ -489,59 +537,10 @@ class ToolExecutor:
                             "Missing tool_call id; cannot attach tool output"
                         )
 
-                    if self._tool_results_storage:
-                        # Store the full result
-                        result_ref = await self._tool_results_storage.store_result(
-                            tool_call_id=tool_id,
-                            tool_name=name,
-                            args=args,
-                            result=result,
-                        )
-
-                        # Create a minimal message with reference
-                        metadata = await self._tool_results_storage.get_metadata(
-                            tool_id
-                        )
-                        inline_result = result
-                        inline_result_json = json.dumps(
-                            inline_result, ensure_ascii=False
-                        )
-                        tool_message_content = {
-                            "tool_call_id": tool_id,
-                            "tool_name": name,
-                            "status": (
-                                "error"
-                                if result.get("type") == "tool_error"
-                                else "success"
-                            ),
-                            "metadata": {
-                                "size_bytes": metadata.size_bytes if metadata else 0,
-                                "summary": metadata.summary if metadata else "",
-                                "truncated_preview": self._tool_results_storage.get_truncated_preview(
-                                    result
-                                ),
-                                "result_present": True,
-                                "result_length_bytes": len(
-                                    inline_result_json.encode("utf-8")
-                                ),
-                            },
-                            "result_ref": result_ref.to_dict(),
-                            "inline_result": inline_result,
-                            "has_inline_result": True,
-                        }
-                        tool_message = ToolMessage(
-                            content=json.dumps(
-                                tool_message_content, ensure_ascii=False
-                            ),
-                            tool_call_id=tool_id,
-                        )
-                        self._append_tool_message_to_history(tool_message)
-                    else:
-                        # Fallback to old behavior if no storage available
-                        tool_message = ToolMessage(
-                            content=json.dumps(result, ensure_ascii=False),
-                            tool_call_id=tool_id,
-                        )
+                    tool_message, is_ephemeral = await self._build_tool_message(
+                        tool_id, name, args, result
+                    )
+                    if not is_ephemeral and self._tool_results_storage:
                         self._append_tool_message_to_history(tool_message)
 
                     conversation.append(tool_message)
