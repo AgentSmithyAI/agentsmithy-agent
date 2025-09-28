@@ -31,6 +31,15 @@ class Settings(BaseSettings):
         default=5, description="Maximum number of open files to include in context"
     )
 
+    # Summarization threshold (single knob, tokens)
+    summary_trigger_token_budget: int = Field(
+        default=10000,
+        description=(
+            "Approximate total input tokens in dialog after which summarization should be applied"
+        ),
+        validation_alias="SUMMARY_TRIGGER_TOKEN_BUDGET",
+    )
+
     # LLM Configuration
     default_model: str = Field(
         default="", description="Default LLM model", validation_alias="DEFAULT_MODEL"

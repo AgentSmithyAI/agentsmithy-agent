@@ -7,6 +7,7 @@ from typing import Any
 from langchain_core.messages import BaseMessage
 
 from agentsmithy_server.agents.base_agent import BaseAgent
+from agentsmithy_server.core.dialog_usage_storage import DialogUsageStorage
 from agentsmithy_server.prompts import UNIVERSAL_SYSTEM
 from agentsmithy_server.tools import ToolExecutor
 from agentsmithy_server.tools.build_registry import build_registry
@@ -105,6 +106,28 @@ class UniversalAgent(BaseAgent):
         else:
             # For non-streaming, use the async method
             result = await self.tool_executor.process_with_tools_async(messages)
+            # Try to persist usage if present in metadata
+            try:
+                dialog_id = (
+                    full_context.get("dialog", {}).get("id")
+                    if isinstance(full_context, dict)
+                    else None
+                )
+                project = (
+                    full_context.get("project")
+                    if isinstance(full_context, dict)
+                    else None
+                )
+                usage = result.get("usage") if isinstance(result, dict) else None
+                if project and dialog_id and usage and hasattr(project, "dialogs_dir"):
+                    storage = DialogUsageStorage(project, dialog_id)
+                    storage.upsert(
+                        prompt_tokens=usage.get("prompt_tokens"),
+                        completion_tokens=usage.get("completion_tokens"),
+                        total_tokens=usage.get("total_tokens"),
+                    )
+            except Exception:
+                pass
             return {
                 "agent": self.get_agent_name(),
                 "response": self._format_response(result),

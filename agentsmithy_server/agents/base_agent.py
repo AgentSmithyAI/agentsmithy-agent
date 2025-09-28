@@ -105,6 +105,15 @@ class BaseAgent(ABC):
         """
         messages: list[BaseMessage] = [SystemMessage(content=self.system_prompt)]
 
+        # If a dialog summary is available, include it as a SystemMessage first
+        dialog_summary = context.get("dialog_summary")
+        if dialog_summary:
+            messages.append(
+                SystemMessage(
+                    content=f"Dialog Summary (earlier turns):\n{dialog_summary}"
+                )
+            )
+
         # Extract project and dialog_id for tool results loading
         project = context.get("project")
         dialog_id = context.get("dialog", {}).get("id")
@@ -161,7 +170,14 @@ class BaseAgent(ABC):
                             # Old-style ToolMessage with full result, keep as is
                             pass
 
-                    messages.append(msg)
+                    # Drop empty tool_calls on AIMessage to avoid OpenAI 400 (empty array not allowed)
+                    if (
+                        isinstance(msg, AIMessage)
+                        and getattr(msg, "tool_calls", None) == []
+                    ):
+                        messages.append(AIMessage(content=getattr(msg, "content", "")))
+                    else:
+                        messages.append(msg)
                 # Otherwise convert from dict (backward compatibility)
                 elif isinstance(msg, dict):
                     if msg.get("role") == "user":

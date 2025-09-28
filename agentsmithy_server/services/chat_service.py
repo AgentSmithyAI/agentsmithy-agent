@@ -11,6 +11,8 @@ from typing import Any
 
 from agentsmithy_server.api.sse_protocol import EventFactory as SSEEventFactory
 from agentsmithy_server.core.agent_graph import AgentOrchestrator
+from agentsmithy_server.core.dialog_summary_storage import DialogSummaryStorage
+from agentsmithy_server.core.summarization.strategy import KEEP_LAST_MESSAGES
 from agentsmithy_server.utils.logger import api_logger
 
 
@@ -176,7 +178,7 @@ class ChatService:
         dialog_id: str | None,
         project: Any | None,
     ) -> dict[str, Any]:
-        """Append user message and enrich context with dialog history (no limit)."""
+        """Append user message and enrich context with dialog history (with summary support)."""
         ctx: dict[str, Any] = dict(context or {})
         if not project or not dialog_id:
             return ctx
@@ -187,14 +189,35 @@ class ChatService:
         except Exception as e:
             api_logger.error("Failed to append user message", exception=e)
 
-        # Load full history (no memory limit as per current decision)
+        # Load history; use persisted summary when present
         messages = []
+        summary_text = None
         try:
-            messages = history.get_messages()
+            # Try persisted summary to decide whether to load only tail K
+            try:
+                storage = DialogSummaryStorage(project, dialog_id)
+                stored = storage.load()
+            except Exception:
+                stored = None
+
+            if stored:
+                tail_k = KEEP_LAST_MESSAGES
+                messages = history.get_messages(limit=tail_k)
+                summary_text = stored.summary_text
+                api_logger.info(
+                    "Context prepared with persisted summary",
+                    dialog_id=dialog_id,
+                    tail_k=tail_k,
+                    summarized_count=stored.summarized_count,
+                )
+            else:
+                messages = history.get_messages()
         except Exception as e:
             api_logger.error("Failed to load dialog history", exception=e)
 
         ctx["dialog"] = {"id": dialog_id, "messages": messages}
+        if summary_text:
+            ctx["dialog_summary"] = summary_text
         # Add project reference for tool results storage
         ctx["project"] = project
         return ctx
@@ -282,6 +305,7 @@ class ChatService:
                                 )
                                 yield SSEEventFactory.done(dialog_id=dialog_id).to_sse()
                                 return
+                        # Usage persisted inside ToolExecutor now; nothing to do here
                         api_logger.info(f"Finished streaming {chunk_count} chunks")
                     else:
                         try:

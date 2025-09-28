@@ -7,10 +7,9 @@ from typing import TYPE_CHECKING, Any
 
 from langchain_core.messages import BaseMessage, ToolMessage
 
+from agentsmithy_server.core.dialog_usage_storage import DialogUsageStorage
 from agentsmithy_server.core.llm_provider import LLMProvider
-from agentsmithy_server.core.tool_results_storage import (
-    ToolResultsStorage,
-)
+from agentsmithy_server.core.tool_results_storage import ToolResultsStorage
 from agentsmithy_server.utils.logger import agent_logger
 
 from .integration.langchain_adapter import as_langchain_tools
@@ -267,6 +266,34 @@ class ToolExecutor:
         while True:
             agent_logger.info("LLM invoke", messages=len(conversation))
             response = await bound_llm.ainvoke(conversation)
+            # Persist usage if provided by provider (non-stream path)
+            try:
+                usage: dict[str, Any] = {}
+                meta = getattr(response, "response_metadata", {}) or {}
+                if isinstance(meta, dict) and meta.get("token_usage"):
+                    maybe = meta.get("token_usage")
+                    if isinstance(maybe, dict):
+                        usage = maybe
+                add = getattr(response, "additional_kwargs", {}) or {}
+                if not usage and isinstance(add, dict) and add.get("usage"):
+                    maybe2 = add.get("usage")
+                    if isinstance(maybe2, dict):
+                        usage = maybe2
+                # No debug logging here; only persist if available
+                if usage and self._project and self._dialog_id:
+                    prompt_val = usage.get("prompt_tokens")
+                    if prompt_val is None:
+                        prompt_val = usage.get("input_tokens")
+                    completion_val = usage.get("completion_tokens")
+                    if completion_val is None:
+                        completion_val = usage.get("output_tokens")
+                    DialogUsageStorage(self._project, self._dialog_id).upsert(
+                        prompt_tokens=prompt_val,
+                        completion_tokens=completion_val,
+                        total_tokens=usage.get("total_tokens"),
+                    )
+            except Exception:
+                pass
             tool_calls = getattr(response, "tool_calls", [])
             agent_logger.info("LLM response", has_tool_calls=bool(tool_calls))
 
@@ -333,7 +360,34 @@ class ToolExecutor:
             chat_started = False
             reasoning_started = False
 
-            async for chunk in bound_llm.astream(conversation):
+            last_usage: dict[str, Any] | None = None
+            # Require usage in stream; if unsupported, fail fast to surface misconfig
+            try:
+                stream_iter = bound_llm.astream(conversation, stream_usage=True)
+            except TypeError as e:
+                error_msg = "LangChain/OpenAI client does not support stream_usage=True; upgrade dependencies or switch model family"
+                agent_logger.error(error_msg, exception=e)
+                yield {"type": "error", "error": error_msg}
+                return
+            async for chunk in stream_iter:
+                # Capture usage tokens if provider exposes them on chunks
+                try:
+                    add = getattr(chunk, "additional_kwargs", {}) or {}
+                    if isinstance(add, dict) and add.get("usage"):
+                        maybeu = add.get("usage")
+                        if isinstance(maybeu, dict):
+                            last_usage = maybeu
+                    meta = getattr(chunk, "response_metadata", {}) or {}
+                    if isinstance(meta, dict) and meta.get("token_usage"):
+                        maybeu2 = meta.get("token_usage")
+                        if isinstance(maybeu2, dict):
+                            last_usage = maybeu2
+                    # Prefer direct usage_metadata if LC provides it (final chunk)
+                    um = getattr(chunk, "usage_metadata", None)
+                    if isinstance(um, dict) and um:
+                        last_usage = um
+                except Exception:
+                    pass
                 # Try to extract reasoning from provider-specific metadata (minimal and robust)
                 try:
                     additional_kwargs = getattr(chunk, "additional_kwargs", {}) or {}
@@ -471,6 +525,23 @@ class ToolExecutor:
 
             # If no tool calls, we're done
             if not accumulated_tool_calls:
+                # Persist usage snapshot if present
+                try:
+                    if last_usage and self._project and self._dialog_id:
+                        # Normalize keys across families (gpt-5: input/output, chat: prompt/completion)
+                        prompt_val = last_usage.get("prompt_tokens")
+                        if prompt_val is None:
+                            prompt_val = last_usage.get("input_tokens")
+                        completion_val = last_usage.get("completion_tokens")
+                        if completion_val is None:
+                            completion_val = last_usage.get("output_tokens")
+                        DialogUsageStorage(self._project, self._dialog_id).upsert(
+                            prompt_tokens=prompt_val,
+                            completion_tokens=completion_val,
+                            total_tokens=last_usage.get("total_tokens"),
+                        )
+                except Exception:
+                    pass
                 # Stream might have already yielded all content chunks
                 break
 

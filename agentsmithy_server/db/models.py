@@ -20,3 +20,23 @@ class ToolResultORM(BaseORM):
     size_bytes: Mapped[int] = mapped_column(Integer)
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class DialogSummaryORM(BaseORM):
+    __tablename__ = "dialog_summaries"
+
+    dialog_id: Mapped[str] = mapped_column(String, primary_key=True)
+    summary_text: Mapped[str] = mapped_column(Text)
+    summarized_count: Mapped[int] = mapped_column(Integer)
+    keep_last: Mapped[int] = mapped_column(Integer)
+    updated_at: Mapped[str] = mapped_column(String)
+
+
+class DialogUsageORM(BaseORM):
+    __tablename__ = "dialog_usage"
+
+    dialog_id: Mapped[str] = mapped_column(String, primary_key=True)
+    prompt_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    completion_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    total_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    updated_at: Mapped[str] = mapped_column(String)

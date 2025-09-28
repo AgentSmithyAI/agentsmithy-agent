@@ -8,6 +8,9 @@ from langgraph.graph.message import add_messages
 
 from agentsmithy_server.agents.universal_agent import UniversalAgent
 from agentsmithy_server.core import LLMFactory
+from agentsmithy_server.core.context_compactor import maybe_compact_dialog
+from agentsmithy_server.core.dialog_summary_storage import DialogSummaryStorage
+from agentsmithy_server.core.summarization.strategy import KEEP_LAST_MESSAGES
 from agentsmithy_server.rag import ContextBuilder
 from agentsmithy_server.utils.logger import agent_logger
 
@@ -56,13 +59,13 @@ class AgentOrchestrator:
         """Build the simplified agent orchestration graph."""
         graph = StateGraph(AgentState)
 
-        # Add single universal agent node
+        # Add context compaction followed by universal agent
+        graph.add_node("context_compaction", self._maybe_compact_node)
         graph.add_node("universal_agent", self._run_universal_agent)
 
-        # Direct entry to universal agent
-        graph.set_entry_point("universal_agent")
-
-        # Universal agent leads to END
+        # Entry point compacts dialog first, then agent
+        graph.set_entry_point("context_compaction")
+        graph.add_edge("context_compaction", "universal_agent")
         graph.add_edge("universal_agent", END)
 
         return graph.compile()
@@ -96,6 +99,69 @@ class AgentOrchestrator:
 
         return state
 
+    async def _maybe_compact_node(self, state: AgentState) -> AgentState:
+        """Insert a summary SystemMessage when dialog is large."""
+        try:
+            context = state.get("context") or {}
+            dialog = context.get("dialog") or {}
+            messages = list(dialog.get("messages") or [])
+            dialog_id = dialog.get("id")
+
+            # Try persisted summary first
+            if context.get("project") and dialog_id:
+                storage = DialogSummaryStorage(context["project"], dialog_id)
+                stored = storage.load()
+                total_msgs = len(messages)
+                if (
+                    stored
+                    and stored.keep_last == KEEP_LAST_MESSAGES
+                    and stored.summarized_count
+                    >= max(0, total_msgs - KEEP_LAST_MESSAGES)
+                ):
+                    from langchain_core.messages import SystemMessage
+
+                    state["messages"] = [
+                        SystemMessage(
+                            content=f"Dialog Summary (earlier turns):\n{stored.summary_text}"
+                        )
+                    ] + state.get("messages", [])
+                    agent_logger.info(
+                        "Using persisted dialog summary",
+                        dialog_id=dialog_id,
+                        summarized_count=stored.summarized_count,
+                    )
+                    return state
+
+            # Generate or refresh if needed
+            extra_msgs = await maybe_compact_dialog(
+                self.llm_provider, messages, context.get("project"), dialog_id
+            )
+            if extra_msgs:
+                from langchain_core.messages import SystemMessage
+
+                state["messages"] = extra_msgs + state.get("messages", [])
+
+                # Persist generated summary
+                if context.get("project") and dialog_id:
+                    summary_msg = next(
+                        (m for m in extra_msgs if isinstance(m, SystemMessage)), None
+                    )
+                    if summary_msg:
+                        summary_text = str(getattr(summary_msg, "content", "") or "")
+                        summarized_count = max(0, len(messages) - KEEP_LAST_MESSAGES)
+                        try:
+                            storage = DialogSummaryStorage(
+                                context["project"], dialog_id
+                            )
+                            storage.upsert(
+                                summary_text, summarized_count, KEEP_LAST_MESSAGES
+                            )
+                        except Exception:
+                            pass
+        except Exception as e:
+            agent_logger.error("Compaction node failed", exception=e)
+        return state
+
     async def process_request(
         self, query: str, context: dict[str, Any] | None = None, stream: bool = False
     ) -> dict[str, Any]:
@@ -113,14 +179,11 @@ class AgentOrchestrator:
 
         # Run the graph
         if stream:
-            # For streaming, we need to handle it differently
-            # Return the graph execution for streaming
             return {
                 "graph_execution": self.graph.astream(initial_state),
                 "initial_state": initial_state,
             }
         else:
-            # For non-streaming, run to completion
             final_state = await self.graph.ainvoke(initial_state)
             return {
                 "response": final_state["response"],
