@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel, Field
 
 from agentsmithy_server.core.tool_results_storage import ToolResultsStorage
+from agentsmithy_server.tools.core import result as result_factory
 from agentsmithy_server.utils.logger import agent_logger
 
 from ..base_tool import BaseTool
@@ -64,10 +65,11 @@ class GetPreviousResultTool(BaseTool):  # type: ignore[override]
             Dictionary containing the tool result or error information
         """
         if not self._project or not self._dialog_id:
-            return {
-                "type": "error",
-                "error": "No dialog context available for retrieving tool results",
-            }
+            return result_factory.error(
+                "get_tool_result",
+                "no_context",
+                "No dialog context available for retrieving tool results",
+            )
 
         try:
             storage = ToolResultsStorage(self._project, self._dialog_id)
@@ -78,12 +80,15 @@ class GetPreviousResultTool(BaseTool):  # type: ignore[override]
                 available = await storage.list_results()
                 available_ids = [r.tool_call_id for r in available[:10]]  # Show max 10
 
-                return {
-                    "type": "error",
-                    "error": f"Tool result not found: {tool_call_id}",
-                    "available_tool_call_ids": available_ids,
-                    "hint": "Use one of the available tool_call_ids listed above. Remember: this tool is for retrieving results from EARLIER in the conversation, not for tools you just executed.",
-                }
+                return result_factory.not_found(
+                    "get_tool_result",
+                    "tool_result",
+                    tool_call_id,
+                    hint=(
+                        "Use one of the available tool_call_ids listed above. Remember: this tool is for retrieving results from EARLIER in the conversation, not for tools you just executed."
+                    ),
+                    extra={"available_tool_call_ids": available_ids},
+                )
 
             agent_logger.info(
                 "Retrieved previous tool result",
@@ -107,7 +112,9 @@ class GetPreviousResultTool(BaseTool):  # type: ignore[override]
                 tool_call_id=tool_call_id,
                 error=str(e),
             )
-            return {
-                "type": "error",
-                "error": f"Failed to retrieve tool result: {str(e)}",
-            }
+            return result_factory.error(
+                "get_tool_result",
+                "internal_error",
+                f"Failed to retrieve tool result: {str(e)}",
+                error_type=type(e).__name__,
+            )

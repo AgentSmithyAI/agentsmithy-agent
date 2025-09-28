@@ -211,8 +211,39 @@ class ToolExecutor:
                 and self._dialog_id
                 and hasattr(self._project, "get_dialog_history")
             ):
+                # Redact ephemeral tool_calls from the persisted history so the
+                # agent won't see ephemeral calls and try to fetch their outputs later.
+                tool_calls = list(getattr(ai_message, "tool_calls", []) or [])
+                if tool_calls:
+                    filtered_calls: list[dict[str, Any]] = []
+                    for tc in tool_calls:
+                        try:
+                            name_value = tc.get("name", "")
+                        except Exception:
+                            name_value = ""
+                        if not self._is_ephemeral_tool(str(name_value)):
+                            filtered_calls.append(tc)
+
+                    # Build a shallow copy of the message for persistence
+                    from langchain_core.messages import AIMessage
+
+                    persisted = AIMessage(
+                        content=getattr(ai_message, "content", ""),
+                        tool_calls=filtered_calls,
+                    )
+                    try:
+                        existing_kwargs = dict(
+                            getattr(ai_message, "additional_kwargs", {}) or {}
+                        )
+                        existing_kwargs["tool_calls"] = filtered_calls
+                        persisted.additional_kwargs = existing_kwargs
+                    except Exception:
+                        pass
+                else:
+                    persisted = ai_message
+
                 history = self._project.get_dialog_history(self._dialog_id)
-                history.add_message(ai_message)
+                history.add_message(persisted)
         except Exception as e:
             agent_logger.error(
                 "Failed to append AI tool_calls message to history", error=str(e)

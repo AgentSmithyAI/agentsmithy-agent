@@ -107,7 +107,12 @@ class ToolRegistry:
     async def run_tool(self, name: str, **kwargs: Any) -> dict[str, Any]:
         tool = self.get(name)
         if tool is None:
-            raise ValueError(f"Tool not found: {name}")
+            # Return a structured not-found result instead of raising
+            return {
+                "type": "tool_not_found",
+                "name": name,
+                "error": f"Tool not found: {name}",
+            }
         try:
             agent_logger.info("Tool call", tool=name, args=kwargs)
         except Exception:
