@@ -279,7 +279,39 @@ class ToolExecutor:
                     maybe2 = add.get("usage")
                     if isinstance(maybe2, dict):
                         usage = maybe2
-                # No debug logging here; only persist if available
+                # Some providers expose usage as usage_metadata on non-stream responses
+                if not usage:
+                    um = getattr(response, "usage_metadata", None)
+                    if isinstance(um, dict) and um:
+                        usage = um
+
+                # Check if usage is directly on response
+                if not usage and hasattr(response, "usage"):
+                    direct_usage = getattr(response, "usage", None)
+                    if direct_usage:
+                        # Convert object to dict if needed
+                        if hasattr(direct_usage, "__dict__"):
+                            usage = direct_usage.__dict__
+                        elif hasattr(direct_usage, "dict") and callable(
+                            direct_usage.dict
+                        ):
+                            usage = direct_usage.dict()
+                        else:
+                            usage = direct_usage
+
+                # Check response_metadata.finish_reason_data (some models put usage here)
+                if not usage and meta and "finish_reason_data" in meta:
+                    frd = meta.get("finish_reason_data", {})
+                    if isinstance(frd, dict) and "usage" in frd:
+                        usage = frd.get("usage", {})
+
+                # Check model_kwargs in response_metadata
+                if not usage and meta and "model_kwargs" in meta:
+                    mk = meta.get("model_kwargs", {})
+                    if isinstance(mk, dict) and "usage" in mk:
+                        usage = mk.get("usage", {})
+
+                # Persist usage if available
                 if usage and self._project and self._dialog_id:
                     prompt_val = usage.get("prompt_tokens")
                     if prompt_val is None:
@@ -292,8 +324,10 @@ class ToolExecutor:
                         completion_tokens=completion_val,
                         total_tokens=usage.get("total_tokens"),
                     )
-            except Exception:
-                pass
+            except Exception as e:
+                agent_logger.error(
+                    "Failed to persist usage", exception=e, dialog_id=self._dialog_id
+                )
             tool_calls = getattr(response, "tool_calls", [])
             agent_logger.info("LLM response", has_tool_calls=bool(tool_calls))
 
@@ -540,8 +574,12 @@ class ToolExecutor:
                             completion_tokens=completion_val,
                             total_tokens=last_usage.get("total_tokens"),
                         )
-                except Exception:
-                    pass
+                except Exception as e:
+                    agent_logger.error(
+                        "Failed to persist usage (streaming)",
+                        exception=e,
+                        dialog_id=self._dialog_id,
+                    )
                 # Stream might have already yielded all content chunks
                 break
 

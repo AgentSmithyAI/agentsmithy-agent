@@ -120,6 +120,28 @@ class OpenAIProvider(LLMProvider):
             if isinstance(content, str) and content:
                 yield {"type": "chat", "content": content}
 
+            # Track usage information from chunks
+            try:
+                # Check for usage in various locations where providers might put it
+                usage = None
+                add = getattr(chunk, "additional_kwargs", {}) or {}
+                if isinstance(add, dict) and add.get("usage"):
+                    usage = add.get("usage")
+
+                meta = getattr(chunk, "response_metadata", {}) or {}
+                if not usage and isinstance(meta, dict) and meta.get("token_usage"):
+                    usage = meta.get("token_usage")
+
+                # Direct usage_metadata attribute (preferred)
+                um = getattr(chunk, "usage_metadata", None)
+                if isinstance(um, dict) and um:
+                    usage = um
+
+                if usage:
+                    self._last_usage = usage
+            except Exception:
+                pass
+
     def get_model_name(self) -> str:
         """Get the model name."""
         return self.model
@@ -131,7 +153,7 @@ class OpenAIProvider(LLMProvider):
 
     def get_last_usage(self) -> dict[str, Any] | None:
         """Return last observed usage from streaming; may be None if unavailable."""
-        return None
+        return self._last_usage
 
 
 class LLMFactory:

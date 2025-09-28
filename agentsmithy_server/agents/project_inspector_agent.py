@@ -46,7 +46,11 @@ class ProjectInspectorAgent(BaseAgent):
             pass
         system = SystemMessage(content=INSPECTOR_SYSTEM)
         human = HumanMessage(content=build_inspector_human(str(project.root)))
-
+        # Ensure usage events are persisted under a stable inspector dialog scope
+        try:
+            self.executor.set_context(project, "inspector")
+        except Exception:
+            pass
         result = await self.executor.process_with_tools_async([system, human])
         # Diagnostics for large tool traffic
         from agentsmithy_server.utils.logger import agent_logger as _alog

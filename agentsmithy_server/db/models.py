@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import Integer, String, Text
+from sqlalchemy import Index, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -40,3 +40,19 @@ class DialogUsageORM(BaseORM):
     completion_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     total_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     updated_at: Mapped[str] = mapped_column(String)
+
+
+class DialogUsageEventORM(BaseORM):
+    __tablename__ = "dialog_usage_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    dialog_id: Mapped[str] = mapped_column(String, index=True)
+    model_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    prompt_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    completion_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    total_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[str] = mapped_column(String)
+
+    __table_args__ = (
+        Index("ix_usage_events_dialog_created", "dialog_id", "created_at"),
+    )

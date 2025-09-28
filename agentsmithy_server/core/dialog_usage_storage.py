@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.engine import Engine
 
 from agentsmithy_server.core.dialog_history import DialogHistory
-from agentsmithy_server.db import BaseORM, DialogUsageORM
+from agentsmithy_server.db import BaseORM, DialogUsageEventORM
 from agentsmithy_server.db.base import get_engine, get_session
 from agentsmithy_server.utils.logger import agent_logger
 
@@ -47,10 +47,13 @@ class DialogUsageStorage:
         try:
             engine = self._get_engine()
             with get_session(engine) as session:
-                stmt = select(DialogUsageORM).where(
-                    DialogUsageORM.dialog_id == self.dialog_id
+                # Return most recent usage event for this dialog
+                stmt = (
+                    select(DialogUsageEventORM)
+                    .where(DialogUsageEventORM.dialog_id == self.dialog_id)
+                    .order_by(DialogUsageEventORM.created_at.desc())
                 )
-                row = session.execute(stmt).scalar_one_or_none()
+                row = session.execute(stmt).scalars().first()
                 if not row:
                     return None
                 return DialogUsage(
@@ -58,7 +61,7 @@ class DialogUsageStorage:
                     prompt_tokens=row.prompt_tokens,
                     completion_tokens=row.completion_tokens,
                     total_tokens=row.total_tokens,
-                    updated_at=row.updated_at,
+                    updated_at=row.created_at,
                 )
         except Exception as e:
             agent_logger.error("Failed to load dialog usage", exception=e)
@@ -75,22 +78,16 @@ class DialogUsageStorage:
         now = datetime.now(UTC).isoformat()
         try:
             with get_session(engine) as session:
-                session.merge(
-                    DialogUsageORM(
+                session.add(
+                    DialogUsageEventORM(
                         dialog_id=self.dialog_id,
+                        model_name=None,
                         prompt_tokens=prompt_tokens,
                         completion_tokens=completion_tokens,
                         total_tokens=total_tokens,
-                        updated_at=now,
+                        created_at=now,
                     )
                 )
                 session.commit()
-            agent_logger.info(
-                "Updated dialog usage",
-                dialog_id=self.dialog_id,
-                prompt_tokens=prompt_tokens,
-                completion_tokens=completion_tokens,
-                total_tokens=total_tokens,
-            )
         except Exception as e:
-            agent_logger.error("Failed to upsert dialog usage", exception=e)
+            agent_logger.error("Failed to write dialog usage event", exception=e)

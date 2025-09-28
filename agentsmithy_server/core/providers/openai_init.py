@@ -5,15 +5,18 @@ from typing import Any
 
 def detect_openai_family(model: str) -> str:
     m = (model or "").lower()
-    if m.startswith("gpt-4o") or m.startswith("o1") or m.startswith("gpt-5"):
+    # Only o1 and gpt-5 models use the responses family (no streaming usage support)
+    # gpt-4o-mini and other gpt-4o variants support streaming usage
+    if m.startswith("o1") or m.startswith("gpt-5"):
         return "responses"
     return "chat_completions"
 
 
 def supports_temperature(model: str) -> bool:
     m = (model or "").lower()
-    # Disable temperature for responses-family models (o1/gpt-4o/gpt-5)
-    if m.startswith("gpt-4o") or m.startswith("o1") or m.startswith("gpt-5"):
+    # Disable temperature for responses-family models (o1/gpt-5 only)
+    # gpt-4o models support temperature
+    if m.startswith("o1") or m.startswith("gpt-5"):
         return False
     return True
 
@@ -30,7 +33,8 @@ def build_openai_langchain_kwargs(
     """
     base_kwargs: dict[str, Any] = {
         "model": model,
-        "streaming": True,
+        # Don't force streaming mode - let langchain decide based on the call
+        # This allows ainvoke to properly return usage metadata
     }
     if temperature is not None and supports_temperature(model):
         base_kwargs["temperature"] = temperature
