@@ -1,5 +1,6 @@
 """Agent orchestration using LangGraph."""
 
+from collections.abc import Awaitable, Callable
 from typing import Annotated, Any, TypedDict
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
@@ -7,6 +8,7 @@ from langgraph.graph import END, StateGraph
 from langgraph.graph.message import add_messages
 
 from agentsmithy_server.agents.universal_agent import UniversalAgent
+from agentsmithy_server.api.sse_protocol import EventFactory as SSEEventFactory
 from agentsmithy_server.core import LLMFactory
 from agentsmithy_server.core.context_compactor import maybe_compact_dialog
 from agentsmithy_server.core.dialog_summary_storage import DialogSummaryStorage
@@ -43,12 +45,14 @@ class AgentOrchestrator:
         self.universal_agent = UniversalAgent(self.llm_provider, self.context_builder)
 
         # Store SSE callback for later use
-        self._sse_callback = None
+        self._sse_callback: Callable[[dict[str, Any]], Awaitable[None]] | None = None
 
         # Build the simplified graph
         self.graph = self._build_graph()
 
-    def set_sse_callback(self, callback):
+    def set_sse_callback(
+        self, callback: Callable[[dict[str, Any]], Awaitable[None]] | None
+    ) -> None:
         """Set SSE callback for streaming updates."""
         self._sse_callback = callback
         # Pass it to the agent
@@ -101,6 +105,7 @@ class AgentOrchestrator:
 
     async def _maybe_compact_node(self, state: AgentState) -> AgentState:
         """Insert a summary SystemMessage when dialog is large."""
+        emitted_summary_start = False
         try:
             context = state.get("context") or {}
             dialog = context.get("dialog") or {}
@@ -133,6 +138,16 @@ class AgentOrchestrator:
                     return state
 
             # Generate or refresh if needed
+            # Emit SSE summary_start before running summarization
+            if self._sse_callback and state.get("streaming"):
+                try:
+                    await self._sse_callback(
+                        SSEEventFactory.summary_start(dialog_id=dialog_id).to_sse()
+                    )
+                    emitted_summary_start = True
+                except Exception:
+                    pass
+
             extra_msgs = await maybe_compact_dialog(
                 self.llm_provider, messages, context.get("project"), dialog_id
             )
@@ -160,6 +175,17 @@ class AgentOrchestrator:
                             pass
         except Exception as e:
             agent_logger.error("Compaction node failed", exception=e)
+        finally:
+            # Guarantee that summary_end is sent if summary_start was emitted
+            if emitted_summary_start and self._sse_callback and state.get("streaming"):
+                try:
+                    dialog = (state.get("context") or {}).get("dialog") or {}
+                    dialog_id = dialog.get("id")
+                    await self._sse_callback(
+                        SSEEventFactory.summary_end(dialog_id=dialog_id).to_sse()
+                    )
+                except Exception:
+                    pass
         return state
 
     async def process_request(

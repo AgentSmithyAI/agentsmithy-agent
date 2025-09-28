@@ -80,6 +80,8 @@ class ChatService:
             "chat_end",
             "reasoning_start",
             "reasoning_end",
+            "summary_start",
+            "summary_end",
         }:
             if chunk["type"] == "chat":
                 content = chunk.get("content", "")
@@ -102,6 +104,10 @@ class ChatService:
                 yield SSEEventFactory.reasoning_start(dialog_id=dialog_id).to_sse()
             elif chunk["type"] == "reasoning_end":
                 yield SSEEventFactory.reasoning_end(dialog_id=dialog_id).to_sse()
+            elif chunk["type"] == "summary_start":
+                yield SSEEventFactory.summary_start(dialog_id=dialog_id).to_sse()
+            elif chunk["type"] == "summary_end":
+                yield SSEEventFactory.summary_end(dialog_id=dialog_id).to_sse()
             elif chunk["type"] == "file_edit":
                 yield SSEEventFactory.file_edit(
                     file=chunk.get("file", ""),
