@@ -125,6 +125,7 @@ class UniversalAgent(BaseAgent):
                         prompt_tokens=usage.get("prompt_tokens"),
                         completion_tokens=usage.get("completion_tokens"),
                         total_tokens=usage.get("total_tokens"),
+                        model_name=self.llm_provider.get_model_name(),
                     )
             except Exception:
                 pass

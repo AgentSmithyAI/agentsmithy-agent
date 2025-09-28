@@ -323,6 +323,7 @@ class ToolExecutor:
                         prompt_tokens=prompt_val,
                         completion_tokens=completion_val,
                         total_tokens=usage.get("total_tokens"),
+                        model_name=self.llm_provider.get_model_name(),
                     )
             except Exception as e:
                 agent_logger.error(
@@ -573,6 +574,7 @@ class ToolExecutor:
                             prompt_tokens=prompt_val,
                             completion_tokens=completion_val,
                             total_tokens=last_usage.get("total_tokens"),
+                            model_name=self.llm_provider.get_model_name(),
                         )
                 except Exception as e:
                     agent_logger.error(

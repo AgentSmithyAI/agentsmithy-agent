@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any
 
-from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage
+from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 
 from agentsmithy_server.core.dialog_usage_storage import DialogUsageStorage
 from agentsmithy_server.core.summarization.strategy import TokenStrategy
@@ -53,7 +53,9 @@ async def maybe_compact_dialog(
         # Compute boundary and align it backward to the previous user message
         boundary = max(0, total_msgs - keep_last)
         try:
-            while boundary > 0 and not isinstance(dialog_messages[boundary], HumanMessage):
+            while boundary > 0 and not isinstance(
+                dialog_messages[boundary], HumanMessage
+            ):
                 boundary -= 1
         except Exception:
             pass

@@ -72,6 +72,7 @@ class DialogUsageStorage:
         prompt_tokens: int | None,
         completion_tokens: int | None,
         total_tokens: int | None,
+        model_name: str | None = None,
     ) -> None:
         self._ensure_db()
         engine = self._get_engine()
@@ -81,7 +82,7 @@ class DialogUsageStorage:
                 session.add(
                     DialogUsageEventORM(
                         dialog_id=self.dialog_id,
-                        model_name=None,
+                        model_name=model_name,
                         prompt_tokens=prompt_tokens,
                         completion_tokens=completion_tokens,
                         total_tokens=total_tokens,
