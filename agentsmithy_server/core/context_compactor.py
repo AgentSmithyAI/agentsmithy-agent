@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any
 
-from langchain_core.messages import BaseMessage, SystemMessage
+from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage
 
 from agentsmithy_server.core.dialog_usage_storage import DialogUsageStorage
 from agentsmithy_server.core.summarization.strategy import TokenStrategy
@@ -50,7 +50,17 @@ async def maybe_compact_dialog(
 
         total_msgs = len(dialog_messages)
         keep_last = decision.keep_last
-        older = dialog_messages[: total_msgs - keep_last]
+        # Compute boundary and align it backward to the previous user message
+        boundary = max(0, total_msgs - keep_last)
+        try:
+            while boundary > 0 and not isinstance(dialog_messages[boundary], HumanMessage):
+                boundary -= 1
+        except Exception:
+            pass
+        # If boundary is at start, skip summarization (nothing to summarize before first user)
+        if boundary <= 0:
+            return None
+        older = dialog_messages[:boundary]
 
         budget = SUMMARY_INPUT_CHAR_BUDGET
         chunks: list[str] = []
