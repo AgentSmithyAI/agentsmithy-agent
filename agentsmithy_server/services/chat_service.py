@@ -6,6 +6,7 @@ This service centralizes streaming/non-streaming chat logic so routers remain th
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -456,15 +457,78 @@ class ChatService:
                     conversation = resp.get("conversation", [])
 
                 if conversation:
+                    # Build map of non-ephemeral tool_call_ids by inspecting ToolMessage-like entries
+                    non_ephemeral_ids: set[str] = set()
                     for msg in conversation:
-                        if hasattr(msg, "tool_calls") and getattr(
-                            msg, "tool_calls", None
-                        ):
-                            history.add_message(msg)
-                        elif hasattr(msg, "tool_call_id") and getattr(
-                            msg, "tool_call_id", None
-                        ):
-                            history.add_message(msg)
+                        try:
+                            tool_call_id = getattr(msg, "tool_call_id", None)
+                            if isinstance(tool_call_id, str) and tool_call_id:
+                                content = getattr(msg, "content", None)
+                                if isinstance(content, str):
+                                    try:
+                                        parsed = json.loads(content)
+                                    except Exception:
+                                        parsed = None
+                                    if isinstance(parsed, dict) and parsed.get(
+                                        "result_ref"
+                                    ):
+                                        non_ephemeral_ids.add(tool_call_id)
+                        except Exception:
+                            # Best-effort; if parsing fails, treat as ephemeral by omission
+                            pass
+
+                    # Persist only AI messages with filtered tool_calls; skip ToolMessage entirely
+                    for msg in conversation:
+                        try:
+                            tool_calls = getattr(msg, "tool_calls", None)
+                        except Exception:
+                            tool_calls = None
+
+                        if tool_calls:
+                            # Filter out ephemeral tool calls by checking for corresponding non-ephemeral ToolMessage ids
+                            filtered_calls = []
+                            for tc in (
+                                list(tool_calls) if isinstance(tool_calls, list) else []
+                            ):
+                                try:
+                                    tc_id = (
+                                        tc.get("id")
+                                        if isinstance(tc, dict)
+                                        else getattr(tc, "id", "")
+                                    )
+                                except Exception:
+                                    tc_id = ""
+                                if tc_id and tc_id in non_ephemeral_ids:
+                                    filtered_calls.append(tc)
+
+                            try:
+                                from langchain_core.messages import (
+                                    AIMessage,
+                                )
+
+                                persisted = AIMessage(
+                                    content=getattr(msg, "content", ""),
+                                    tool_calls=filtered_calls,
+                                )
+                                try:
+                                    existing_kwargs = dict(
+                                        getattr(msg, "additional_kwargs", {}) or {}
+                                    )
+                                    existing_kwargs["tool_calls"] = filtered_calls
+                                    persisted.additional_kwargs = existing_kwargs
+                                except Exception:
+                                    pass
+                                history.add_message(persisted)
+                            except Exception:
+                                # Fallback to original message if AIMessage construction fails
+                                history.add_message(msg)
+                        else:
+                            # Skip ToolMessage (has tool_call_id) to avoid storing inline results
+                            if hasattr(msg, "tool_call_id") and getattr(
+                                msg, "tool_call_id", None
+                            ):
+                                continue
+                            # Other message types are ignored here
 
                 if assistant_text:
                     conv_contents = (
