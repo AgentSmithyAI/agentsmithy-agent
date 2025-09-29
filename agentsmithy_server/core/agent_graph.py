@@ -105,7 +105,7 @@ class AgentOrchestrator:
     async def _maybe_compact_node(self, state: AgentState) -> AgentState:
         """Insert a summary SystemMessage when dialog is large."""
         from agentsmithy_server.api.sse_protocol import EventFactory as SSEEventFactory
-        
+
         emitted_summary_start = False
         try:
             context = state.get("context") or {}
