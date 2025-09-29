@@ -1,7 +1,11 @@
 """SQLite-backed dialog history management using LangChain.
 
-Stores a per-project database under `.agentsmithy/dialogs/messages.sqlite`,
-with one session per `dialog_id`.
+Storage layout:
+- Inspector: `.agentsmithy/dialogs/journal.sqlite`
+- Per dialog: `.agentsmithy/dialogs/<dialog_id>/journal.sqlite`
+
+LangChain's SQLChatMessageHistory still uses `session_id` (the `dialog_id`),
+even for per-dialog databases, for compatibility and future-proofing.
 """
 
 from __future__ import annotations
@@ -27,10 +31,18 @@ class DialogHistory:
 
     @property
     def db_path(self) -> Path:
-        """Get the SQLite DB path for all dialogs of this project."""
+        """Get the SQLite DB path based on dialog scope.
+
+        - For the special inspector scope (dialog_id == "inspector"), use a
+          shared file under the dialogs root: `journal.sqlite`.
+        - For regular dialogs, store the database inside the dialog's own
+          directory: `<dialogs>/<dialog_id>/journal.sqlite`.
+        """
         dialogs_root = self.project.dialogs_dir
         dialogs_root.mkdir(parents=True, exist_ok=True)
-        return dialogs_root / "messages.sqlite"
+        if self.dialog_id == "inspector":
+            return dialogs_root / "journal.sqlite"
+        return self.project.get_dialog_dir(self.dialog_id) / "journal.sqlite"
 
     @property
     def history(self) -> SQLChatMessageHistory:

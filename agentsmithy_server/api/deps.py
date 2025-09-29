@@ -38,7 +38,8 @@ def get_db_engine() -> Engine:
     global _db_engine
     if _db_engine is None:
         project = get_current_project()
-        db_path = project.dialogs_dir / "messages.sqlite"
+        # Use the inspector-wide journal for global/inspector scope
+        db_path = project.dialogs_dir / "journal.sqlite"
         _db_engine = _mk_engine(db_path)
     return _db_engine
 
