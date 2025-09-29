@@ -1,7 +1,13 @@
 """Database package: engine/session management and ORM models."""
 
 from .base import get_engine, get_session
-from .models import BaseORM, DialogSummaryORM, DialogUsageEventORM, ToolResultORM
+from .models import (
+    BaseORM,
+    DialogSummaryORM,
+    DialogSummaryVersionORM,
+    DialogUsageEventORM,
+    ToolResultORM,
+)
 
 __all__ = [
     "get_engine",
@@ -9,5 +15,6 @@ __all__ = [
     "BaseORM",
     "ToolResultORM",
     "DialogSummaryORM",
+    "DialogSummaryVersionORM",
     "DialogUsageEventORM",
 ]

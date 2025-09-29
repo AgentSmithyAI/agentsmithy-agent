@@ -112,30 +112,22 @@ class AgentOrchestrator:
             messages = list(dialog.get("messages") or [])
             dialog_id = dialog.get("id")
 
-            # Try persisted summary first
+            # Load existing summary (if any) to chain with tail for re-summarization
+            stored = None
             if context.get("project") and dialog_id:
                 storage = DialogSummaryStorage(context["project"], dialog_id)
                 stored = storage.load()
-                total_msgs = len(messages)
-                if (
-                    stored
-                    and stored.keep_last == KEEP_LAST_MESSAGES
-                    and stored.summarized_count
-                    >= max(0, total_msgs - KEEP_LAST_MESSAGES)
-                ):
-                    from langchain_core.messages import SystemMessage
 
-                    state["messages"] = [
-                        SystemMessage(
-                            content=f"Dialog Summary (earlier turns):\n{stored.summary_text}"
-                        )
-                    ] + state.get("messages", [])
-                    agent_logger.info(
-                        "Using persisted dialog summary",
-                        dialog_id=dialog_id,
-                        summarized_count=stored.summarized_count,
+            # Build compaction source: previous summary (if any) + current tail
+            compaction_source = list(messages)
+            if stored:
+                from langchain_core.messages import SystemMessage
+
+                compaction_source = [
+                    SystemMessage(
+                        content=f"Dialog Summary (earlier turns):\n{stored.summary_text}"
                     )
-                    return state
+                ] + compaction_source
 
             # Generate or refresh if needed
             # Emit SSE summary_start before running summarization
@@ -149,7 +141,7 @@ class AgentOrchestrator:
                     pass
 
             extra_msgs = await maybe_compact_dialog(
-                self.llm_provider, messages, context.get("project"), dialog_id
+                self.llm_provider, compaction_source, context.get("project"), dialog_id
             )
             if extra_msgs:
                 from langchain_core.messages import SystemMessage
@@ -163,13 +155,29 @@ class AgentOrchestrator:
                     )
                     if summary_msg:
                         summary_text = str(getattr(summary_msg, "content", "") or "")
-                        summarized_count = max(0, len(messages) - KEEP_LAST_MESSAGES)
+                        # If we chained previous summary, adjust summarized_count incrementally
+                        if stored:
+                            # compaction_source = [prev_summary] + tail
+                            # Additional summarized now ~= (len(compaction_source) - keep_last - 1)
+                            additional = max(
+                                0, len(compaction_source) - KEEP_LAST_MESSAGES - 1
+                            )
+                            summarized_count = max(
+                                0, int(stored.summarized_count or 0) + additional
+                            )
+                        else:
+                            summarized_count = max(
+                                0, len(messages) - KEEP_LAST_MESSAGES
+                            )
                         try:
                             storage = DialogSummaryStorage(
                                 context["project"], dialog_id
                             )
+                            # Store legacy single-row and one versioned record
                             storage.upsert(
-                                summary_text, summarized_count, KEEP_LAST_MESSAGES
+                                summary_text,
+                                summarized_count,
+                                KEEP_LAST_MESSAGES,
                             )
                         except Exception:
                             pass
