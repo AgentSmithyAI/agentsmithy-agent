@@ -11,7 +11,6 @@ from langchain_core.messages import (
 )
 
 from agentsmithy_server.core import LLMProvider
-from agentsmithy_server.core.tool_results_storage import ToolResultsStorage
 from agentsmithy_server.rag import ContextBuilder
 from agentsmithy_server.utils.logger import agent_logger
 
@@ -116,11 +115,12 @@ class BaseAgent(ABC):
         # Extract project and dialog_id for tool results loading
         project = context.get("project")
         dialog_id = context.get("dialog", {}).get("id")
-        tool_results_storage = None
+
         # Check if project is a Project object (not a dict from context formatting)
         if project and dialog_id and hasattr(project, "dialogs_dir"):
             # Ensure dialog DB path and directories exist (side-effect) without creating unused ToolResultsStorage
             from agentsmithy_server.core.dialog_history import DialogHistory
+
             _ = DialogHistory(project, dialog_id).db_path
 
         # Add dialog history as actual messages (not as context text)
