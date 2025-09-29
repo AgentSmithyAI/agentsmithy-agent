@@ -119,7 +119,9 @@ class BaseAgent(ABC):
         tool_results_storage = None
         # Check if project is a Project object (not a dict from context formatting)
         if project and dialog_id and hasattr(project, "dialogs_dir"):
-            tool_results_storage = ToolResultsStorage(project, dialog_id)
+            # Ensure dialog DB path and directories exist (side-effect) without creating unused ToolResultsStorage
+            from agentsmithy_server.core.dialog_history import DialogHistory
+            _ = DialogHistory(project, dialog_id).db_path
 
         # Add dialog history as actual messages (not as context text)
         if context and context.get("dialog") and context["dialog"].get("messages"):
