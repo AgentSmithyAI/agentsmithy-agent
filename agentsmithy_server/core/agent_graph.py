@@ -8,7 +8,6 @@ from langgraph.graph import END, StateGraph
 from langgraph.graph.message import add_messages
 
 from agentsmithy_server.agents.universal_agent import UniversalAgent
-from agentsmithy_server.api.sse_protocol import EventFactory as SSEEventFactory
 from agentsmithy_server.core import LLMFactory
 from agentsmithy_server.core.context_compactor import maybe_compact_dialog
 from agentsmithy_server.core.dialog_summary_storage import DialogSummaryStorage
@@ -105,6 +104,8 @@ class AgentOrchestrator:
 
     async def _maybe_compact_node(self, state: AgentState) -> AgentState:
         """Insert a summary SystemMessage when dialog is large."""
+        from agentsmithy_server.api.sse_protocol import EventFactory as SSEEventFactory
+        
         emitted_summary_start = False
         try:
             context = state.get("context") or {}
