@@ -14,7 +14,7 @@ from agentsmithy_server.api.sse_protocol import EventFactory as SSEEventFactory
 from agentsmithy_server.core.agent_graph import AgentOrchestrator
 from agentsmithy_server.core.dialog_summary_storage import DialogSummaryStorage
 from agentsmithy_server.core.summarization.strategy import KEEP_LAST_MESSAGES
-from agentsmithy_server.utils.logger import api_logger
+from agentsmithy_server.utils.logger import api_logger, stream_log
 
 
 class StreamAbortError(Exception):
@@ -173,7 +173,7 @@ class ChatService:
                     sse = SSEEventFactory.chat(
                         content=str(tool_event), dialog_id=dialog_id
                     ).to_sse()
-                api_logger.stream_log("tool_event", None)
+                stream_log(api_logger, "tool_event", None)
                 sse_events.append(sse)
 
         return sse_events
@@ -302,8 +302,11 @@ class ChatService:
                                     chunk, dialog_id, assistant_buffer
                                 ):
                                     yield sse_event
-                                api_logger.stream_log(
-                                    "processed_chunk", None, chunk_number=chunk_count
+                                stream_log(
+                                    api_logger,
+                                    "processed_chunk",
+                                    None,
+                                    chunk_number=chunk_count,
                                 )
                             except StreamAbortError:
                                 # Flush buffer before terminating

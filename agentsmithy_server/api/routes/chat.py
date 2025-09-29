@@ -9,7 +9,7 @@ from agentsmithy_server.api.schemas import ChatRequest, ChatResponse
 from agentsmithy_server.api.sse import stream_response
 from agentsmithy_server.core.project import Project
 from agentsmithy_server.services.chat_service import ChatService
-from agentsmithy_server.utils.logger import api_logger
+from agentsmithy_server.utils.logger import api_logger, request_log
 
 router = APIRouter()
 
@@ -59,8 +59,8 @@ async def chat(
             )
 
             duration_ms = (time.time() - start_time) * 1000
-            api_logger.request_log(
-                "POST", "/api/chat", 200, duration_ms, streaming=True
+            request_log(
+                api_logger, "POST", "/api/chat", 200, duration_ms, streaming=True
             )
             return response
         else:
@@ -77,7 +77,8 @@ async def chat(
             )
 
             duration_ms = (time.time() - start_time) * 1000
-            api_logger.request_log(
+            request_log(
+                api_logger,
                 "POST",
                 "/api/chat",
                 200,

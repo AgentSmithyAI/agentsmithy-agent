@@ -11,7 +11,6 @@ import signal
 import sys
 from argparse import ArgumentParser
 from pathlib import Path
-from typing import Any
 
 # Add the project root to Python path
 sys.path.insert(0, str(Path(__file__).parent))
@@ -20,22 +19,10 @@ sys.path.insert(0, str(Path(__file__).parent))
 shutdown_event = asyncio.Event()
 
 if __name__ == "__main__":
-    # Setup basic logging for startup
-    import logging
+    # Setup logging for startup
+    from agentsmithy_server.utils.logger import get_logger
 
-    # Try to import our structured logger, fallback to basic logging if not available
-    try:
-        from agentsmithy_server.utils.logger import StructuredLogger
-
-        startup_logger: Any = StructuredLogger("server.startup")
-    except ImportError:
-        # Fallback to basic colored logging
-        logging.basicConfig(
-            level=logging.INFO,
-            format="\033[90m%(asctime)s\033[0m \033[32m%(levelname)-8s\033[0m \033[90m[%(name)s]\033[0m %(message)s",
-            datefmt="%H:%M:%S",
-        )
-        startup_logger = logging.getLogger("server.startup")
+    startup_logger = get_logger("server.startup")
 
     # Signal handlers for graceful shutdown
     def signal_handler(signum, frame):
