@@ -32,7 +32,7 @@ async def lifespan(app: FastAPI):
             set_shutdown_event(app.state.shutdown_event)
             api_logger.info("Shutdown event registered with chat service")
     except Exception as e:
-        api_logger.error("Dialog state init failed", exception=e)
+        api_logger.error("Dialog state init failed", exc_info=True, error=str(e))
 
     yield
 
@@ -46,7 +46,7 @@ async def lifespan(app: FastAPI):
         dispose_db_engine()
         api_logger.info("Chat service shutdown completed")
     except Exception as e:
-        api_logger.error("Shutdown cleanup failed", exception=e)
+        api_logger.error("Shutdown cleanup failed", exc_info=True, error=str(e))
 
 
 def create_app() -> FastAPI:

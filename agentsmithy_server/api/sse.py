@@ -51,7 +51,7 @@ def stream_response(
                 done_sent = True
             raise
         except Exception as e:
-            api_logger.error("SSE pipeline crashed", exception=e)
+            api_logger.error("SSE pipeline crashed", exc_info=True, error=str(e))
             # Always send error, then done (if not yet sent)
             yield SSEEventFactory.error(message=str(e), dialog_id=dialog_id).to_sse()
             if not done_sent:

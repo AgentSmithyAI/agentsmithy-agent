@@ -250,7 +250,7 @@ class ToolExecutor:
 
     def process_with_tools(
         self, messages: list[BaseMessage], stream: bool = True
-    ) -> AsyncGenerator[Any, None]:
+    ) -> AsyncGenerator[Any]:
         """Streaming path: yield strings or structured dicts suitable for SSE."""
         return self._process_streaming(messages)
 
@@ -327,7 +327,10 @@ class ToolExecutor:
                     )
             except Exception as e:
                 agent_logger.error(
-                    "Failed to persist usage", exception=e, dialog_id=self._dialog_id
+                    "Failed to persist usage",
+                    exc_info=True,
+                    error=str(e),
+                    dialog_id=self._dialog_id,
                 )
             tool_calls = getattr(response, "tool_calls", [])
             agent_logger.info("LLM response", has_tool_calls=bool(tool_calls))
@@ -378,7 +381,7 @@ class ToolExecutor:
 
     async def _process_streaming(
         self, messages: list[BaseMessage]
-    ) -> AsyncGenerator[Any, None]:
+    ) -> AsyncGenerator[Any]:
         """Streaming loop: emit content chunks and tool results as they happen."""
         bound_llm = self._bind_tools()
         conversation: list[BaseMessage] = list(messages)
@@ -401,7 +404,7 @@ class ToolExecutor:
                 stream_iter = bound_llm.astream(conversation, stream_usage=True)
             except TypeError as e:
                 error_msg = "LangChain/OpenAI client does not support stream_usage=True; upgrade dependencies or switch model family"
-                agent_logger.error(error_msg, exception=e)
+                agent_logger.error(error_msg, exc_info=True, error=str(e))
                 yield {"type": "error", "error": error_msg}
                 return
             async for chunk in stream_iter:
@@ -579,7 +582,8 @@ class ToolExecutor:
                 except Exception as e:
                     agent_logger.error(
                         "Failed to persist usage (streaming)",
-                        exception=e,
+                        exc_info=True,
+                        error=str(e),
                         dialog_id=self._dialog_id,
                     )
                 # Stream might have already yielded all content chunks

@@ -93,5 +93,7 @@ async def chat(
         raise
     except Exception as e:
         duration_ms = (time.time() - start_time) * 1000
-        api_logger.error("Chat request failed", exception=e, duration_ms=duration_ms)
+        api_logger.error(
+            "Chat request failed", exc_info=True, error=str(e), duration_ms=duration_ms
+        )
         raise HTTPException(status_code=500, detail=str(e)) from e

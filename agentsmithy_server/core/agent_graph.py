@@ -97,7 +97,7 @@ class AgentOrchestrator:
             )
 
         except Exception as e:
-            agent_logger.error("Universal agent failed", exception=e)
+            agent_logger.error("Universal agent failed", exc_info=True, error=str(e))
             raise
 
         return state
@@ -181,7 +181,7 @@ class AgentOrchestrator:
                         except Exception:
                             pass
         except Exception as e:
-            agent_logger.error("Compaction node failed", exception=e)
+            agent_logger.error("Compaction node failed", exc_info=True, error=str(e))
         finally:
             # Guarantee that summary_end is sent if summary_start was emitted
             if emitted_summary_start and self._sse_callback and state.get("streaming"):

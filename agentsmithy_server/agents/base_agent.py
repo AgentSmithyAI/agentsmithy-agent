@@ -82,7 +82,9 @@ class BaseAgent(ABC):
                     "context": full_context,
                 }
         except Exception as e:
-            agent_logger.error(f"{agent_name} failed to generate response", exception=e)
+            agent_logger.error(
+                f"{agent_name} failed to generate response", exc_info=True, error=str(e)
+            )
             raise
 
     def _prepare_messages(

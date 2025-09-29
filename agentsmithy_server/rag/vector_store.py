@@ -8,6 +8,12 @@ import os
 from pathlib import Path
 from typing import Any
 
+# NOTE (PyInstaller): Import Chroma Settings to explicitly disable telemetry.
+# Chroma's telemetry can trigger a dynamic import of `chromadb.telemetry.product.posthog`,
+# which PyInstaller one-file builds do not auto-discover. Disabling telemetry avoids
+# runtime import errors in the frozen binary. Do not remove unless you also adjust
+# PyInstaller hidden imports to include Chroma telemetry modules.
+from chromadb.config import Settings
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -45,6 +51,11 @@ class VectorStoreManager:
                 collection_name=self.collection_name,
                 embedding_function=self.embeddings_manager.embeddings,
                 persist_directory=self.persist_directory,
+                # NOTE (PyInstaller): Keep anonymized_telemetry disabled to prevent Chroma from
+                # importing PostHog at runtime inside the frozen binary. If you must enable
+                # telemetry, ensure PyInstaller collects `chromadb.telemetry.product.posthog`
+                # and its dependencies.
+                client_settings=Settings(anonymized_telemetry=False),
             )
         return self._vectorstore
 

@@ -64,7 +64,9 @@ class DialogUsageStorage:
                     updated_at=row.created_at,
                 )
         except Exception as e:
-            agent_logger.error("Failed to load dialog usage", exception=e)
+            agent_logger.error(
+                "Failed to load dialog usage", exc_info=True, error=str(e)
+            )
             return None
 
     def upsert(
@@ -91,4 +93,6 @@ class DialogUsageStorage:
                 )
                 session.commit()
         except Exception as e:
-            agent_logger.error("Failed to write dialog usage event", exception=e)
+            agent_logger.error(
+                "Failed to write dialog usage event", exc_info=True, error=str(e)
+            )

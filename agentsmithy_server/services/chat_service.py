@@ -44,7 +44,11 @@ class ChatService:
                     if content:
                         history.add_ai_message(content)
         except Exception as e:
-            api_logger.error("Failed to append assistant message (stream)", exception=e)
+            api_logger.error(
+                "Failed to append assistant message (stream)",
+                exc_info=True,
+                error=str(e),
+            )
 
     def _get_orchestrator(self) -> AgentOrchestrator:
         if self._orchestrator is None:
@@ -194,7 +198,9 @@ class ChatService:
             history = project.get_dialog_history(dialog_id)
             history.add_user_message(query)
         except Exception as e:
-            api_logger.error("Failed to append user message", exception=e)
+            api_logger.error(
+                "Failed to append user message", exc_info=True, error=str(e)
+            )
 
         # Load history; use persisted summary when present
         messages = []
@@ -220,7 +226,9 @@ class ChatService:
             else:
                 messages = history.get_messages()
         except Exception as e:
-            api_logger.error("Failed to load dialog history", exception=e)
+            api_logger.error(
+                "Failed to load dialog history", exc_info=True, error=str(e)
+            )
 
         ctx["dialog"] = {"id": dialog_id, "messages": messages}
         if summary_text:
@@ -415,7 +423,7 @@ class ChatService:
             yield SSEEventFactory.done(dialog_id=dialog_id).to_sse()
             raise
         except Exception as e:
-            api_logger.error("Error in SSE generation", exception=e)
+            api_logger.error("Error in SSE generation", exc_info=True, error=str(e))
             # Flush buffer on error before signaling done
             self._flush_assistant_buffer(project_dialog, dialog_id, assistant_buffer)
             error_msg = f"Error processing request: {str(e)}"
@@ -543,7 +551,9 @@ class ChatService:
                         history.add_ai_message(assistant_text)
         except Exception as e:
             api_logger.error(
-                "Failed to append assistant message (non-stream)", exception=e
+                "Failed to append assistant message (non-stream)",
+                exc_info=True,
+                error=str(e),
             )
 
         return result

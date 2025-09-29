@@ -1,51 +1,34 @@
 from __future__ import annotations
 
-import inspect
-import pkgutil
-from collections.abc import Iterable
-from importlib import import_module
-from types import ModuleType
+from agentsmithy_server.tools.builtin import TOOL_CLASSES
 
-from .base_tool import BaseTool
 from .registry import ToolRegistry
-
-
-def _iter_tool_classes(mod: ModuleType) -> Iterable[type[BaseTool]]:
-    for _, obj in inspect.getmembers(mod, inspect.isclass):
-        try:
-            if issubclass(obj, BaseTool) and obj is not BaseTool:
-                yield obj
-        except Exception:
-            continue
 
 
 def build_registry(
     include: set[str] | None = None, exclude: set[str] | None = None
 ) -> ToolRegistry:
+    """Build tool registry via static registration only.
+
+    Why static:
+    - Dynamic autodiscovery (pkgutil/importlib over package paths) breaks in
+      PyInstaller onefile binaries because packages are inside an archive and
+      not visible as filesystem directories. This leads to missing tools.
+    - To ensure consistent behavior across dev and binary builds, we register a
+      fixed list of known builtin tools explicitly.
+    """
     registry = ToolRegistry()
 
     include = include or set()
     exclude = exclude or set()
 
-    # Autodiscover tools from builtin package
-    package_name = "agentsmithy_server.tools.builtin"
-    pkg = import_module(package_name)
-
-    for modinfo in pkgutil.iter_modules(pkg.__path__, package_name + "."):
-        try:
-            mod = import_module(modinfo.name)
-        except Exception:
+    # Register using the explicit list from builtin package
+    for tool_cls in TOOL_CLASSES:
+        tool_name = getattr(tool_cls, "name", tool_cls.__name__.lower())
+        if include and tool_name not in include:
             continue
-
-        for tool_cls in _iter_tool_classes(mod):
-            tool_name = getattr(tool_cls, "name", tool_cls.__name__.lower())
-            if include and tool_name not in include:
-                continue
-            if tool_name in exclude:
-                continue
-            try:
-                registry.register(tool_cls())
-            except Exception:
-                continue
+        if tool_name in exclude:
+            continue
+        registry.register(tool_cls())
 
     return registry

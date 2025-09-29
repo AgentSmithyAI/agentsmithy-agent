@@ -85,7 +85,9 @@ class DialogSummaryStorage:
                     updated_at=row.updated_at,
                 )
         except Exception as e:
-            agent_logger.error("Failed to load dialog summary", exception=e)
+            agent_logger.error(
+                "Failed to load dialog summary", exc_info=True, error=str(e)
+            )
             return None
 
     def upsert(
@@ -130,7 +132,9 @@ class DialogSummaryStorage:
                 summary_len=len(summary_text or ""),
             )
         except Exception as e:
-            agent_logger.error("Failed to upsert dialog summary", exception=e)
+            agent_logger.error(
+                "Failed to upsert dialog summary", exc_info=True, error=str(e)
+            )
 
     def append_version(
         self,
@@ -168,4 +172,6 @@ class DialogSummaryStorage:
                 summary_len=len(summary_text or ""),
             )
         except Exception as e:
-            agent_logger.error("Failed to append dialog summary version", exception=e)
+            agent_logger.error(
+                "Failed to append dialog summary version", exc_info=True, error=str(e)
+            )

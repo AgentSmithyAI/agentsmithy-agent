@@ -46,7 +46,19 @@ clean:
 	rm -rf $(VENV) .mypy_cache .pytest_cache .ruff_cache __pycache__ **/__pycache__ dist build *.spec
 
 pyinstall: install-dev
-	$(PYINSTALLER) --onefile --name $(BIN) main.py
+	$(PYINSTALLER) --onefile --name $(BIN) \
+		--collect-submodules agentsmithy_server.tools \
+		--collect-submodules agentsmithy_server.tools.builtin \
+		--collect-submodules chromadb \
+		--collect-submodules chromadb.telemetry.product \
+		--collect-data chromadb \
+		--collect-submodules tiktoken \
+		--collect-submodules tiktoken_ext \
+		# NOTE (PyInstaller): The lines above force inclusion of dynamic imports used by
+		# ChromaDB (telemetry) and tiktoken (OpenAI encoding plugin) that are otherwise
+		# not auto-discovered in one-file builds. Do not remove unless the spec file is
+		# updated equivalently.
+		main.py
 
 build: pyinstall
 

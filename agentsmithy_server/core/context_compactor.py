@@ -114,5 +114,5 @@ async def maybe_compact_dialog(
         )
         return [SystemMessage(content=header)]
     except Exception as e:
-        agent_logger.error("Dialog compaction failed", exception=e)
+        agent_logger.error("Dialog compaction failed", exc_info=True, error=str(e))
         return None
