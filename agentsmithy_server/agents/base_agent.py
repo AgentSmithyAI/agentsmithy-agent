@@ -132,50 +132,28 @@ class BaseAgent(ABC):
             for msg in dialog_messages:
                 # If it's already a BaseMessage object, process it
                 if hasattr(msg, "content") and hasattr(msg, "type"):
-                    # Special handling for ToolMessage
+                    # Special handling for ToolMessage: do not include tool role messages in LLM input
+                    # to avoid OpenAI API error: tool messages must directly follow an assistant
+                    # message with tool_calls. Historical tool outputs are stored separately and
+                    # can be fetched via tools when needed.
                     if isinstance(msg, ToolMessage):
+                        continue
+
+                    # Sanitize AIMessage with tool_calls: historical assistant tool_calls must not be
+                    # included unless followed immediately by ToolMessages (which we purposefully skip).
+                    # To satisfy OpenAI constraints, convert any AIMessage that has tool_calls (empty or not)
+                    # into a plain assistant message without tool_calls.
+                    if isinstance(msg, AIMessage):
                         try:
-                            # Ensure content is a string before parsing
-                            content = msg.content
-                            if isinstance(content, str):
-                                content_data = json.loads(content)
-                            else:
-                                # Skip if content is not a string
-                                messages.append(msg)
-                                continue
-                            # Check if this is a new-style message with result_ref
-                            if (
-                                isinstance(content_data, dict)
-                                and "result_ref" in content_data
-                            ):
-                                # Decide whether to load full result
-                                tool_call_id = content_data.get("tool_call_id", "")
-                                should_load = load_tool_results is True or (
-                                    isinstance(load_tool_results, list)
-                                    and tool_call_id in load_tool_results
-                                )
-
-                                if should_load and tool_results_storage:
-                                    # Load full result synchronously (we're not in async context)
-                                    # For now, keep the reference version
-                                    # TODO: Make this method async to support full loading
-                                    agent_logger.debug(
-                                        "Tool result loading requested but not in async context",
-                                        tool_call_id=tool_call_id,
-                                    )
-                                # History contains only references; no inline results expected.
-                                # Keep as-is; the model will use get_tool_result if needed.
-                                # Otherwise keep the reference-only version
-                        except (json.JSONDecodeError, TypeError):
-                            # Old-style ToolMessage with full result, keep as is
-                            pass
-
-                    # Drop empty tool_calls on AIMessage to avoid OpenAI 400 (empty array not allowed)
-                    if (
-                        isinstance(msg, AIMessage)
-                        and getattr(msg, "tool_calls", None) == []
-                    ):
-                        messages.append(AIMessage(content=getattr(msg, "content", "")))
+                            has_tool_calls = getattr(msg, "tool_calls", None)
+                        except Exception:
+                            has_tool_calls = None
+                        if has_tool_calls is not None:
+                            messages.append(
+                                AIMessage(content=getattr(msg, "content", ""))
+                            )
+                        else:
+                            messages.append(msg)
                     else:
                         messages.append(msg)
                 # Otherwise convert from dict (backward compatibility)

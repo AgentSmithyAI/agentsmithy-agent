@@ -107,21 +107,41 @@ class ToolRegistry:
     async def run_tool(self, name: str, **kwargs: Any) -> dict[str, Any]:
         tool = self.get(name)
         if tool is None:
-            # Return a structured not-found result instead of raising
+            # Return a structured error so the LLM can react and recover
             return {
-                "type": "tool_not_found",
+                "type": "tool_error",
                 "name": name,
                 "error": f"Tool not found: {name}",
+                "error_type": "NotFound",
             }
         try:
             agent_logger.info("Tool call", tool=name, args=kwargs)
         except Exception:
             pass
 
+        # Validate/normalize args via args_schema if available
         args = kwargs
-        schema = getattr(tool, "args_schema", None)
-        if schema is not None:
-            parsed = schema(**kwargs)
-            args = parsed.model_dump()
+        try:
+            schema = getattr(tool, "args_schema", None)
+            if schema is not None:
+                parsed = schema(**kwargs)
+                args = parsed.model_dump()
+        except Exception as ve:
+            return {"type": "tool_error", "name": name, "error": str(ve), "error_type": type(ve).__name__}
 
-        return await tool.arun(**args)
+        # Execute tool and wrap any exception as a structured error
+        try:
+            return await tool.arun(**args)
+        except Exception as e:
+            try:
+                agent_logger.error(
+                    "Tool execution failed", tool=name, error=str(e), error_type=type(e).__name__
+                )
+            except Exception:
+                pass
+            return {
+                "type": "tool_error",
+                "name": name,
+                "error": str(e),
+                "error_type": type(e).__name__,
+            }

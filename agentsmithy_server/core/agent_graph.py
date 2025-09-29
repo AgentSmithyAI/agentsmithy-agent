@@ -155,20 +155,14 @@ class AgentOrchestrator:
                     )
                     if summary_msg:
                         summary_text = str(getattr(summary_msg, "content", "") or "")
-                        # If we chained previous summary, adjust summarized_count incrementally
-                        if stored:
-                            # compaction_source = [prev_summary] + tail
-                            # Additional summarized now ~= (len(compaction_source) - keep_last - 1)
-                            additional = max(
-                                0, len(compaction_source) - KEEP_LAST_MESSAGES - 1
-                            )
-                            summarized_count = max(
-                                0, int(stored.summarized_count or 0) + additional
-                            )
-                        else:
-                            summarized_count = max(
-                                0, len(messages) - KEEP_LAST_MESSAGES
-                            )
+                        # summarized_count must represent the full number of messages in the dialog history
+                        # (including messages that were previously summarized).
+                        try:
+                            summarized_count = max(0, len(messages) if messages is not None else 0)
+                        except Exception:
+                            # Fallback to stored value if available, otherwise 0
+                            summarized_count = int(stored.summarized_count or 0) if stored else 0
+
                         try:
                             storage = DialogSummaryStorage(
                                 context["project"], dialog_id
