@@ -304,7 +304,7 @@ def _apply_marker_style_blocks(diff_text: str, file_path: Path) -> str:
     # Track all replacements for out-of-order editing support
     replacements: list[dict] = []
 
-    search_start_re = re.compile(r"^[-<]{3,}\s*SEARCH>?")
+    search_start_re = re.compile(r"^[-<]{3,}\s*SEARCH>?$")
     middle_re = re.compile(r"^[=]{3,}$")
     replace_end_re = re.compile(r"^[+>]{3,}\s*(REPLACE>?)?$")
 
