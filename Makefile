@@ -54,10 +54,6 @@ pyinstall: install-dev
 		--collect-data chromadb \
 		--collect-submodules tiktoken \
 		--collect-submodules tiktoken_ext \
-		# NOTE (PyInstaller): The lines above force inclusion of dynamic imports used by
-		# ChromaDB (telemetry) and tiktoken (OpenAI encoding plugin) that are otherwise
-		# not auto-discovered in one-file builds. Do not remove unless the spec file is
-		# updated equivalently.
 		main.py
 
 build: pyinstall

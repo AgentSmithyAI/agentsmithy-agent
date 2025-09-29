@@ -24,7 +24,7 @@ class GetPreviousResultArgs(BaseModel):
     )
 
 
-class GetPreviousResultTool(BaseTool):  # type: ignore[override]
+class GetPreviousResultTool(BaseTool):
     """Retrieve results from previous tool executions in this dialog.
 
     This tool allows the model to access full results from PREVIOUS tool

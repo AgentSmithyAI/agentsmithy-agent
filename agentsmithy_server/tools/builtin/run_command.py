@@ -114,7 +114,7 @@ _OS_DESC = (
 )
 
 
-class RunCommandTool(BaseTool):  # type: ignore[override]
+class RunCommandTool(BaseTool):
     name: str = "run_command"
     description: str = (
         "Execute an operating system command and return stdout, stderr, exit code,"

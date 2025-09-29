@@ -17,7 +17,7 @@ class ListFilesArgs(BaseModel):
     )
 
 
-class ListFilesTool(BaseTool):  # type: ignore[override]
+class ListFilesTool(BaseTool):
     name: str = "list_files"
     description: str = (
         "List files and directories under a path. Hidden (dot-prefixed) files and"

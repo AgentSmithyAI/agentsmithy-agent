@@ -33,7 +33,6 @@ class Settings(BaseSettings):
 
     # Summarization threshold (single knob, tokens)
     summary_trigger_token_budget: int = Field(
-        default=200,
         description=(
             "Approximate total input tokens in dialog after which summarization should be applied"
         ),

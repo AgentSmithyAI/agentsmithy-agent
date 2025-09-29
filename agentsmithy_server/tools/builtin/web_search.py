@@ -18,14 +18,16 @@ class WebSearchArgs(BaseModel):
     num_results: int = Field(5, description="Number of search results to return")
 
 
-class WebSearchTool(BaseTool):  # type: ignore[override]
+class WebSearchTool(BaseTool):
     name: str = "web_search"
     description: str = "Search the web for information using DuckDuckGo search engine"
     args_schema: type[BaseModel] | dict[str, Any] | None = WebSearchArgs
 
     async def _arun(self, **kwargs: Any) -> dict[str, Any]:
         query = kwargs["query"]
-        num_results = kwargs.get("num_results", 5)
+        num_results = kwargs.get(
+            "num_results", 5
+        )  # TODO: investigate optiomal number & configureable
 
         try:
             results: list[dict[str, str]] = []

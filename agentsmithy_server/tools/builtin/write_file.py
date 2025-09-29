@@ -16,7 +16,7 @@ class WriteFileArgs(BaseModel):
     content: str = Field(..., description="Complete file content to write")
 
 
-class WriteFileTool(BaseTool):  # type: ignore[override]
+class WriteFileTool(BaseTool):
     name: str = "write_to_file"
     description: str = "Write complete content to a file (create or overwrite)."
     args_schema: type[BaseModel] | dict[str, Any] | None = WriteFileArgs

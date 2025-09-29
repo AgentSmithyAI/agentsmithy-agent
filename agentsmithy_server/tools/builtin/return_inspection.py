@@ -19,7 +19,7 @@ class ReturnInspectionArgs(BaseModel):
     )
 
 
-class ReturnInspectionTool(BaseTool):  # type: ignore[override]
+class ReturnInspectionTool(BaseTool):
     name: str = "return_inspection"
     description: str = (
         "Finalize and return the strict JSON analysis of the project. MUST be called once."

@@ -32,7 +32,7 @@ class ReplaceArgs(BaseModel):
     )
 
 
-class ReplaceInFileTool(BaseTool):  # type: ignore[override]
+class ReplaceInFileTool(BaseTool):
     name: str = "replace_in_file"
     description: str = (
         "Edit a file by applying a diff. Required format:\n"

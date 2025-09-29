@@ -17,7 +17,7 @@ class WebFetchArgs(BaseModel):
     )
 
 
-class WebFetchTool(BaseTool):  # type: ignore[override]
+class WebFetchTool(BaseTool):
     name: str = "web_fetch"
     description: str = (
         "Fetch a web page with a minimal API. Uses fast HTTP fetch first, and falls back "

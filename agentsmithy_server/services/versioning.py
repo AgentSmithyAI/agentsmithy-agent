@@ -7,8 +7,10 @@ import tempfile
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 from dulwich import porcelain
+from dulwich.objects import Blob, Commit, Tree  # precise types for object store
 from dulwich.repo import Repo
 
 DEFAULT_EXCLUDES = [
@@ -163,7 +165,7 @@ class VersioningTracker:
             parent_commit = None
 
         # Create new tree by scanning project directory
-        tree = Tree()
+        tree: Tree = Tree()
 
         # Walk through project directory and add files
         for root, dirs, files in os.walk(self.project_root):
@@ -186,7 +188,7 @@ class VersioningTracker:
                     content = file_path.read_bytes()
 
                     # Create blob
-                    blob = Blob.from_string(content)
+                    blob: Blob = Blob.from_string(content)
                     repo.object_store.add_object(blob)
 
                     # Add to tree with relative path
@@ -211,7 +213,7 @@ class VersioningTracker:
         repo.object_store.add_object(tree)
 
         # Create commit
-        commit = Commit()
+        commit: Commit = Commit()
         commit.tree = tree.id
         if parent_commit:
             commit.parents = [parent_commit.id]
@@ -238,15 +240,23 @@ class VersioningTracker:
     def restore_checkpoint(self, commit_id: str) -> None:
         repo = self.ensure_repo()
         # Checkout the given tree into worktree by reading blobs and writing files
-        tree = repo[repo[commit_id.encode()].tree]
+        # mypy: dulwich types use dynamic attributes; guard with isinstance checks
+        commit_obj = repo[commit_id.encode()]
+        tree_id = getattr(commit_obj, "tree", None)
+        if tree_id is None:
+            return
+        tree = cast(Tree, repo[tree_id])
         # Build index of all blobs in target commit
-        for entry in tree.walk():
+        for entry in tree.walk():  # type: ignore[attr-defined]
             _, _, files = entry
             for name, _mode, sha in files:
                 rel = Path(name.decode())
                 target = self.project_root / rel
                 target.parent.mkdir(parents=True, exist_ok=True)
-                data = repo[sha].data
+                obj = repo[sha]
+                data = getattr(obj, "data", None)
+                if data is None:
+                    continue
                 target.write_bytes(data)
 
     def _record_metadata(self, commit_id: str, message: str) -> None:

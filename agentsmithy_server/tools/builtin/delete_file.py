@@ -15,7 +15,7 @@ class DeleteFileArgs(BaseModel):
     path: str = Field(..., description="Path to file to delete")
 
 
-class DeleteFileTool(BaseTool):  # type: ignore[override]
+class DeleteFileTool(BaseTool):
     name: str = "delete_file"
     description: str = "Delete a file from the workspace (non-recursive)."
     args_schema: type[BaseModel] | dict[str, Any] | None = DeleteFileArgs

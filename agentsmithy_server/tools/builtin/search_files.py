@@ -16,7 +16,7 @@ class SearchFilesArgs(BaseModel):
     file_pattern: str | None = Field(None, description="Glob to filter files")
 
 
-class SearchFilesTool(BaseTool):  # type: ignore[override]
+class SearchFilesTool(BaseTool):
     name: str = "search_files"
     description: str = (
         "Regex search across files in a directory, returning context lines."
