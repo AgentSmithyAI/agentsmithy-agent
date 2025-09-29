@@ -1,6 +1,5 @@
 """Base agent class for all specialized agents."""
 
-import json
 from abc import ABC, abstractmethod
 from typing import Any
 

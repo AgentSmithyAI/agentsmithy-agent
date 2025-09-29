@@ -158,10 +158,14 @@ class AgentOrchestrator:
                         # summarized_count must represent the full number of messages in the dialog history
                         # (including messages that were previously summarized).
                         try:
-                            summarized_count = max(0, len(messages) if messages is not None else 0)
+                            summarized_count = max(
+                                0, len(messages) if messages is not None else 0
+                            )
                         except Exception:
                             # Fallback to stored value if available, otherwise 0
-                            summarized_count = int(stored.summarized_count or 0) if stored else 0
+                            summarized_count = (
+                                int(stored.summarized_count or 0) if stored else 0
+                            )
 
                         try:
                             storage = DialogSummaryStorage(

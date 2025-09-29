@@ -127,7 +127,12 @@ class ToolRegistry:
                 parsed = schema(**kwargs)
                 args = parsed.model_dump()
         except Exception as ve:
-            return {"type": "tool_error", "name": name, "error": str(ve), "error_type": type(ve).__name__}
+            return {
+                "type": "tool_error",
+                "name": name,
+                "error": str(ve),
+                "error_type": type(ve).__name__,
+            }
 
         # Execute tool and wrap any exception as a structured error
         try:
@@ -135,7 +140,10 @@ class ToolRegistry:
         except Exception as e:
             try:
                 agent_logger.error(
-                    "Tool execution failed", tool=name, error=str(e), error_type=type(e).__name__
+                    "Tool execution failed",
+                    tool=name,
+                    error=str(e),
+                    error_type=type(e).__name__,
                 )
             except Exception:
                 pass
