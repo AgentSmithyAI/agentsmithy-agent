@@ -49,7 +49,7 @@ High level:
   - Inspector-wide: `.agentsmithy/dialogs/journal.sqlite`
   - Per dialog: `.agentsmithy/dialogs/<dialog_id>/journal.sqlite`
 - `db/models.py` declares ORM models (e.g., `ToolResultORM`, `BaseORM`)
-- `core/tool_results_storage.py` uses ORM for storing tool results and lazily ensures tables via `BaseORM.metadata.create_all` — внешних миграций не требуется
+- `core/tool_results_storage.py` uses ORM for storing tool results and lazily ensures tables via `BaseORM.metadata.create_all` — external migrations are not required
 
 ### Dialogs Persistence (MVP)
 - Registry: `<project>/.agentsmithy/dialogs/index.json`
