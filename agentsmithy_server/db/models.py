@@ -25,27 +25,14 @@ class ToolResultORM(BaseORM):
 class DialogSummaryORM(BaseORM):
     __tablename__ = "dialog_summaries"
 
-    dialog_id: Mapped[str] = mapped_column(String, primary_key=True)
-    summary_text: Mapped[str] = mapped_column(Text)
-    summarized_count: Mapped[int] = mapped_column(Integer)
-    keep_last: Mapped[int] = mapped_column(Integer)
-    updated_at: Mapped[str] = mapped_column(String)
-
-
-class DialogSummaryVersionORM(BaseORM):
-    __tablename__ = "dialog_summary_versions"
-
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     dialog_id: Mapped[str] = mapped_column(String, index=True)
     cutoff_message_index: Mapped[int] = mapped_column(Integer)
     summary_text: Mapped[str] = mapped_column(Text)
     keep_last: Mapped[int] = mapped_column(Integer)
     created_at: Mapped[str] = mapped_column(String)
-    # Denormalized convenience for quick reads without joins
     summarized_count: Mapped[int] = mapped_column(Integer)
-    __table_args__ = (
-        Index("ix_summary_versions_dialog_created", "dialog_id", "created_at"),
-    )
+    __table_args__ = (Index("ix_summaries_dialog_created", "dialog_id", "created_at"),)
 
 
 class DialogUsageORM(BaseORM):
