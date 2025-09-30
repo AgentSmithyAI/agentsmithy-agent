@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 
 from agentsmithy_server.utils.logger import agent_logger
 
-from .base_tool import BaseTool
+from ..base_tool import BaseTool
 
 
 def _detect_shell() -> str | None:
@@ -114,7 +114,7 @@ _OS_DESC = (
 )
 
 
-class RunCommandTool(BaseTool):  # type: ignore[override]
+class RunCommandTool(BaseTool):
     name: str = "run_command"
     description: str = (
         "Execute an operating system command and return stdout, stderr, exit code,"

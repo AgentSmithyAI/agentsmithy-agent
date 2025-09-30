@@ -44,7 +44,16 @@ class DialogPatchRequest(BaseModel):
 
 
 class DialogListParams(BaseModel):
-    sort: str = "last_message_at"  # created_at|updated_at|last_message_at
+    sort: str = "updated_at"  # created_at|updated_at
     order: str = "desc"  # asc|desc
     limit: int | None = 50
     offset: int = 0
+
+
+class ToolResultResponse(BaseModel):
+    tool_call_id: str
+    tool_name: str
+    args: dict[str, Any]
+    result: dict[str, Any]
+    timestamp: str
+    metadata: dict[str, Any] = {}

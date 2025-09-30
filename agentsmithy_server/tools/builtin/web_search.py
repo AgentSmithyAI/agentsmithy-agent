@@ -7,13 +7,10 @@ from pydantic import BaseModel, Field
 
 from agentsmithy_server.config import settings
 
-from .base_tool import BaseTool
+from ..base_tool import BaseTool
 
-# Mandatory APIs from duckduckgo_search; DDGS required, AsyncDDGS optional
-_AsyncDDGS = getattr(ddg, "AsyncDDGS", None)
-_DDGS = getattr(ddg, "DDGS", None)
-AsyncDDGS = cast(Any, _AsyncDDGS)
-DDGS = cast(Any, _DDGS)
+AsyncDDGS = cast(Any, getattr(ddg, "AsyncDDGS", None))
+DDGS = cast(Any, getattr(ddg, "DDGS", None))
 
 
 class WebSearchArgs(BaseModel):
@@ -21,14 +18,16 @@ class WebSearchArgs(BaseModel):
     num_results: int = Field(5, description="Number of search results to return")
 
 
-class WebSearchTool(BaseTool):  # type: ignore[override]
+class WebSearchTool(BaseTool):
     name: str = "web_search"
     description: str = "Search the web for information using DuckDuckGo search engine"
     args_schema: type[BaseModel] | dict[str, Any] | None = WebSearchArgs
 
     async def _arun(self, **kwargs: Any) -> dict[str, Any]:
         query = kwargs["query"]
-        num_results = kwargs.get("num_results", 5)
+        num_results = kwargs.get(
+            "num_results", 5
+        )  # TODO: investigate optiomal number & configureable
 
         try:
             results: list[dict[str, str]] = []

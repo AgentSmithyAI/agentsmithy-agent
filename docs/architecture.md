@@ -44,10 +44,17 @@ High level:
 - Project entity owns `state_dir` and RAG paths per project
 - Runtime manages singleton server per project and writes `.agentsmithy/status.json`
 
+### Persistence (`agentsmithy_server/db/*`, `core/tool_results_storage.py`)
+- `db/base.py` provides `get_engine` and `get_session` for SQLite journals:
+  - Inspector-wide: `.agentsmithy/dialogs/journal.sqlite`
+  - Per dialog: `.agentsmithy/dialogs/<dialog_id>/journal.sqlite`
+- `db/models.py` declares ORM models (e.g., `ToolResultORM`, `BaseORM`)
+- `core/tool_results_storage.py` uses ORM for storing tool results and lazily ensures tables via `BaseORM.metadata.create_all` — external migrations are not required
+
 ### Dialogs Persistence (MVP)
 - Registry: `<project>/.agentsmithy/dialogs/index.json`
-  - `current_dialog_id`, `dialogs[]` (id, title, created/updated/last_message timestamps)
-- Messages: `<project>/.agentsmithy/dialogs/<dialog_id>/messages.jsonl` (LDJSON: `{role, content, ts}`)
+  - `current_dialog_id`, `dialogs[]` (id, title, created/updated timestamps)
+- Messages: inspector-wide journal at `<project>/.agentsmithy/dialogs/journal.sqlite`, per-dialog journals at `<project>/.agentsmithy/dialogs/<dialog_id>/journal.sqlite` (SQLite database via LangChain's SQLChatMessageHistory)
 - On server startup: if no dialogs exist, a default dialog is created and set current
 
 ## Request Flow

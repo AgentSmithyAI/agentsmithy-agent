@@ -25,16 +25,16 @@ update-reqs:
 lint:
 	@bash -c '\
 	ec=0; \
-	$(VENV)/bin/ruff check . || ec=1; \
-	$(VENV)/bin/black --check . || ec=1; \
-	$(VENV)/bin/isort --check-only . || ec=1; \
-	$(VENV)/bin/mypy . || ec=1; \
+	$(PY) -m ruff check . || ec=1; \
+	$(PY) -m black --check . || ec=1; \
+	$(PY) -m isort --check-only . || ec=1; \
+	$(PY) -m mypy . || ec=1; \
 	exit $$ec'
 
 format:
-	$(VENV)/bin/ruff check . --fix --exit-zero
-	$(VENV)/bin/black .
-	$(VENV)/bin/isort .
+	$(PY) -m ruff check . --fix --exit-zero
+	$(PY) -m black .
+	$(PY) -m isort .
 
 test:
 	$(VENV)/bin/pytest -q
@@ -46,7 +46,15 @@ clean:
 	rm -rf $(VENV) .mypy_cache .pytest_cache .ruff_cache __pycache__ **/__pycache__ dist build *.spec
 
 pyinstall: install-dev
-	$(PYINSTALLER) --onefile --name $(BIN) main.py
+	$(PYINSTALLER) --onefile --name $(BIN) \
+		--collect-submodules agentsmithy_server.tools \
+		--collect-submodules agentsmithy_server.tools.builtin \
+		--collect-submodules chromadb \
+		--collect-submodules chromadb.telemetry.product \
+		--collect-data chromadb \
+		--collect-submodules tiktoken \
+		--collect-submodules tiktoken_ext \
+		main.py
 
 build: pyinstall
 

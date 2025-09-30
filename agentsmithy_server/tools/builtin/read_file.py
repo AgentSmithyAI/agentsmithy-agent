@@ -5,14 +5,14 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from .base_tool import BaseTool
+from ..base_tool import BaseTool
 
 
 class ReadFileArgs(BaseModel):
     path: str = Field(..., description="Path to file to read")
 
 
-class ReadFileTool(BaseTool):  # type: ignore[override]
+class ReadFileTool(BaseTool):
     name: str = "read_file"
     description: str = "Read the contents of a file at the specified path."
     args_schema: type[BaseModel] | dict[str, Any] | None = ReadFileArgs

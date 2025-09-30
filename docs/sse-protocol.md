@@ -4,7 +4,7 @@ This document describes the simplified Server-Sent Events (SSE) protocol used by
 
 ## Overview
 
-AgentSmithy streams events: `chat_start`, `chat`, `chat_end`, `reasoning_start`, `reasoning`, `reasoning_end`, `tool_call`, `file_edit`, `error`. A final `done` event signals end of stream. Each SSE message is a single JSON object. If an `error` event is emitted, it is immediately followed by a `done` event so clients can reliably finalize the stream.
+AgentSmithy streams events: `chat_start`, `chat`, `chat_end`, `reasoning_start`, `reasoning`, `reasoning_end`, `summary_start`, `summary_end`, `tool_call`, `file_edit`, `error`. A final `done` event signals end of stream. Each SSE message is a single JSON object. If an `error` event is emitted, it is immediately followed by a `done` event so clients can reliably finalize the stream.
 
 ## Connection
 
@@ -97,7 +97,23 @@ Marks the end of the reasoning segment.
 { "type": "reasoning_end", "dialog_id": "01J..." }
 ```
 
-### 7) tool_call
+### 7) summary_start
+
+Marks the beginning of a dialog summarization phase. Emitted even if summarization decides to skip generating a summary (to allow UIs to show a brief spinner).
+
+```json
+{ "type": "summary_start", "dialog_id": "01J..." }
+```
+
+### 8) summary_end
+
+Marks the end of a dialog summarization phase. Emitted after the system attempts to summarize earlier turns (regardless of whether a summary was produced or a persisted summary was used).
+
+```json
+{ "type": "summary_end", "dialog_id": "01J..." }
+```
+
+### 9) tool_call
 
 Emitted when a tool is invoked by the agent.
 
@@ -105,7 +121,7 @@ Emitted when a tool is invoked by the agent.
 { "type": "tool_call", "name": "read_file", "args": {"path": "src/example.py"}, "dialog_id": "01J..." }
 ```
 
-### 8) file_edit
+### 10) file_edit
 
 Notification that a file was edited/created by a tool. Includes minimal path plus change metadata.
 
@@ -123,7 +139,7 @@ Notification that a file was edited/created by a tool. Includes minimal path plu
 }
 ```
 
-### 9) error
+### 11) error
 
 Errors encountered during processing. Always followed by a `done` event.
 
@@ -265,6 +281,7 @@ Streamed as SSE (arrive incrementally over the connection):
 
 - `chat_start`, `chat` (chunks), `chat_end`
 - `reasoning_start`, `reasoning` (chunks), `reasoning_end`
+- `summary_start`, `summary_end` (bookend summarization phase; no payload chunks yet)
 - `tool_call` (when a tool invocation begins; includes tool name and args)
 - `file_edit` (when a tool edits/creates/deletes a file)
 - `error` (on failure) followed by `done`
@@ -289,6 +306,10 @@ data: {"type": "reasoning_start", "dialog_id": "01J..."}
 data: {"type": "reasoning", "content": "Analyzing functions to update...", "dialog_id": "01J..."}
 
 data: {"type": "reasoning_end", "dialog_id": "01J..."}
+
+data: {"type": "summary_start", "dialog_id": "01J..."}
+
+data: {"type": "summary_end", "dialog_id": "01J..."}
 
 data: {"type": "chat_start", "dialog_id": "01J..."}
 

@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from agentsmithy_server.tools.list_files import ListFilesTool
+from agentsmithy_server.tools.builtin.list_files import ListFilesTool
 
 pytestmark = pytest.mark.asyncio
 

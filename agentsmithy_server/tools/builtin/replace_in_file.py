@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 from agentsmithy_server.services.versioning import VersioningTracker
 from agentsmithy_server.utils.logger import agent_logger
 
-from .base_tool import BaseTool
+from ..base_tool import BaseTool
 
 
 class ReplaceArgs(BaseModel):
@@ -32,7 +32,7 @@ class ReplaceArgs(BaseModel):
     )
 
 
-class ReplaceInFileTool(BaseTool):  # type: ignore[override]
+class ReplaceInFileTool(BaseTool):
     name: str = "replace_in_file"
     description: str = (
         "Edit a file by applying a diff. Required format:\n"

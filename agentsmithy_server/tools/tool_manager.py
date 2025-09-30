@@ -103,7 +103,8 @@ class ToolManager:
             return {"type": "tool_error", "name": name, "error": str(ve)}
 
         try:
-            result = await tool.arun(**args)
+            # Pass arguments via tool_input dict to satisfy BaseTool.arun signature
+            result = await tool.arun(tool_input=args)
         except Exception as e:
             agent_logger.error(
                 "Tool execution failed",

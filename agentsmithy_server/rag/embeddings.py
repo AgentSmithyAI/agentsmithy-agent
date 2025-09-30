@@ -3,6 +3,18 @@
 from langchain_core.embeddings import Embeddings
 from langchain_openai import OpenAIEmbeddings
 
+# NOTE (PyInstaller): tiktoken registers OpenAI encodings (e.g., "cl100k_base") via
+# the plugin module `tiktoken_ext.openai_public`. PyInstaller one-file builds do not
+# auto-discover this plugin because it is imported dynamically by tiktoken at runtime.
+# The explicit import below ensures the plugin is bundled and its encodings are
+# registered, preventing "Unknown encoding cl100k_base" errors in the frozen binary.
+# Do not remove unless the build system is updated to collect tiktoken_ext.
+try:  # pragma: no cover
+    import tiktoken_ext.openai_public  # noqa: F401
+except Exception:
+    # If the plugin isn't present, runtime will fail on usage; this keeps dev envs lenient.
+    pass
+
 
 class EmbeddingsManager:
     """Manager for handling document embeddings."""

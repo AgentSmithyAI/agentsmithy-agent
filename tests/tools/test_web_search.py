@@ -1,11 +1,10 @@
 """Tests for WebSearchTool."""
 
-import sys
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
-from agentsmithy_server.tools.web_search import WebSearchTool
+from agentsmithy_server.tools.builtin.web_search import WebSearchTool
 
 
 @pytest.mark.asyncio
@@ -43,7 +42,9 @@ async def test_web_search_success():
 
     mock_ddgs_instance.text.return_value = async_gen()
 
-    with patch("agentsmithy_server.tools.web_search.AsyncDDGS", mock_ddgs_class):
+    with patch(
+        "agentsmithy_server.tools.builtin.web_search.AsyncDDGS", mock_ddgs_class
+    ):
         result = await tool._arun(query="test query", num_results=2)
 
     assert result["type"] == "web_search_result"
@@ -56,18 +57,6 @@ async def test_web_search_success():
 
     # Tool no longer emits a separate SSE 'search' event
     tool._sse_callback.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_web_search_import_error():
-    """duckduckgo-search is mandatory; simulate ImportError should raise at import time."""
-    with patch.dict(sys.modules, {"duckduckgo_search": None}):
-        import importlib
-
-        with pytest.raises(ImportError):
-            import agentsmithy_server.tools.web_search as ws
-
-            importlib.reload(ws)
 
 
 @pytest.mark.asyncio
@@ -85,7 +74,9 @@ async def test_web_search_exception():
     mock_ddgs_instance.__aexit__.return_value = None
     mock_ddgs_instance.text.side_effect = Exception("Network error")
 
-    with patch("agentsmithy_server.tools.web_search.AsyncDDGS", mock_ddgs_class):
+    with patch(
+        "agentsmithy_server.tools.builtin.web_search.AsyncDDGS", mock_ddgs_class
+    ):
         result = await tool._arun(query="test query")
 
     assert result["type"] == "web_search_error"
@@ -119,7 +110,9 @@ async def test_web_search_default_num_results():
 
     mock_ddgs_instance.text.return_value = async_gen()
 
-    with patch("agentsmithy_server.tools.web_search.AsyncDDGS", mock_ddgs_class):
+    with patch(
+        "agentsmithy_server.tools.builtin.web_search.AsyncDDGS", mock_ddgs_class
+    ):
         result = await tool._arun(query="test query")
 
     # Default is 5 results

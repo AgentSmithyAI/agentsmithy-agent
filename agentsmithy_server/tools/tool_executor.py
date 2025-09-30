@@ -1,15 +1,22 @@
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncGenerator
-from typing import Any
+import uuid
+from collections.abc import AsyncGenerator, Awaitable, Callable
+from typing import TYPE_CHECKING, Any
 
 from langchain_core.messages import BaseMessage, ToolMessage
 
+from agentsmithy_server.core.dialog_usage_storage import DialogUsageStorage
 from agentsmithy_server.core.llm_provider import LLMProvider
+from agentsmithy_server.core.tool_results_storage import ToolResultsStorage
 from agentsmithy_server.utils.logger import agent_logger
 
-from .tool_manager import ToolManager
+from .integration.langchain_adapter import as_langchain_tools
+from .registry import ToolRegistry
+
+if TYPE_CHECKING:
+    from agentsmithy_server.core.project import Project
 
 
 class ToolExecutor:
@@ -20,18 +27,33 @@ class ToolExecutor:
     - process_with_tools_async(stream=False) -> dict
     """
 
-    def __init__(self, tool_manager: ToolManager, llm_provider: LLMProvider) -> None:
+    def __init__(self, tool_manager: ToolRegistry, llm_provider: LLMProvider) -> None:
         self.tool_manager = tool_manager
         self.llm_provider = llm_provider
         # Optional SSE callback to emit structured events upstream if needed
-        self._sse_callback = None
+        self._sse_callback: Callable[[dict[str, Any]], Awaitable[None]] | None = None
+        self._project: Project | None = None
+        self._dialog_id: str | None = None
+        # Set via set_context(...)
+        self._tool_results_storage: ToolResultsStorage | None = None
 
-    def set_sse_callback(self, callback):
+    def set_sse_callback(
+        self, callback: Callable[[dict[str, Any]], Awaitable[None]] | None
+    ) -> None:
         self._sse_callback = callback
+
+    def set_context(self, project: Project | None, dialog_id: str | None) -> None:
+        """Set project and dialog context for tool results storage."""
+        self._project = project
+        self._dialog_id = dialog_id
+        if project and dialog_id:
+            self._tool_results_storage = ToolResultsStorage(project, dialog_id)
+        else:
+            self._tool_results_storage = None
 
     async def emit_event(self, event: dict[str, Any]) -> None:
         if self._sse_callback is not None:
-            try:  # type: ignore[unreachable]
+            try:
                 await self._sse_callback(event)
             except Exception as e:
                 agent_logger.error(
@@ -40,12 +62,195 @@ class ToolExecutor:
 
     def _bind_tools(self):
         # The provider returns an LLM object with tools bound (LangChain style)
-        tools = [t for t in self.tool_manager._tools.values()]
+        tools = as_langchain_tools(self.tool_manager)
         return self.llm_provider.bind_tools(tools)
+
+    def _is_ephemeral_tool(self, name: str) -> bool:
+        """Check whether a tool should be treated as ephemeral (no persistence).
+
+        Centralizing this avoids sprinkling special-cases across flows.
+        """
+        try:
+            tool_obj = self.tool_manager.get(name)
+            return bool(getattr(tool_obj, "ephemeral", False))
+        except Exception:
+            return False
+
+    async def _build_tool_message(
+        self,
+        tool_call_id: str,
+        name: str,
+        args: dict[str, Any],
+        result: dict[str, Any],
+    ) -> tuple[ToolMessage, bool]:
+        """Create a ToolMessage for a tool result, optionally persisting it.
+
+        Returns a tuple of (tool_message, is_ephemeral). When ephemeral, the
+        message contains only inline results and no history/storage is written.
+        """
+        is_ephemeral = self._is_ephemeral_tool(name)
+
+        # If storage is available and tool is not ephemeral, persist and build reference
+        if self._tool_results_storage and not is_ephemeral:
+            result_ref = await self._tool_results_storage.store_result(
+                tool_call_id=tool_call_id,
+                tool_name=name,
+                args=args,
+                result=result,
+            )
+            metadata = await self._tool_results_storage.get_metadata(tool_call_id)
+
+            inline_result_json = json.dumps(result, ensure_ascii=False)
+            content = {
+                "tool_call_id": tool_call_id,
+                "tool_name": name,
+                "status": (
+                    "error" if result.get("type") == "tool_error" else "success"
+                ),
+                "metadata": {
+                    "size_bytes": metadata.size_bytes if metadata else 0,
+                    "summary": metadata.summary if metadata else "",
+                    "truncated_preview": self._tool_results_storage.get_truncated_preview(
+                        result
+                    ),
+                    "result_present": True,
+                    "result_length_bytes": len(inline_result_json.encode("utf-8")),
+                },
+                "result_ref": result_ref.to_dict(),
+                "inline_result": result,
+                "has_inline_result": True,
+            }
+            return (
+                ToolMessage(
+                    content=json.dumps(content, ensure_ascii=False),
+                    tool_call_id=tool_call_id,
+                ),
+                is_ephemeral,
+            )
+
+        # Inline-only message for ephemeral tools or when storage is unavailable
+        inline_result_json = json.dumps(result, ensure_ascii=False)
+        content = {
+            "tool_call_id": tool_call_id,
+            "tool_name": name,
+            "status": ("error" if result.get("type") == "tool_error" else "success"),
+            "metadata": {
+                "size_bytes": len(inline_result_json.encode("utf-8")),
+                "summary": "",
+                "truncated_preview": None,
+                "result_present": True,
+                "result_length_bytes": len(inline_result_json.encode("utf-8")),
+            },
+            "inline_result": result,
+            "has_inline_result": True,
+        }
+        return (
+            ToolMessage(
+                content=json.dumps(content, ensure_ascii=False),
+                tool_call_id=tool_call_id,
+            ),
+            True,
+        )
+
+    def _append_tool_message_to_history(self, tool_message: ToolMessage) -> None:
+        """Persist a slim reference-only ToolMessage to dialog history.
+
+        The saved message will exclude any inline result or truncated preview and
+        contain only a reference and length so that history stays compact.
+        """
+        try:
+            if not (
+                self._project
+                and self._dialog_id
+                and hasattr(self._project, "get_dialog_history")
+            ):
+                return
+
+            # Build a minimized envelope
+            content = tool_message.content
+            slim_content: dict[str, Any] | None = None
+            try:
+                if isinstance(content, str):
+                    parsed = json.loads(content)
+                    if isinstance(parsed, dict) and "result_ref" in parsed:
+                        metadata = parsed.get("metadata", {}) or {}
+                        size_bytes = metadata.get("size_bytes", 0)
+                        slim_content = {
+                            "tool_call_id": parsed.get("tool_call_id"),
+                            "tool_name": parsed.get("tool_name"),
+                            "status": parsed.get("status"),
+                            "metadata": {
+                                "size_bytes": size_bytes,
+                            },
+                            "result_ref": parsed.get("result_ref"),
+                            # Explicitly indicate no inline result persisted
+                            "has_inline_result": False,
+                        }
+            except Exception:
+                slim_content = None
+
+            history = self._project.get_dialog_history(self._dialog_id)
+            if slim_content is not None:
+                persisted = ToolMessage(
+                    content=json.dumps(slim_content, ensure_ascii=False),
+                    tool_call_id=slim_content.get("tool_call_id", ""),
+                )
+                history.add_message(persisted)
+            else:
+                # Fallback: save original if we cannot minimize (should be rare)
+                history.add_message(tool_message)
+        except Exception as e:
+            agent_logger.error("Failed to append ToolMessage to history", error=str(e))
+
+    def _append_ai_message_with_tool_calls_to_history(self, ai_message: Any) -> None:
+        """Append the assistant message that declares tool_calls to history."""
+        try:
+            if (
+                self._project
+                and self._dialog_id
+                and hasattr(self._project, "get_dialog_history")
+            ):
+                # Redact ephemeral tool_calls from the persisted history so the
+                # agent won't see ephemeral calls and try to fetch their outputs later.
+                tool_calls = list(getattr(ai_message, "tool_calls", []) or [])
+                if tool_calls:
+                    filtered_calls: list[dict[str, Any]] = []
+                    for tc in tool_calls:
+                        try:
+                            name_value = tc.get("name", "")
+                        except Exception:
+                            name_value = ""
+                        if not self._is_ephemeral_tool(str(name_value)):
+                            filtered_calls.append(tc)
+
+                    # Build a shallow copy of the message for persistence
+                    from langchain_core.messages import AIMessage
+
+                    persisted = AIMessage(
+                        content=getattr(ai_message, "content", ""),
+                        tool_calls=filtered_calls,
+                    )
+                    try:
+                        existing_kwargs = dict(
+                            getattr(ai_message, "additional_kwargs", {}) or {}
+                        )
+                        existing_kwargs["tool_calls"] = filtered_calls
+                        persisted.additional_kwargs = existing_kwargs
+                    except Exception:
+                        pass
+                else:
+                    persisted = ai_message
+
+                history = self._project.get_dialog_history(self._dialog_id)
+                history.add_message(persisted)
+        except Exception as e:
+            agent_logger.error(
+                "Failed to append AI tool_calls message to history", error=str(e)
+            )
 
     def process_with_tools(
         self, messages: list[BaseMessage], stream: bool = True
-    ) -> AsyncGenerator[Any, None]:
+    ) -> AsyncGenerator[Any]:
         """Streaming path: yield strings or structured dicts suitable for SSE."""
         return self._process_streaming(messages)
 
@@ -61,6 +266,72 @@ class ToolExecutor:
         while True:
             agent_logger.info("LLM invoke", messages=len(conversation))
             response = await bound_llm.ainvoke(conversation)
+            # Persist usage if provided by provider (non-stream path)
+            try:
+                usage: dict[str, Any] = {}
+                meta = getattr(response, "response_metadata", {}) or {}
+                if isinstance(meta, dict) and meta.get("token_usage"):
+                    maybe = meta.get("token_usage")
+                    if isinstance(maybe, dict):
+                        usage = maybe
+                add = getattr(response, "additional_kwargs", {}) or {}
+                if not usage and isinstance(add, dict) and add.get("usage"):
+                    maybe2 = add.get("usage")
+                    if isinstance(maybe2, dict):
+                        usage = maybe2
+                # Some providers expose usage as usage_metadata on non-stream responses
+                if not usage:
+                    um = getattr(response, "usage_metadata", None)
+                    if isinstance(um, dict) and um:
+                        usage = um
+
+                # Check if usage is directly on response
+                if not usage and hasattr(response, "usage"):
+                    direct_usage = getattr(response, "usage", None)
+                    if direct_usage:
+                        # Convert object to dict if needed
+                        if hasattr(direct_usage, "__dict__"):
+                            usage = direct_usage.__dict__
+                        elif hasattr(direct_usage, "dict") and callable(
+                            direct_usage.dict
+                        ):
+                            usage = direct_usage.dict()
+                        else:
+                            usage = direct_usage
+
+                # Check response_metadata.finish_reason_data (some models put usage here)
+                if not usage and meta and "finish_reason_data" in meta:
+                    frd = meta.get("finish_reason_data", {})
+                    if isinstance(frd, dict) and "usage" in frd:
+                        usage = frd.get("usage", {})
+
+                # Check model_kwargs in response_metadata
+                if not usage and meta and "model_kwargs" in meta:
+                    mk = meta.get("model_kwargs", {})
+                    if isinstance(mk, dict) and "usage" in mk:
+                        usage = mk.get("usage", {})
+
+                # Persist usage if available
+                if usage and self._project and self._dialog_id:
+                    prompt_val = usage.get("prompt_tokens")
+                    if prompt_val is None:
+                        prompt_val = usage.get("input_tokens")
+                    completion_val = usage.get("completion_tokens")
+                    if completion_val is None:
+                        completion_val = usage.get("output_tokens")
+                    DialogUsageStorage(self._project, self._dialog_id).upsert(
+                        prompt_tokens=prompt_val,
+                        completion_tokens=completion_val,
+                        total_tokens=usage.get("total_tokens"),
+                        model_name=self.llm_provider.get_model_name(),
+                    )
+            except Exception as e:
+                agent_logger.error(
+                    "Failed to persist usage",
+                    exc_info=True,
+                    error=str(e),
+                    dialog_id=self._dialog_id,
+                )
             tool_calls = getattr(response, "tool_calls", [])
             agent_logger.info("LLM response", has_tool_calls=bool(tool_calls))
 
@@ -90,19 +361,27 @@ class ToolExecutor:
                 if not name:
                     continue
                 result = await self.tool_manager.run_tool(name, **args)
-                aggregated_tool_results.append({"name": name, "result": result})
-                aggregated_tool_calls.append({"name": name, "args": args})
+                # Check if tool output should be aggregated/persisted
+                is_ephemeral = self._is_ephemeral_tool(name)
+                if not is_ephemeral:
+                    aggregated_tool_results.append({"name": name, "result": result})
+                    aggregated_tool_calls.append({"name": name, "args": args})
 
-                # Append ToolMessage with serialized result back to model
-                tool_message = ToolMessage(
-                    content=json.dumps(result, ensure_ascii=False),
-                    tool_call_id=call.get("id", ""),
+                # Store result and create reference
+                tool_call_id = call.get("id", "") or f"call_{uuid.uuid4().hex[:8]}"
+
+                tool_message, is_ephemeral = await self._build_tool_message(
+                    tool_call_id, name, args, result
                 )
+                # Persist to history only if non-ephemeral and storage path built with reference
+                if not is_ephemeral and self._tool_results_storage:
+                    self._append_tool_message_to_history(tool_message)
+
                 conversation.append(tool_message)
 
     async def _process_streaming(
         self, messages: list[BaseMessage]
-    ) -> AsyncGenerator[Any, None]:
+    ) -> AsyncGenerator[Any]:
         """Streaming loop: emit content chunks and tool results as they happen."""
         bound_llm = self._bind_tools()
         conversation: list[BaseMessage] = list(messages)
@@ -119,7 +398,34 @@ class ToolExecutor:
             chat_started = False
             reasoning_started = False
 
-            async for chunk in bound_llm.astream(conversation):
+            last_usage: dict[str, Any] | None = None
+            # Require usage in stream; if unsupported, fail fast to surface misconfig
+            try:
+                stream_iter = bound_llm.astream(conversation, stream_usage=True)
+            except TypeError as e:
+                error_msg = "LangChain/OpenAI client does not support stream_usage=True; upgrade dependencies or switch model family"
+                agent_logger.error(error_msg, exc_info=True, error=str(e))
+                yield {"type": "error", "error": error_msg}
+                return
+            async for chunk in stream_iter:
+                # Capture usage tokens if provider exposes them on chunks
+                try:
+                    add = getattr(chunk, "additional_kwargs", {}) or {}
+                    if isinstance(add, dict) and add.get("usage"):
+                        maybeu = add.get("usage")
+                        if isinstance(maybeu, dict):
+                            last_usage = maybeu
+                    meta = getattr(chunk, "response_metadata", {}) or {}
+                    if isinstance(meta, dict) and meta.get("token_usage"):
+                        maybeu2 = meta.get("token_usage")
+                        if isinstance(maybeu2, dict):
+                            last_usage = maybeu2
+                    # Prefer direct usage_metadata if LC provides it (final chunk)
+                    um = getattr(chunk, "usage_metadata", None)
+                    if isinstance(um, dict) and um:
+                        last_usage = um
+                except Exception:
+                    pass
                 # Try to extract reasoning from provider-specific metadata (minimal and robust)
                 try:
                     additional_kwargs = getattr(chunk, "additional_kwargs", {}) or {}
@@ -257,14 +563,77 @@ class ToolExecutor:
 
             # If no tool calls, we're done
             if not accumulated_tool_calls:
+                # Persist usage snapshot if present
+                try:
+                    if last_usage and self._project and self._dialog_id:
+                        # Normalize keys across families (gpt-5: input/output, chat: prompt/completion)
+                        prompt_val = last_usage.get("prompt_tokens")
+                        if prompt_val is None:
+                            prompt_val = last_usage.get("input_tokens")
+                        completion_val = last_usage.get("completion_tokens")
+                        if completion_val is None:
+                            completion_val = last_usage.get("output_tokens")
+                        DialogUsageStorage(self._project, self._dialog_id).upsert(
+                            prompt_tokens=prompt_val,
+                            completion_tokens=completion_val,
+                            total_tokens=last_usage.get("total_tokens"),
+                            model_name=self.llm_provider.get_model_name(),
+                        )
+                except Exception as e:
+                    agent_logger.error(
+                        "Failed to persist usage (streaming)",
+                        exc_info=True,
+                        error=str(e),
+                        dialog_id=self._dialog_id,
+                    )
                 # Stream might have already yielded all content chunks
                 break
 
             # Create AI message with tool calls for conversation history
             from langchain_core.messages import AIMessage
 
-            ai_message = AIMessage(content=accumulated_content or "")
-            ai_message.tool_calls = []
+            # Build tool_calls payload; require provider-supplied IDs
+            tool_calls_payload = []
+            for tool_call in accumulated_tool_calls:
+                name_preview = tool_call.get("name", "")
+                try:
+                    args_preview = json.loads(tool_call.get("args", "{}") or "{}")
+                except Exception:
+                    args_preview = {}
+                call_id = tool_call.get("id", "")
+                if not call_id:
+                    # If the provider hasn't supplied an id, skip this call to avoid API mismatch
+                    agent_logger.error(
+                        "Missing tool_call id in streamed chunks; skipping call",
+                        tool_name=name_preview,
+                    )
+                    continue
+                tool_calls_payload.append(
+                    {
+                        "name": name_preview,
+                        "args": args_preview,
+                        "id": call_id,
+                    }
+                )
+
+            # Create AI message with tool_calls set at construction
+            ai_message = AIMessage(
+                content=accumulated_content or "", tool_calls=tool_calls_payload
+            )
+            # Ensure tool_calls are also present in additional_kwargs for SQL history round-trip
+            try:
+                existing_kwargs = dict(
+                    getattr(ai_message, "additional_kwargs", {}) or {}
+                )
+                existing_kwargs["tool_calls"] = tool_calls_payload
+                ai_message.additional_kwargs = existing_kwargs
+            except Exception:
+                pass
+
+            # Append the assistant tool-call message BEFORE tool outputs
+            conversation.append(ai_message)
+            # Persist AI tool_calls message to history for next turns
+            self._append_ai_message_with_tool_calls_to_history(ai_message)
 
             # Execute tools and stream results
             for tool_call in accumulated_tool_calls:
@@ -283,16 +652,12 @@ class ToolExecutor:
                     if not name:
                         continue
 
-                    # Add to AI message for history
-                    ai_message.tool_calls.append(
-                        {"name": name, "args": args, "id": tool_id}
-                    )
-
                     # Emit tool_call as a structured chunk
                     yield {"type": "tool_call", "name": name, "args": args}
 
                     # Execute tool
                     result = await self.tool_manager.run_tool(name, **args)
+                    is_ephemeral = self._is_ephemeral_tool(name)
 
                     # Immediately yield file_edit in the same stream if tool produced a file change
                     if isinstance(result, dict) and result.get("type") in {
@@ -312,11 +677,18 @@ class ToolExecutor:
                                 "checkpoint": checkpoint,
                             }
 
-                    # Add tool message to conversation
-                    tool_message = ToolMessage(
-                        content=json.dumps(result, ensure_ascii=False),
-                        tool_call_id=tool_id,
+                    # Store result and create reference (tool_id must be present)
+                    if not tool_id:
+                        raise RuntimeError(
+                            "Missing tool_call id; cannot attach tool output"
+                        )
+
+                    tool_message, is_ephemeral = await self._build_tool_message(
+                        tool_id, name, args, result
                     )
+                    if not is_ephemeral and self._tool_results_storage:
+                        self._append_tool_message_to_history(tool_message)
+
                     conversation.append(tool_message)
 
                 except json.JSONDecodeError as e:
@@ -330,5 +702,4 @@ class ToolExecutor:
                     yield {"type": "error", "error": error_msg}
                     return
 
-            # Add AI message with tool calls to conversation
-            conversation.append(ai_message)
+            # Assistant message already appended above

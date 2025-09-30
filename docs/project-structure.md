@@ -15,7 +15,7 @@ Contents of `.agentsmithy`:
 
 ### Dialogs (MVP)
 
-User/assistant conversation logs are stored per-dialog under `.agentsmithy/dialogs/<dialog_id>/`.
+User/assistant conversation logs are stored in a SQLite database.
 
 - `.agentsmithy/dialogs/index.json` — registry of dialogs:
   - `current_dialog_id`: string | null
@@ -24,10 +24,12 @@ User/assistant conversation logs are stored per-dialog under `.agentsmithy/dialo
     - `title`: string | null
     - `created_at`: ISO timestamp
     - `updated_at`: ISO timestamp
-    - `last_message_at`: ISO timestamp | null
 
-- `.agentsmithy/dialogs/<dialog_id>/messages.jsonl` — line-delimited JSON, one message per line:
-  - `{"role":"user|assistant", "content":"...", "ts":"2025-08-21T12:34:56Z"}`
+- Inspector journal: `.agentsmithy/dialogs/journal.sqlite` — SQLite database used by the project inspector and global tasks
+  - Messages are stored using LangChain's SQLChatMessageHistory (session_id = `inspector`)
+- Per-dialog journals: `.agentsmithy/dialogs/<dialog_id>/journal.sqlite` — SQLite database for each dialog
+  - Messages are stored using LangChain's SQLChatMessageHistory
+  - Tool results are stored in the `tool_results` table (SQLAlchemy ORM). Tables are created automatically on first use; external migrations are not required.
 
 On first startup (or first chat), if no dialogs exist, a default dialog is created and set current.
 

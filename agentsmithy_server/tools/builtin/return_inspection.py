@@ -4,7 +4,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from .base_tool import BaseTool
+from ..base_tool import BaseTool
 
 
 class ReturnInspectionArgs(BaseModel):
@@ -19,7 +19,7 @@ class ReturnInspectionArgs(BaseModel):
     )
 
 
-class ReturnInspectionTool(BaseTool):  # type: ignore[override]
+class ReturnInspectionTool(BaseTool):
     name: str = "return_inspection"
     description: str = (
         "Finalize and return the strict JSON analysis of the project. MUST be called once."

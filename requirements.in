@@ -1,0 +1,40 @@
+# Core dependencies
+fastapi
+uvicorn[standard]
+sse-starlette
+python-multipart
+
+# LangChain and LangGraph
+langchain
+langchain-openai
+langchain-community
+langchain-core
+langgraph
+langchain-text-splitters
+SQLAlchemy
+
+# RAG and Vector Store
+langchain-chroma
+chromadb
+posthog
+tiktoken
+
+# Utils
+python-dotenv
+pydantic
+pydantic-settings
+dulwich
+structlog
+
+# Web Search
+duckduckgo-search
+
+# Web rendering (mandatory)
+playwright
+
+# Development
+pytest
+pytest-asyncio
+black
+isort
+aiohttp

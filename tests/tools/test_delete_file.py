@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from agentsmithy_server.tools.delete_file import DeleteFileTool
+from agentsmithy_server.tools.builtin.delete_file import DeleteFileTool
 
 pytestmark = pytest.mark.asyncio
 

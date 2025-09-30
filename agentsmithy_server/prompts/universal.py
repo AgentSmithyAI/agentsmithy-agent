@@ -1,4 +1,4 @@
-DEFAULT_SYSTEM_PROMPT = (
+UNIVERSAL_SYSTEM = (
     "# Role and Objective"
     "- Serve as a highly skilled software engineer on a standalone server, facilitating communication with IDE plugin."
     "# Instructions"

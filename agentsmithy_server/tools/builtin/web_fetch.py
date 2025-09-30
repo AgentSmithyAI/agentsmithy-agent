@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field, HttpUrl
 
 from agentsmithy_server.config import settings
 
-from .base_tool import BaseTool
+from ..base_tool import BaseTool
 
 
 class WebFetchArgs(BaseModel):
@@ -17,7 +17,7 @@ class WebFetchArgs(BaseModel):
     )
 
 
-class WebFetchTool(BaseTool):  # type: ignore[override]
+class WebFetchTool(BaseTool):
     name: str = "web_fetch"
     description: str = (
         "Fetch a web page with a minimal API. Uses fast HTTP fetch first, and falls back "

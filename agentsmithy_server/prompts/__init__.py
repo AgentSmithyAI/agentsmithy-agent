@@ -1,12 +1,13 @@
-"""Prompt templates and utilities for the agent.
+"""Prompt templates and utilities.
 
-Centralizes the system prompt, enforcement message, and shared constants.
+Naming: files and symbols are named per agent for clarity.
 """
 
-from .constants import MODIFICATION_KEYWORDS
-from .system_prompt import DEFAULT_SYSTEM_PROMPT
+from .inspector import INSPECTOR_SYSTEM, build_inspector_human
+from .universal import UNIVERSAL_SYSTEM
 
 __all__ = [
-    "DEFAULT_SYSTEM_PROMPT",
-    "MODIFICATION_KEYWORDS",
+    "UNIVERSAL_SYSTEM",
+    "INSPECTOR_SYSTEM",
+    "build_inspector_human",
 ]

@@ -9,6 +9,7 @@ from langchain_core.tools import BaseTool
 from langchain_openai import ChatOpenAI
 
 from agentsmithy_server.config import settings
+from agentsmithy_server.core.providers.openai_init import build_openai_langchain_kwargs
 from agentsmithy_server.utils.logger import agent_logger
 
 
@@ -64,53 +65,12 @@ class OpenAIProvider(LLMProvider):
             max_tokens=self.max_tokens,
         )
 
-        # Build extra provider-specific kwargs (e.g., GPT-5 reasoning controls)
-        extra_model_kwargs: dict[str, Any] = {}
-        # Pass GPT-5 reasoning controls only for GPT-5 models
-        if isinstance(self.model, str) and self.model.startswith("gpt-5"):
-            reasoning_kwargs: dict[str, Any] = {}
-            # Always request a reasoning summary; default to 'auto' if not configured
-            verbosity = getattr(settings, "reasoning_verbosity", None) or "auto"
-            reasoning_kwargs["summary"] = verbosity
-            # Include effort if configured
-            effort = getattr(settings, "reasoning_effort", None)
-            if effort:
-                reasoning_kwargs["effort"] = effort
-            extra_model_kwargs["reasoning"] = reasoning_kwargs
-
-        # Determine whether to include temperature (unsupported on some models like gpt-5)
-        def _supports_temperature(model_name: str) -> bool:
-            try:
-                # Disallow temperature for GPT-5 family (Responses API rejects it)
-                if model_name.startswith("gpt-5"):
-                    return False
-            except Exception:
-                pass
-            return True
-
-        # Assemble ChatOpenAI kwargs conditionally
-        base_kwargs: dict[str, Any] = {
-            "model": self.model,
-            "streaming": True,
-        }
-        if _supports_temperature(self.model) and self.temperature is not None:
-            base_kwargs["temperature"] = self.temperature
-        # Route token limit to correct parameter depending on model family
-        if isinstance(self.model, str) and self.model.startswith("gpt-5"):
-            # Responses API expects max_output_tokens
-            extra_model_kwargs["max_output_tokens"] = self.max_tokens
-        else:
-            base_kwargs["max_tokens"] = self.max_tokens
-        if extra_model_kwargs:
-            try:
-                agent_logger.debug(
-                    "OpenAI ChatOpenAI model_kwargs",
-                    model=self.model,
-                    model_kwargs=extra_model_kwargs,
-                )
-            except Exception:
-                pass
-            base_kwargs["model_kwargs"] = extra_model_kwargs
+        # Base kwargs split to allow per-family specialization
+        base_kwargs, model_kwargs = build_openai_langchain_kwargs(
+            self.model, self.temperature, self.max_tokens
+        )
+        if model_kwargs:
+            base_kwargs["model_kwargs"] = model_kwargs
 
         # Initialize LLM; use explicit API key if provided
         if self.api_key:
@@ -134,6 +94,9 @@ class OpenAIProvider(LLMProvider):
                 pass
             self.llm = ChatOpenAI(**base_kwargs)
 
+        # Track last observed usage in streaming mode
+        self._last_usage: dict[str, Any] | None = None
+
     async def agenerate(
         self, messages: list[BaseMessage], stream: bool = False, **kwargs
     ) -> AsyncIterator[str | dict[str, Any]] | str:
@@ -155,21 +118,29 @@ class OpenAIProvider(LLMProvider):
         async for chunk in self.llm.astream(messages, **kwargs):
             content = getattr(chunk, "content", None)
             if isinstance(content, str) and content:
-                # Attach metadata if SDK provides it
-                try:
-                    response_meta = {
-                        "response_metadata": getattr(chunk, "response_metadata", {})
-                        or {},
-                        "additional_kwargs": getattr(chunk, "additional_kwargs", {})
-                        or {},
-                    }
-                except Exception:
-                    response_meta = {}
+                yield {"type": "chat", "content": content}
 
-                if response_meta and any(response_meta.values()):
-                    yield {"content": content, "metadata": response_meta}
-                else:
-                    yield content
+            # Track usage information from chunks
+            try:
+                # Check for usage in various locations where providers might put it
+                usage = None
+                add = getattr(chunk, "additional_kwargs", {}) or {}
+                if isinstance(add, dict) and add.get("usage"):
+                    usage = add.get("usage")
+
+                meta = getattr(chunk, "response_metadata", {}) or {}
+                if not usage and isinstance(meta, dict) and meta.get("token_usage"):
+                    usage = meta.get("token_usage")
+
+                # Direct usage_metadata attribute (preferred)
+                um = getattr(chunk, "usage_metadata", None)
+                if isinstance(um, dict) and um:
+                    usage = um
+
+                if usage:
+                    self._last_usage = usage
+            except Exception:
+                pass
 
     def get_model_name(self) -> str:
         """Get the model name."""
@@ -179,6 +150,10 @@ class OpenAIProvider(LLMProvider):
         """Bind tools to the LLM for function calling."""
         # Return a tool-bound runnable/LLM as provided by SDK
         return self.llm.bind_tools(tools)
+
+    def get_last_usage(self) -> dict[str, Any] | None:
+        """Return last observed usage from streaming; may be None if unavailable."""
+        return self._last_usage
 
 
 class LLMFactory:

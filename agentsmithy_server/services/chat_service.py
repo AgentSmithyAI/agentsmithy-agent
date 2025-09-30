@@ -6,12 +6,15 @@ This service centralizes streaming/non-streaming chat logic so routers remain th
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import AsyncIterator
 from typing import Any
 
 from agentsmithy_server.api.sse_protocol import EventFactory as SSEEventFactory
 from agentsmithy_server.core.agent_graph import AgentOrchestrator
-from agentsmithy_server.utils.logger import api_logger
+from agentsmithy_server.core.dialog_summary_storage import DialogSummaryStorage
+from agentsmithy_server.core.summarization.strategy import KEEP_LAST_MESSAGES
+from agentsmithy_server.utils.logger import api_logger, stream_log
 
 
 class StreamAbortError(Exception):
@@ -23,6 +26,29 @@ class ChatService:
         self._orchestrator: AgentOrchestrator | None = None
         self._active_streams: set[asyncio.Task] = set()
         self._shutdown_event: asyncio.Event | None = None
+
+    def _flush_assistant_buffer(
+        self,
+        project_dialog: tuple[Any, str] | None,
+        dialog_id: str | None,
+        assistant_buffer: list[str],
+    ) -> None:
+        """Persist accumulated assistant text to dialog history (best-effort)."""
+        try:
+            if assistant_buffer and project_dialog:
+                project_obj, pdialog_id = project_dialog
+                target_dialog_id = dialog_id or pdialog_id
+                if target_dialog_id and hasattr(project_obj, "get_dialog_history"):
+                    history = project_obj.get_dialog_history(target_dialog_id)
+                    content = "".join(assistant_buffer)
+                    if content:
+                        history.add_ai_message(content)
+        except Exception as e:
+            api_logger.error(
+                "Failed to append assistant message (stream)",
+                exc_info=True,
+                error=str(e),
+            )
 
     def _get_orchestrator(self) -> AgentOrchestrator:
         if self._orchestrator is None:
@@ -52,7 +78,6 @@ class ChatService:
         if isinstance(chunk, dict) and chunk.get("type") in {
             "file_edit",
             "tool_call",
-            # "search",  # deprecated: no longer emitted as SSE
             "error",
             "chat",
             "reasoning",
@@ -60,6 +85,8 @@ class ChatService:
             "chat_end",
             "reasoning_start",
             "reasoning_end",
+            "summary_start",
+            "summary_end",
         }:
             if chunk["type"] == "chat":
                 content = chunk.get("content", "")
@@ -82,6 +109,10 @@ class ChatService:
                 yield SSEEventFactory.reasoning_start(dialog_id=dialog_id).to_sse()
             elif chunk["type"] == "reasoning_end":
                 yield SSEEventFactory.reasoning_end(dialog_id=dialog_id).to_sse()
+            elif chunk["type"] == "summary_start":
+                yield SSEEventFactory.summary_start(dialog_id=dialog_id).to_sse()
+            elif chunk["type"] == "summary_end":
+                yield SSEEventFactory.summary_end(dialog_id=dialog_id).to_sse()
             elif chunk["type"] == "file_edit":
                 yield SSEEventFactory.file_edit(
                     file=chunk.get("file", ""),
@@ -95,8 +126,6 @@ class ChatService:
                     args=chunk.get("args", {}),
                     dialog_id=dialog_id,
                 ).to_sse()
-            # elif chunk["type"] == "search":
-            #     pass  # ignore deprecated search event if any legacy tool emits it
             else:
                 # Emit error and signal abort
                 yield SSEEventFactory.error(
@@ -144,16 +173,69 @@ class ChatService:
                     sse = SSEEventFactory.error(
                         message=tool_event.get("error", ""), dialog_id=dialog_id
                     ).to_sse()
-                # elif tool_event.get("type") == "search":
-                #     continue  # ignore deprecated search event
                 else:
                     sse = SSEEventFactory.chat(
                         content=str(tool_event), dialog_id=dialog_id
                     ).to_sse()
-                api_logger.stream_log("tool_event", None)
+                stream_log(api_logger, "tool_event", None)
                 sse_events.append(sse)
 
         return sse_events
+
+    def _append_user_and_prepare_context(
+        self,
+        query: str,
+        context: dict[str, Any] | None,
+        dialog_id: str | None,
+        project: Any | None,
+    ) -> dict[str, Any]:
+        """Append user message and enrich context with dialog history (with summary support)."""
+        ctx: dict[str, Any] = dict(context or {})
+        if not project or not dialog_id:
+            return ctx
+
+        try:
+            history = project.get_dialog_history(dialog_id)
+            history.add_user_message(query)
+        except Exception as e:
+            api_logger.error(
+                "Failed to append user message", exc_info=True, error=str(e)
+            )
+
+        # Load history; use persisted summary when present
+        messages = []
+        summary_text = None
+        try:
+            # Try persisted summary to decide whether to load only tail K
+            try:
+                storage = DialogSummaryStorage(project, dialog_id)
+                stored = storage.load()
+            except Exception:
+                stored = None
+
+            if stored:
+                tail_k = KEEP_LAST_MESSAGES
+                messages = history.get_messages(limit=tail_k)
+                summary_text = stored.summary_text
+                api_logger.info(
+                    "Context prepared with persisted summary",
+                    dialog_id=dialog_id,
+                    tail_k=tail_k,
+                    summarized_count=stored.summarized_count,
+                )
+            else:
+                messages = history.get_messages()
+        except Exception as e:
+            api_logger.error(
+                "Failed to load dialog history", exc_info=True, error=str(e)
+            )
+
+        ctx["dialog"] = {"id": dialog_id, "messages": messages}
+        if summary_text:
+            ctx["dialog_summary"] = summary_text
+        # Add project reference for tool results storage
+        ctx["project"] = project
+        return ctx
 
     async def stream_chat(
         self,
@@ -180,6 +262,12 @@ class ChatService:
 
         try:
             api_logger.debug("Processing request with orchestrator", streaming=True)
+            # Centralize history: append user and inject dialog messages into context
+            if project_dialog:
+                project_obj, pdialog_id = project_dialog
+                context = self._append_user_and_prepare_context(
+                    query, context, dialog_id or pdialog_id, project_obj
+                )
             result = await orchestrator.process_request(
                 query=query, context=context, stream=True
             )
@@ -193,6 +281,10 @@ class ChatService:
                 # Check for shutdown signal
                 if self._shutdown_event and self._shutdown_event.is_set():
                     api_logger.info("Shutdown detected, terminating stream")
+                    # Flush any accumulated assistant content before exit
+                    self._flush_assistant_buffer(
+                        project_dialog, dialog_id, assistant_buffer
+                    )
                     yield SSEEventFactory.error(
                         message="Server is shutting down", dialog_id=dialog_id
                     ).to_sse()
@@ -218,12 +310,20 @@ class ChatService:
                                     chunk, dialog_id, assistant_buffer
                                 ):
                                     yield sse_event
-                                api_logger.stream_log(
-                                    "processed_chunk", None, chunk_number=chunk_count
+                                stream_log(
+                                    api_logger,
+                                    "processed_chunk",
+                                    None,
+                                    chunk_number=chunk_count,
                                 )
                             except StreamAbortError:
+                                # Flush buffer before terminating
+                                self._flush_assistant_buffer(
+                                    project_dialog, dialog_id, assistant_buffer
+                                )
                                 yield SSEEventFactory.done(dialog_id=dialog_id).to_sse()
                                 return
+                        # Usage persisted inside ToolExecutor now; nothing to do here
                         api_logger.info(f"Finished streaming {chunk_count} chunks")
                     else:
                         try:
@@ -232,7 +332,12 @@ class ChatService:
                             ):
                                 yield sse_event
                         except StreamAbortError:
-                            pass
+                            # Flush buffer before terminating
+                            self._flush_assistant_buffer(
+                                project_dialog, dialog_id, assistant_buffer
+                            )
+                            yield SSEEventFactory.done(dialog_id=dialog_id).to_sse()
+                            return
 
                 for key in state.keys():
                     if key.endswith("_agent") and state[key] and key != "response":
@@ -252,6 +357,10 @@ class ChatService:
                                         ):
                                             yield sse_event
                                     except StreamAbortError:
+                                        # Flush buffer before terminating
+                                        self._flush_assistant_buffer(
+                                            project_dialog, dialog_id, assistant_buffer
+                                        )
                                         yield SSEEventFactory.done(
                                             dialog_id=dialog_id
                                         ).to_sse()
@@ -289,21 +398,34 @@ class ChatService:
                                         ):
                                             yield sse_event
                                     except StreamAbortError:
-                                        pass
+                                        # Flush buffer before terminating
+                                        self._flush_assistant_buffer(
+                                            project_dialog, dialog_id, assistant_buffer
+                                        )
+                                        yield SSEEventFactory.done(
+                                            dialog_id=dialog_id
+                                        ).to_sse()
+                                        return
 
-            # Persist handled by router after buffer is returned via closure
+            # Persist streamed assistant text to dialog history (if available)
+            self._flush_assistant_buffer(project_dialog, dialog_id, assistant_buffer)
+
             api_logger.info("SSE generation completed", total_events=event_count)
             yield SSEEventFactory.done(dialog_id=dialog_id).to_sse()
 
         except asyncio.CancelledError:
             api_logger.info("Stream cancelled due to shutdown")
+            # Flush buffer before exit
+            self._flush_assistant_buffer(project_dialog, dialog_id, assistant_buffer)
             yield SSEEventFactory.error(
                 message="Request cancelled due to server shutdown", dialog_id=dialog_id
             ).to_sse()
             yield SSEEventFactory.done(dialog_id=dialog_id).to_sse()
             raise
         except Exception as e:
-            api_logger.error("Error in SSE generation", exception=e)
+            api_logger.error("Error in SSE generation", exc_info=True, error=str(e))
+            # Flush buffer on error before signaling done
+            self._flush_assistant_buffer(project_dialog, dialog_id, assistant_buffer)
             error_msg = f"Error processing request: {str(e)}"
             api_logger.error(f"Yielding error event: {error_msg}")
             yield SSEEventFactory.error(message=error_msg, dialog_id=dialog_id).to_sse()
@@ -313,8 +435,125 @@ class ChatService:
             if current_task and current_task in self._active_streams:
                 self._active_streams.discard(current_task)
 
-    async def chat(self, query: str, context: dict[str, Any]) -> dict[str, Any]:
+    async def chat(
+        self,
+        query: str,
+        context: dict[str, Any],
+        dialog_id: str | None = None,
+        project: Any | None = None,
+    ) -> dict[str, Any]:
         orchestrator = self._get_orchestrator()
-        return await orchestrator.process_request(
+        # Centralize history: append user and inject dialog messages into context
+        context = self._append_user_and_prepare_context(
+            query, context, dialog_id, project
+        )
+        result = await orchestrator.process_request(
             query=query, context=context, stream=False
         )
+
+        # Persist non-streaming assistant/tool messages
+        try:
+            if project and dialog_id:
+                history = project.get_dialog_history(dialog_id)
+                assistant_text = ""
+                resp = result.get("response")
+                conversation = []
+
+                if isinstance(resp, str):
+                    assistant_text = resp
+                elif isinstance(resp, dict):
+                    assistant_text = str(
+                        resp.get("content") or resp.get("explanation") or ""
+                    )
+                    conversation = resp.get("conversation", [])
+
+                if conversation:
+                    # Build map of non-ephemeral tool_call_ids by inspecting ToolMessage-like entries
+                    non_ephemeral_ids: set[str] = set()
+                    for msg in conversation:
+                        try:
+                            tool_call_id = getattr(msg, "tool_call_id", None)
+                            if isinstance(tool_call_id, str) and tool_call_id:
+                                content = getattr(msg, "content", None)
+                                if isinstance(content, str):
+                                    try:
+                                        parsed = json.loads(content)
+                                    except Exception:
+                                        parsed = None
+                                    if isinstance(parsed, dict) and parsed.get(
+                                        "result_ref"
+                                    ):
+                                        non_ephemeral_ids.add(tool_call_id)
+                        except Exception:
+                            # Best-effort; if parsing fails, treat as ephemeral by omission
+                            pass
+
+                    # Persist only AI messages with filtered tool_calls; skip ToolMessage entirely
+                    for msg in conversation:
+                        try:
+                            tool_calls = getattr(msg, "tool_calls", None)
+                        except Exception:
+                            tool_calls = None
+
+                        if tool_calls:
+                            # Filter out ephemeral tool calls by checking for corresponding non-ephemeral ToolMessage ids
+                            filtered_calls = []
+                            for tc in (
+                                list(tool_calls) if isinstance(tool_calls, list) else []
+                            ):
+                                try:
+                                    tc_id = (
+                                        tc.get("id")
+                                        if isinstance(tc, dict)
+                                        else getattr(tc, "id", "")
+                                    )
+                                except Exception:
+                                    tc_id = ""
+                                if tc_id and tc_id in non_ephemeral_ids:
+                                    filtered_calls.append(tc)
+
+                            try:
+                                from langchain_core.messages import (
+                                    AIMessage,
+                                )
+
+                                persisted = AIMessage(
+                                    content=getattr(msg, "content", ""),
+                                    tool_calls=filtered_calls,
+                                )
+                                try:
+                                    existing_kwargs = dict(
+                                        getattr(msg, "additional_kwargs", {}) or {}
+                                    )
+                                    existing_kwargs["tool_calls"] = filtered_calls
+                                    persisted.additional_kwargs = existing_kwargs
+                                except Exception:
+                                    pass
+                                history.add_message(persisted)
+                            except Exception:
+                                # Fallback to original message if AIMessage construction fails
+                                history.add_message(msg)
+                        else:
+                            # Skip ToolMessage (has tool_call_id) to avoid storing inline results
+                            if hasattr(msg, "tool_call_id") and getattr(
+                                msg, "tool_call_id", None
+                            ):
+                                continue
+                            # Other message types are ignored here
+
+                if assistant_text:
+                    conv_contents = (
+                        [getattr(m, "content", "") for m in conversation]
+                        if conversation
+                        else []
+                    )
+                    if assistant_text not in conv_contents:
+                        history.add_ai_message(assistant_text)
+        except Exception as e:
+            api_logger.error(
+                "Failed to append assistant message (non-stream)",
+                exc_info=True,
+                error=str(e),
+            )
+
+        return result

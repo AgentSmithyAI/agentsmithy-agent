@@ -16,7 +16,7 @@ router = APIRouter()
 
 @router.get("/api/dialogs")
 async def list_dialogs(
-    sort: str = "last_message_at",
+    sort: str = "updated_at",
     order: str = "desc",
     limit: int | None = 50,
     offset: int = 0,

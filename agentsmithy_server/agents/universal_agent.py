@@ -1,12 +1,16 @@
 """Universal agent that handles all types of requests."""
 
+from __future__ import annotations
+
 from typing import Any
 
-from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+from langchain_core.messages import BaseMessage
 
 from agentsmithy_server.agents.base_agent import BaseAgent
-from agentsmithy_server.prompts import DEFAULT_SYSTEM_PROMPT
-from agentsmithy_server.tools import ToolExecutor, ToolFactory
+from agentsmithy_server.core.dialog_usage_storage import DialogUsageStorage
+from agentsmithy_server.prompts import UNIVERSAL_SYSTEM
+from agentsmithy_server.tools import ToolExecutor
+from agentsmithy_server.tools.build_registry import build_registry
 from agentsmithy_server.utils.logger import agent_logger
 
 
@@ -17,7 +21,7 @@ class UniversalAgent(BaseAgent):
         super().__init__(*args, **kwargs)
 
         # Initialize tool manager with default tools
-        self.tool_manager = ToolFactory.create_tool_manager()
+        self.tool_manager = build_registry()
 
         # Initialize tool executor
         self.tool_executor = ToolExecutor(self.tool_manager, self.llm_provider)
@@ -31,124 +35,19 @@ class UniversalAgent(BaseAgent):
         self.tool_executor.set_sse_callback(callback)
 
     def get_default_system_prompt(self) -> str:
-        return DEFAULT_SYSTEM_PROMPT
+        return UNIVERSAL_SYSTEM
 
     def get_agent_name(self) -> str:
         return "universal_agent"
 
     def _prepare_messages(
-        self, query: str, context: dict[str, Any]
+        self,
+        query: str,
+        context: dict[str, Any],
+        load_tool_results: bool | list[str] = False,
     ) -> list[BaseMessage]:
-        """Prepare messages for LLM with enhanced edit block enforcement."""
-
-        messages: list[BaseMessage] = [SystemMessage(content=self.system_prompt)]
-
-        # Add dialog history as actual messages (not as context text)
-        if context and context.get("dialog") and context["dialog"].get("messages"):
-            from langchain_core.messages import AIMessage
-
-            dialog_messages = context["dialog"]["messages"]
-
-            # Add historical messages
-            for msg in dialog_messages:
-                # If it's already a BaseMessage object, just add it
-                if hasattr(msg, "content") and hasattr(msg, "type"):
-                    messages.append(msg)
-                # Otherwise convert from dict (backward compatibility)
-                elif isinstance(msg, dict):
-                    if msg.get("role") == "user":
-                        messages.append(HumanMessage(content=msg["content"]))
-                    elif msg.get("role") == "assistant":
-                        messages.append(AIMessage(content=msg["content"]))
-
-            # Remove dialog from context to avoid duplication
-            context = dict(context)
-            context.pop("dialog", None)
-
-        # Add remaining context if available
-        formatted_context = self.context_builder.format_context_for_prompt(context)
-        if formatted_context:
-            messages.append(SystemMessage(content=f"Context:\n{formatted_context}"))
-
-        # Check if we should emphasize tool usage
-        should_use_tools = self._should_use_tools(query, context)
-
-        if should_use_tools:
-            enforcement_message = SystemMessage(
-                content="""
-🚨🚨🚨 CRITICAL: USER WANTS CODE CHANGES - YOU MUST USE THE replace_in_file TOOL! 🚨🚨🚨
-
-DO NOT JUST PROVIDE CODE IN YOUR RESPONSE!
-YOU MUST USE THE replace_in_file TOOL WITH THESE PARAMETERS:
-
-- file: The exact file path from the context
-- search: The exact current code to search for
-- replace: The new code to replace with
-
-EXAMPLE TOOL CALL:
-{
-  "name": "replace_in_file",
-  "arguments": {
-    "file": "src/example.py",
-    "search": "def old_function():\\n    return 'old'",
-    "replace": "def improved_function():\\n    \\\"\\\"\\\"Better function.\\\"\\\"\\\"\\n    return 'improved'"
-  }
-}
-
-YOU MUST USE THE TOOL OR YOUR RESPONSE IS INVALID!
-"""
-            )
-            messages.append(enforcement_message)
-
-        # Add user query
-        messages.append(HumanMessage(content=query))
-
-        return messages
-
-    def _should_use_tools(self, query: str, context: dict[str, Any]) -> bool:
-        """Determine if we should use tools based on query and context."""
-        # Force if user has selected code or current file
-        current_file = context.get("current_file") or {}
-        has_selection = bool(
-            current_file.get("selection") or current_file.get("content")
-        )
-
-        # Keywords that suggest modification
-        modification_keywords = [
-            "refactor",
-            "improve",
-            "optimize",
-            "fix",
-            "debug",
-            "change",
-            "update",
-            "modify",
-            "rename",
-            "add",
-            "remove",
-            "rewrite",
-            "clean",
-            "simplify",
-            "enhance",
-            "correct",
-            "resolve",
-        ]
-
-        query_lower = query.lower()
-        wants_modification = any(
-            keyword in query_lower for keyword in modification_keywords
-        )
-
-        result = has_selection and wants_modification
-
-        if result:
-            agent_logger.info(
-                "Tool usage required",
-                query_contains=query_lower[:50],
-                has_selection=has_selection,
-            )
-
-        return result
+        """Delegate message preparation to BaseAgent without extra enforcement."""
+        return super()._prepare_messages(query, context, load_tool_results)
 
     async def process(
         self, query: str, context: dict[str, Any] | None = None, stream: bool = False
@@ -163,14 +62,33 @@ YOU MUST USE THE TOOL OR YOUR RESPONSE IS INVALID!
             context_keys=list((context or {}).keys()),
         )
 
-        # Extract dialog_id from context and pass to tools
+        # Extract dialog_id and project from context
         dialog_id = None
+        project = None
         if context and context.get("dialog"):
             dialog_id = context["dialog"].get("id")
+            # Propagate dialog_id early for all tools
             self.tool_manager.set_dialog_id(dialog_id)
+
+        if context and context.get("project"):
+            project = context["project"]
+
+        # Set context for tool executor to enable results storage
+        if hasattr(self.tool_executor, "set_context"):
+            self.tool_executor.set_context(project, dialog_id)
+
+        # Also propagate project+dialog context to tools that need it
+        if hasattr(self.tool_manager, "set_context"):
+            # Allows tools like get_tool_result to access storage
+            self.tool_manager.set_context(project, dialog_id)
 
         # Build context
         full_context = await self.context_builder.build_context(query, context)
+
+        # Preserve the original project object in the full context
+        # as build_context might have serialized it
+        if project:
+            full_context["project"] = project
 
         # Prepare messages
         messages = self._prepare_messages(query, full_context)
@@ -188,6 +106,29 @@ YOU MUST USE THE TOOL OR YOUR RESPONSE IS INVALID!
         else:
             # For non-streaming, use the async method
             result = await self.tool_executor.process_with_tools_async(messages)
+            # Try to persist usage if present in metadata
+            try:
+                dialog_id = (
+                    full_context.get("dialog", {}).get("id")
+                    if isinstance(full_context, dict)
+                    else None
+                )
+                project = (
+                    full_context.get("project")
+                    if isinstance(full_context, dict)
+                    else None
+                )
+                usage = result.get("usage") if isinstance(result, dict) else None
+                if project and dialog_id and usage and hasattr(project, "dialogs_dir"):
+                    storage = DialogUsageStorage(project, dialog_id)
+                    storage.upsert(
+                        prompt_tokens=usage.get("prompt_tokens"),
+                        completion_tokens=usage.get("completion_tokens"),
+                        total_tokens=usage.get("total_tokens"),
+                        model_name=self.llm_provider.get_model_name(),
+                    )
+            except Exception:
+                pass
             return {
                 "agent": self.get_agent_name(),
                 "response": self._format_response(result),

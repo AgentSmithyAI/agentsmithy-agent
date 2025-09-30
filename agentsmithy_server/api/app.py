@@ -9,6 +9,7 @@ from agentsmithy_server.api.routes.chat import router as chat_router
 from agentsmithy_server.api.routes.dialogs import router as dialogs_router
 from agentsmithy_server.api.routes.health import router as health_router
 from agentsmithy_server.api.routes.meta import router as meta_router
+from agentsmithy_server.api.routes.tool_results import router as tool_results_router
 from agentsmithy_server.core.project import get_current_project
 from agentsmithy_server.utils.logger import api_logger
 
@@ -31,20 +32,21 @@ async def lifespan(app: FastAPI):
             set_shutdown_event(app.state.shutdown_event)
             api_logger.info("Shutdown event registered with chat service")
     except Exception as e:
-        api_logger.error("Dialog state init failed", exception=e)
+        api_logger.error("Dialog state init failed", exc_info=True, error=str(e))
 
     yield
 
     # Shutdown: cleanup active streams and resources
     try:
         api_logger.info("Starting shutdown cleanup")
-        from agentsmithy_server.api.deps import get_chat_service
+        from agentsmithy_server.api.deps import dispose_db_engine, get_chat_service
 
         chat_service = get_chat_service()
         await chat_service.shutdown()
+        dispose_db_engine()
         api_logger.info("Chat service shutdown completed")
     except Exception as e:
-        api_logger.error("Shutdown cleanup failed", exception=e)
+        api_logger.error("Shutdown cleanup failed", exc_info=True, error=str(e))
 
 
 def create_app() -> FastAPI:
@@ -63,10 +65,19 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    # Force-create DB engine early to warm up (optional; safe to remove)
+    try:
+        from agentsmithy_server.api.deps import get_db_engine
+
+        _ = get_db_engine()
+    except Exception:
+        pass
+
     app.include_router(chat_router)
     app.include_router(health_router)
     app.include_router(dialogs_router)
     app.include_router(meta_router)
+    app.include_router(tool_results_router)
 
     # Basic error handler example
     @app.middleware("http")

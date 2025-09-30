@@ -5,8 +5,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from .base_tool import BaseTool
-from .file_restrictions import get_file_restrictions
+from ..base_tool import BaseTool
+from ..guards.file_restrictions import get_file_restrictions
 
 
 class ListFilesArgs(BaseModel):
@@ -17,7 +17,7 @@ class ListFilesArgs(BaseModel):
     )
 
 
-class ListFilesTool(BaseTool):  # type: ignore[override]
+class ListFilesTool(BaseTool):
     name: str = "list_files"
     description: str = (
         "List files and directories under a path. Hidden (dot-prefixed) files and"

@@ -4,7 +4,7 @@ import sys
 
 import pytest
 
-from agentsmithy_server.tools.run_command import RunCommandTool
+from agentsmithy_server.tools.builtin.run_command import RunCommandTool
 
 pytestmark = pytest.mark.asyncio
 

@@ -19,6 +19,8 @@ class EventType(str, Enum):
     CHAT_END = "chat_end"
     REASONING_START = "reasoning_start"
     REASONING_END = "reasoning_end"
+    SUMMARY_START = "summary_start"
+    SUMMARY_END = "summary_end"
     TOOL_CALL = "tool_call"
     FILE_EDIT = "file_edit"
     SEARCH = "search"
@@ -71,6 +73,16 @@ class ReasoningStartEvent(BaseEvent):
 @dataclass
 class ReasoningEndEvent(BaseEvent):
     type: Literal[EventType.REASONING_END] = EventType.REASONING_END
+
+
+@dataclass
+class SummaryStartEvent(BaseEvent):
+    type: Literal[EventType.SUMMARY_START] = EventType.SUMMARY_START
+
+
+@dataclass
+class SummaryEndEvent(BaseEvent):
+    type: Literal[EventType.SUMMARY_END] = EventType.SUMMARY_END
 
 
 @dataclass
@@ -132,6 +144,14 @@ class EventFactory:
         return ReasoningEndEvent(dialog_id=dialog_id)
 
     @staticmethod
+    def summary_start(dialog_id: str | None = None) -> SummaryStartEvent:
+        return SummaryStartEvent(dialog_id=dialog_id)
+
+    @staticmethod
+    def summary_end(dialog_id: str | None = None) -> SummaryEndEvent:
+        return SummaryEndEvent(dialog_id=dialog_id)
+
+    @staticmethod
     def tool_call(
         name: str, args: dict[str, Any], dialog_id: str | None = None
     ) -> ToolCallEvent:
@@ -177,6 +197,10 @@ class EventFactory:
             return ReasoningStartEvent(**data)
         if et == EventType.REASONING_END:
             return ReasoningEndEvent(**data)
+        if et == EventType.SUMMARY_START:
+            return SummaryStartEvent(**data)
+        if et == EventType.SUMMARY_END:
+            return SummaryEndEvent(**data)
         if et == EventType.TOOL_CALL:
             return ToolCallEvent(**data)
         if et == EventType.FILE_EDIT:
