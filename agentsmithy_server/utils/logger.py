@@ -19,6 +19,11 @@ def configure_structlog():
     logging.root.addHandler(handler)
     logging.root.setLevel(logging.INFO)
 
+    # Configure HTTP client loggers to use INFO level (will be formatted by structlog)
+    logging.getLogger("httpx").setLevel(logging.INFO)
+    logging.getLogger("openai").setLevel(logging.INFO)
+    logging.getLogger("httpcore").setLevel(logging.INFO)
+
     # Common processors
     processors = [
         structlog.stdlib.add_logger_name,
