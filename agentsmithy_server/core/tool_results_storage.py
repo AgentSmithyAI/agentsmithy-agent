@@ -144,8 +144,20 @@ class ToolResultsStorage:
         except Exception:
             pass
 
-        # Fallback: simple, generic summary
-        return f"Executed {tool_name}"
+        # Fallback: minimal fallback for when summary functions fail
+        try:
+            rtype = result.get("type")
+            # Unified error
+            if rtype == "tool_error":
+                err = result.get("error") or result.get("message") or "error"
+                return f"{err}"
+
+            # Generic fallback - just return empty or minimal info
+            # Tool name is already in the log, no need to repeat it
+            return ""
+        except Exception:
+            pass
+        return ""
 
     async def store_result(
         self,
@@ -162,9 +174,14 @@ class ToolResultsStorage:
         packed_result = json.dumps(result, ensure_ascii=False)
         summary = self._generate_summary(tool_name, args, result)
         size_bytes = len(packed_result.encode("utf-8"))
-        error_value = (
-            result.get("error") if result.get("type") == "tool_error" else None
-        )
+        # Normalize error_value from both unified and legacy shapes
+        rtype = result.get("type")
+        if rtype == "tool_error":
+            error_value = result.get("error") or result.get("message")
+        elif isinstance(rtype, str) and rtype.endswith("_error"):
+            error_value = result.get("error")
+        else:
+            error_value = None
         engine = self._get_engine()
         with get_session(engine) as session:
             session.merge(

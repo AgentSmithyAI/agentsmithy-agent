@@ -7,6 +7,8 @@ import duckduckgo_search as ddg
 from pydantic import BaseModel, Field
 
 from agentsmithy_server.config import settings
+from agentsmithy_server.tools.core import result as result_factory
+from agentsmithy_server.tools.core.types import ToolError, parse_tool_result
 from agentsmithy_server.tools.registry import register_summary_for
 
 from ..base_tool import BaseTool
@@ -17,21 +19,14 @@ class WebSearchArgsDict(TypedDict, total=False):
     num_results: int
 
 
-class WebSearchResultSuccess(TypedDict):
-    type: Literal["web_search_result"]
+class WebSearchSuccess(BaseModel):
+    type: Literal["web_search_result"] = "web_search_result"
     query: str
     results: list[dict[str, str]]
     count: int
 
 
-class WebSearchResultError(TypedDict):
-    type: Literal["web_search_error"]
-    query: str
-    error: str
-    error_type: str
-
-
-WebSearchResult = WebSearchResultSuccess | WebSearchResultError
+WebSearchResult = WebSearchSuccess | ToolError
 
 # Summary registration is declared above with imports
 
@@ -103,16 +98,21 @@ class WebSearchTool(BaseTool):
                 "count": len(results),
             }
         except Exception as e:
-            return {
-                "type": "web_search_error",
-                "query": query,
-                "error": f"Error performing web search: {str(e)}",
-                "error_type": type(e).__name__,
-            }
+            err = result_factory.error(
+                "web_search",
+                code="exception",
+                message=f"Error performing web search: {str(e)}",
+                error_type=type(e).__name__,
+                details={"query": query},
+            )
+            # Back-compat: include query at top-level for tests/consumers
+            err["query"] = query
+            return err
 
 
 @register_summary_for(WebSearchTool)
-def _summarize_web_search(args: WebSearchArgsDict, result: WebSearchResult) -> str:
-    if result["type"] == "web_search_error":
-        return f"Web search failed for '{args.get('query')}': {result['error']}"
-    return f"Web searched '{args.get('query')}' -> {result.get('count', 0)} results"
+def _summarize_web_search(args: WebSearchArgsDict, result: dict[str, Any]) -> str:
+    r = parse_tool_result(result, WebSearchSuccess)
+    if isinstance(r, ToolError):
+        return f"'{args.get('query')}': {r.error}"
+    return f"'{r.query}': {r.count} results"

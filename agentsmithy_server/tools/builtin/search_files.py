@@ -8,6 +8,8 @@ from typing import Any, Literal, TypedDict
 
 from pydantic import BaseModel, Field
 
+from agentsmithy_server.tools.core import result as result_factory
+from agentsmithy_server.tools.core.types import ToolError, parse_tool_result
 from agentsmithy_server.tools.registry import register_summary_for
 
 from ..base_tool import BaseTool
@@ -20,19 +22,12 @@ class SearchFilesArgsDict(TypedDict, total=False):
     file_pattern: str | None
 
 
-class SearchFilesResultSuccess(TypedDict):
-    type: Literal["search_files_result"]
+class SearchFilesSuccess(BaseModel):
+    type: Literal["search_files_result"] = "search_files_result"
     results: list[dict[str, Any]]
 
 
-class SearchFilesResultError(TypedDict):
-    type: Literal["search_files_error"]
-    path: str
-    error: str
-    error_type: str
-
-
-SearchFilesResult = SearchFilesResultSuccess | SearchFilesResultError
+SearchFilesResult = SearchFilesSuccess | ToolError
 
 # Summary registration is declared above with imports
 
@@ -73,38 +68,42 @@ class SearchFilesTool(BaseTool):
 
         try:
             if not base.exists():
-                return {
-                    "type": "search_files_error",
-                    "path": str(base),
-                    "error": f"Path does not exist: {base}",
-                    "error_type": "PathNotFoundError",
-                }
+                return result_factory.error(
+                    "search_files",
+                    code="not_found",
+                    message=f"Path does not exist: {base}",
+                    error_type="PathNotFoundError",
+                    details={"path": str(base)},
+                )
 
             if not base.is_dir():
-                return {
-                    "type": "search_files_error",
-                    "path": str(base),
-                    "error": f"Path is not a directory: {base}",
-                    "error_type": "NotADirectoryError",
-                }
+                return result_factory.error(
+                    "search_files",
+                    code="not_a_directory",
+                    message=f"Path is not a directory: {base}",
+                    error_type="NotADirectoryError",
+                    details={"path": str(base)},
+                )
 
             # Check if the path is restricted (e.g., root or home directory)
             if restrictions.is_restricted_path(base):
-                return {
-                    "type": "search_files_error",
-                    "path": str(base),
-                    "error": f"Access to this directory is restricted: {base}",
-                    "error_type": "RestrictedPathError",
-                }
+                return result_factory.error(
+                    "search_files",
+                    code="restricted",
+                    message=f"Access to this directory is restricted: {base}",
+                    error_type="RestrictedPathError",
+                    details={"path": str(base)},
+                )
 
             regex = re.compile(pattern)
         except re.error as e:
-            return {
-                "type": "search_files_error",
-                "path": str(base),
-                "error": f"Invalid regex pattern: {pattern} - {str(e)}",
-                "error_type": "RegexError",
-            }
+            return result_factory.error(
+                "search_files",
+                code="regex_error",
+                message=f"Invalid regex pattern: {pattern} - {str(e)}",
+                error_type="RegexError",
+                details={"path": str(base), "regex": pattern},
+            )
 
         results: list[dict[str, Any]] = []
 
@@ -141,26 +140,31 @@ class SearchFilesTool(BaseTool):
             return {"type": "search_files_result", "results": results}
 
         except PermissionError:
-            return {
-                "type": "search_files_error",
-                "path": str(base),
-                "error": f"Permission denied accessing directory: {base}",
-                "error_type": "PermissionError",
-            }
+            return result_factory.error(
+                "search_files",
+                code="permission_denied",
+                message=f"Permission denied accessing directory: {base}",
+                error_type="PermissionError",
+                details={"path": str(base)},
+            )
         except Exception as e:
-            return {
-                "type": "search_files_error",
-                "path": str(base),
-                "error": f"Error searching files: {str(e)}",
-                "error_type": type(e).__name__,
-            }
+            return result_factory.error(
+                "search_files",
+                code="exception",
+                message=f"Error searching files: {str(e)}",
+                error_type=type(e).__name__,
+                details={
+                    "path": str(base),
+                    "regex": pattern,
+                    "file_pattern": file_glob,
+                },
+            )
 
 
 @register_summary_for(SearchFilesTool)
-def _summarize_search_files(
-    args: SearchFilesArgsDict, result: SearchFilesResult
-) -> str:
-    if result["type"] == "search_files_error":
-        return f"Error searching {args.get('path')}: {result['error']}"
-    count = len(result["results"])
-    return f"Searched {args.get('path')} - {count} matches"
+def _summarize_search_files(args: SearchFilesArgsDict, result: dict[str, Any]) -> str:
+    r = parse_tool_result(result, SearchFilesSuccess)
+    if isinstance(r, ToolError):
+        return f"{args.get('path')}: {r.error}"
+    regex = args.get("regex", "")
+    return f"{args.get('path')} '{regex}': {len(r.results)} matches"

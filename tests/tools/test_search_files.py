@@ -249,12 +249,12 @@ async def test_search_files_restricted_paths(tmp_path: Path):
 
     # Test root directory
     res = await _run(t, path="/", regex=r"test", file_pattern="**/*")
-    assert res["type"] == "search_files_error"
+    assert res["type"] in {"search_files_error", "tool_error"}
     assert "restricted" in res["error"].lower()
 
     # Test home directory
     res = await _run(t, path=str(Path.home()), regex=r"test", file_pattern="**/*")
-    assert res["type"] == "search_files_error"
+    assert res["type"] in {"search_files_error", "tool_error"}
     assert "restricted" in res["error"].lower()
 
 
@@ -265,7 +265,7 @@ async def test_search_files_invalid_regex(tmp_path: Path):
     t = SearchFilesTool()
     res = await _run(t, path=str(tmp_path), regex=r"[unclosed", file_pattern="**/*.txt")
 
-    assert res["type"] == "search_files_error"
+    assert res["type"] in {"search_files_error", "tool_error"}
     assert res["error_type"] == "RegexError"
     assert "Invalid regex" in res["error"]
 
@@ -277,6 +277,6 @@ async def test_search_files_nonexistent_path(tmp_path: Path):
         t, path=str(tmp_path / "nonexistent"), regex=r"test", file_pattern="**/*"
     )
 
-    assert res["type"] == "search_files_error"
+    assert res["type"] in {"search_files_error", "tool_error"}
     assert res["error_type"] == "PathNotFoundError"
     assert "does not exist" in res["error"]

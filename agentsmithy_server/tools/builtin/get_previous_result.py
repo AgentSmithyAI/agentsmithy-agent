@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from agentsmithy_server.core.tool_results_storage import ToolResultsStorage
 from agentsmithy_server.tools.core import result as result_factory
+from agentsmithy_server.tools.core.types import ToolError, parse_tool_result
 from agentsmithy_server.tools.registry import register_summary_for
 from agentsmithy_server.utils.logger import agent_logger
 
@@ -19,13 +20,16 @@ class GetPreviousResultArgsDict(TypedDict):
     tool_call_id: str
 
 
-class PreviousResultSuccess(TypedDict, total=False):
-    type: Literal["previous_result"]
+class PreviousResultSuccess(BaseModel):
+    type: Literal["previous_result"] = "previous_result"
     tool_call_id: str
-    tool_name: str | None
-    original_args: dict[str, Any] | None
-    result: dict[str, Any] | None
-    timestamp: float | int | None
+    tool_name: str | None = None
+    original_args: dict[str, Any] | None = None
+    result: dict[str, Any] | None = None
+    timestamp: float | int | None = None
+
+
+PreviousResult = PreviousResultSuccess | ToolError
 
 
 # Summary registration is declared above with imports
@@ -141,9 +145,9 @@ class GetPreviousResultTool(BaseTool):
 
 @register_summary_for(GetPreviousResultTool)
 def _summarize_get_previous_result(
-    args: GetPreviousResultArgsDict, result: PreviousResultSuccess | dict[str, Any]
+    args: GetPreviousResultArgsDict, result: dict[str, Any]
 ) -> str:
-    if result.get("type") != "previous_result":
-        return "Previous tool result not found"
-    name = result.get("tool_name") or "tool"
-    return f"Loaded previous result for {name}"
+    r = parse_tool_result(result, PreviousResultSuccess)
+    if isinstance(r, ToolError):
+        return f"{args.get('tool_call_id')}: {r.error}"
+    return f"{r.tool_name or 'unknown'} [{r.tool_call_id}]"

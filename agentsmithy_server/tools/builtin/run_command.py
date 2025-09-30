@@ -11,6 +11,8 @@ from typing import Any, Literal, TypedDict
 
 from pydantic import BaseModel, Field
 
+from agentsmithy_server.tools.core import result as result_factory
+from agentsmithy_server.tools.core.types import ToolError, parse_tool_result
 from agentsmithy_server.tools.registry import register_summary_for
 from agentsmithy_server.utils.logger import agent_logger
 
@@ -132,19 +134,21 @@ class RunCommandTool(BaseTool):
             try:
                 cwd_path = Path(args.cwd).expanduser().resolve()
                 if not cwd_path.exists() or not cwd_path.is_dir():
-                    return {
-                        "type": "run_command_error",
-                        "error": f"Working directory not found: {cwd_path}",
-                        "error_type": "NotADirectoryError",
-                        "os": _os_context(),
-                    }
+                    return result_factory.error(
+                        "run_command",
+                        code="invalid_cwd",
+                        message=f"Working directory not found or not a directory: {cwd_path}",
+                        error_type="NotADirectoryError",
+                        details={"cwd": str(cwd_path), "os": _os_context()},
+                    )
             except Exception as e:
-                return {
-                    "type": "run_command_error",
-                    "error": f"Invalid working directory: {str(e)}",
-                    "error_type": type(e).__name__,
-                    "os": _os_context(),
-                }
+                return result_factory.error(
+                    "run_command",
+                    code="invalid_cwd",
+                    message=f"Invalid working directory: {str(e)}",
+                    error_type=type(e).__name__,
+                    details={"cwd": args.cwd, "os": _os_context()},
+                )
 
         env = None
         if args.env:
@@ -247,21 +251,26 @@ class RunCommandTool(BaseTool):
                 except Exception:
                     pass
                 duration_ms = int((time.perf_counter() - start) * 1000)
-                return {
-                    "type": "run_command_timeout",
-                    "command": args.command,
-                    "cwd": str(cwd_path) if cwd_path else None,
-                    "stdout": out_b[: args.max_output_bytes].decode(
-                        args.encoding, errors="replace"
-                    ),
-                    "stderr": err_b[: args.max_output_bytes].decode(
-                        args.encoding, errors="replace"
-                    ),
-                    "exit_code": None,
-                    "timed_out": True,
-                    "duration_ms": duration_ms,
-                    "os": _os_context(),
-                }
+                return result_factory.error(
+                    "run_command",
+                    code="timeout",
+                    message="Command execution timed out",
+                    error_type="Timeout",
+                    details={
+                        "command": args.command,
+                        "cwd": str(cwd_path) if cwd_path else None,
+                        "stdout": out_b[: args.max_output_bytes].decode(
+                            args.encoding, errors="replace"
+                        ),
+                        "stderr": err_b[: args.max_output_bytes].decode(
+                            args.encoding, errors="replace"
+                        ),
+                        "exit_code": None,
+                        "timed_out": True,
+                        "duration_ms": duration_ms,
+                        "os": _os_context(),
+                    },
+                )
 
             duration_ms = int((time.perf_counter() - start) * 1000)
 
@@ -317,26 +326,32 @@ class RunCommandTool(BaseTool):
         except FileNotFoundError as e:
             # Command not found (common on Windows or missing binaries)
             duration_ms = int((time.perf_counter() - start) * 1000)
-            return {
-                "type": "run_command_error",
-                "error": str(e),
-                "error_type": type(e).__name__,
-                "command": args.command,
-                "cwd": str(cwd_path) if cwd_path else None,
-                "duration_ms": duration_ms,
-                "os": _os_context(),
-            }
+            return result_factory.error(
+                "run_command",
+                code="not_found",
+                message=str(e),
+                error_type=type(e).__name__,
+                details={
+                    "command": args.command,
+                    "cwd": str(cwd_path) if cwd_path else None,
+                    "duration_ms": duration_ms,
+                    "os": _os_context(),
+                },
+            )
         except Exception as e:
             duration_ms = int((time.perf_counter() - start) * 1000)
-            return {
-                "type": "run_command_error",
-                "error": str(e),
-                "error_type": type(e).__name__,
-                "command": args.command,
-                "cwd": str(cwd_path) if cwd_path else None,
-                "duration_ms": duration_ms,
-                "os": _os_context(),
-            }
+            return result_factory.error(
+                "run_command",
+                code="exception",
+                message=str(e),
+                error_type=type(e).__name__,
+                details={
+                    "command": args.command,
+                    "cwd": str(cwd_path) if cwd_path else None,
+                    "duration_ms": duration_ms,
+                    "os": _os_context(),
+                },
+            )
 
 
 # Summary registration
@@ -350,8 +365,10 @@ class RunCommandBase(TypedDict, total=False):
     os: dict[str, Any]
 
 
-class RunCommandResultSuccess(RunCommandBase):
-    type: Literal["run_command_result"]
+class RunCommandSuccess(BaseModel):
+    type: Literal["run_command_result"] = "run_command_result"
+    command: str
+    cwd: str | None = None
     exit_code: int
     stdout: str
     stderr: str
@@ -360,23 +377,11 @@ class RunCommandResultSuccess(RunCommandBase):
     stdout_truncated_bytes: int
     stderr_truncated_bytes: int
     timed_out: Literal[False]
+    duration_ms: int
+    os: dict[str, Any]
 
 
-class RunCommandTimeout(RunCommandBase):
-    type: Literal["run_command_timeout"]
-    stdout: str
-    stderr: str
-    exit_code: None
-    timed_out: Literal[True]
-
-
-class RunCommandError(RunCommandBase):
-    type: Literal["run_command_error"]
-    error: str
-    error_type: str
-
-
-RunCommandResult = RunCommandResultSuccess | RunCommandTimeout | RunCommandError
+RunCommandResult = RunCommandSuccess | ToolError
 
 
 class RunCommandArgsDict(TypedDict, total=False):
@@ -390,17 +395,16 @@ class RunCommandArgsDict(TypedDict, total=False):
 
 
 @register_summary_for(RunCommandTool)
-def _summarize_run_command(args: RunCommandArgsDict, result: RunCommandResult) -> str:
-    if result["type"] == "run_command_error":
-        return f"Error running {args.get('command')}: {result['error']}"
-    exit_code = result.get("exit_code")
-    stdout = result.get("stdout") or ""
-    # Summarize first non-empty line of stdout if present
+def _summarize_run_command(args: RunCommandArgsDict, result: dict[str, Any]) -> str:
+    r = parse_tool_result(result, RunCommandSuccess)
+    if isinstance(r, ToolError):
+        return f"{args.get('command')}: {r.error}"
+
     first_line = ""
-    for line in stdout.splitlines():
+    for line in r.stdout.splitlines():
         if line.strip():
             first_line = line.strip()
             break
     if first_line:
-        return f"Ran command: {args.get('command')} (exit {exit_code}) - {first_line}"
-    return f"Ran command: {args.get('command')} (exit {exit_code})"
+        return f"{r.command} → exit {r.exit_code}: {first_line[:60]}"
+    return f"{r.command} → exit {r.exit_code}"

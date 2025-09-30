@@ -70,7 +70,17 @@ def register_summary_for(*tool_classes: type[BaseTool]):
             CLASS_SUMMARY_REGISTRY[cls] = real
             # Mirror into name registry for runtime lookup without class
             try:
-                name = getattr(cls, "name", None) or cls.__name__.lower()
+                # Pydantic fields like 'name' are not class attributes, need instance
+                # Try to get name from a dummy instance
+                try:
+                    instance = cls()
+                    name = getattr(instance, "name", None)
+                except Exception:
+                    name = None
+
+                if not name:
+                    name = cls.__name__.lower()
+
                 # Do not override an explicit name registration if present
                 if name not in SUMMARY_REGISTRY:
                     SUMMARY_REGISTRY[name] = real

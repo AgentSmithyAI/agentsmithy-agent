@@ -105,7 +105,11 @@ class ToolExecutor:
                 "tool_call_id": tool_call_id,
                 "tool_name": name,
                 "status": (
-                    "error" if result.get("type") == "tool_error" else "success"
+                    "error"
+                    if isinstance(result, dict)
+                    and isinstance(result.get("type"), str)
+                    and ("error" in result["type"] or result["type"] == "tool_error")
+                    else "success"
                 ),
                 "metadata": {
                     "size_bytes": metadata.size_bytes if metadata else 0,
@@ -133,7 +137,13 @@ class ToolExecutor:
         content = {
             "tool_call_id": tool_call_id,
             "tool_name": name,
-            "status": ("error" if result.get("type") == "tool_error" else "success"),
+            "status": (
+                "error"
+                if isinstance(result, dict)
+                and isinstance(result.get("type"), str)
+                and ("error" in result["type"] or result["type"] == "tool_error")
+                else "success"
+            ),
             "metadata": {
                 "size_bytes": len(inline_result_json.encode("utf-8")),
                 "summary": "",

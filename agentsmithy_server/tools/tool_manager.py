@@ -100,7 +100,13 @@ class ToolManager:
                 parsed = schema(**kwargs)
                 args = parsed.model_dump()
         except Exception as ve:
-            return {"type": "tool_error", "name": name, "error": str(ve)}
+            return {
+                "type": "tool_error",
+                "name": name,
+                "code": "args_validation",
+                "error": str(ve),
+                "error_type": type(ve).__name__,
+            }
 
         try:
             # Pass arguments via tool_input dict to satisfy BaseTool.arun signature
@@ -115,6 +121,7 @@ class ToolManager:
             return {
                 "type": "tool_error",
                 "name": name,
+                "code": "execution_failed",
                 "error": str(e),
                 "error_type": type(e).__name__,
             }

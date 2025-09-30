@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from agentsmithy_server.tools.core.types import ToolError, parse_tool_result
 from agentsmithy_server.tools.registry import register_summary_for
 
 from ..base_tool import BaseTool
@@ -21,6 +22,14 @@ class ReturnInspectionArgs(BaseModel):
     )
 
 
+class ReturnInspectionSuccess(BaseModel):
+    type: Literal["inspection_result"] = "inspection_result"
+    analysis: dict[str, Any]
+
+
+ReturnInspectionResult = ReturnInspectionSuccess | ToolError
+
+
 class ReturnInspectionTool(BaseTool):
     name: str = "return_inspection"
     description: str = (
@@ -35,6 +44,9 @@ class ReturnInspectionTool(BaseTool):
 
 @register_summary_for(ReturnInspectionTool)
 def _summarize_return_inspection(args: dict[str, Any], result: dict[str, Any]) -> str:
-    if result.get("type") == "inspection_result":
-        return "Returned project inspection"
-    return "Inspection return"
+    r = parse_tool_result(result, ReturnInspectionSuccess)
+    if isinstance(r, ToolError):
+        return f"Inspection failed: {r.error}"
+    lang = args.get("language", "unknown")
+    frameworks = args.get("frameworks", [])
+    return f"Project inspection: {lang}, {len(frameworks)} frameworks"

@@ -35,7 +35,8 @@ async def test_run_command_error_not_found():
     t = RunCommandTool()
     # Use shell=False to trigger FileNotFoundError for an unknown binary
     res = await _run(t, command="this_command_should_not_exist_abcxyz", shell=False)
-    assert res["type"] == "run_command_error"
+    assert res["type"] == "tool_error"
+    assert res.get("code") in {"not_found", "exception"}
     assert res["error_type"] in {"FileNotFoundError", "OSError"}
 
 
@@ -43,5 +44,5 @@ async def test_run_command_timeout():
     t = RunCommandTool()
     cmd = [sys.executable, "-c", "import time; time.sleep(2)"]
     res = await _run(t, command=" ".join(cmd), shell=False, timeout=0.2)
-    assert res["type"] == "run_command_timeout"
-    assert res["timed_out"] is True
+    assert res["type"] == "tool_error"
+    assert res.get("code") == "timeout"

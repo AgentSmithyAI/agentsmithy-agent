@@ -79,7 +79,7 @@ async def test_web_search_exception():
     ):
         result = await tool._arun(query="test query")
 
-    assert result["type"] == "web_search_error"
+    assert result["type"] in {"web_search_error", "tool_error"}
     assert result["query"] == "test query"
     assert "Network error" in result["error"]
     assert result["error_type"] == "Exception"
