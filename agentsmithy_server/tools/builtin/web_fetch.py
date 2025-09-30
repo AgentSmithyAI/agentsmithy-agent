@@ -1,14 +1,42 @@
 from __future__ import annotations
 
-from typing import Any
+# Local TypedDicts for type hints
+from typing import Any, Literal, TypedDict
 
 import aiohttp
 from playwright.async_api import async_playwright
 from pydantic import BaseModel, Field, HttpUrl
 
 from agentsmithy_server.config import settings
+from agentsmithy_server.tools.registry import register_summary_for
 
 from ..base_tool import BaseTool
+
+
+class WebFetchArgsDict(TypedDict):
+    url: str
+
+
+class WebBrowseResult(TypedDict, total=False):
+    type: Literal["web_browse_result"]
+    mode: Literal["http", "js"]
+    url: str
+    final_url: str
+    status: int | None
+    content_type: str | None
+    encoding: str | None
+    text: str | None
+
+
+class WebBrowseError(TypedDict):
+    type: Literal["web_browse_error"]
+    mode: Literal["http", "js"]
+    url: str
+    error: str
+    error_type: str
+
+
+# Summary registration is declared above with imports
 
 
 class WebFetchArgs(BaseModel):
@@ -166,3 +194,15 @@ class WebFetchTool(BaseTool):
                 "error": str(e),
                 "error_type": type(e).__name__,
             }
+
+
+@register_summary_for(WebFetchTool)
+def _summarize_web_fetch(
+    args: WebFetchArgsDict, result: WebBrowseResult | WebBrowseError
+) -> str:
+    if result["type"] == "web_browse_error":
+        return f"Web fetch failed for {args.get('url')}: {result['error']}"
+    mode = result.get("mode")
+    status = result.get("status")
+    final_url = result.get("final_url")
+    return f"Fetched {args.get('url')} via {mode} ({status}) -> {final_url}"

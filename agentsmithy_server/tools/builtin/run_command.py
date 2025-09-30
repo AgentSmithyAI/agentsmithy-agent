@@ -7,10 +7,11 @@ import shlex
 import sys
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, TypedDict
 
 from pydantic import BaseModel, Field
 
+from agentsmithy_server.tools.registry import register_summary_for
 from agentsmithy_server.utils.logger import agent_logger
 
 from ..base_tool import BaseTool
@@ -336,3 +337,70 @@ class RunCommandTool(BaseTool):
                 "duration_ms": duration_ms,
                 "os": _os_context(),
             }
+
+
+# Summary registration
+# Local TypedDicts for type hints
+
+
+class RunCommandBase(TypedDict, total=False):
+    command: str
+    cwd: str | None
+    duration_ms: int
+    os: dict[str, Any]
+
+
+class RunCommandResultSuccess(RunCommandBase):
+    type: Literal["run_command_result"]
+    exit_code: int
+    stdout: str
+    stderr: str
+    stdout_truncated: bool
+    stderr_truncated: bool
+    stdout_truncated_bytes: int
+    stderr_truncated_bytes: int
+    timed_out: Literal[False]
+
+
+class RunCommandTimeout(RunCommandBase):
+    type: Literal["run_command_timeout"]
+    stdout: str
+    stderr: str
+    exit_code: None
+    timed_out: Literal[True]
+
+
+class RunCommandError(RunCommandBase):
+    type: Literal["run_command_error"]
+    error: str
+    error_type: str
+
+
+RunCommandResult = RunCommandResultSuccess | RunCommandTimeout | RunCommandError
+
+
+class RunCommandArgsDict(TypedDict, total=False):
+    command: str
+    cwd: str | None
+    timeout: float
+    env: dict[str, str]
+    max_output_bytes: int
+    encoding: str
+    shell: bool
+
+
+@register_summary_for(RunCommandTool)
+def _summarize_run_command(args: RunCommandArgsDict, result: RunCommandResult) -> str:
+    if result["type"] == "run_command_error":
+        return f"Error running {args.get('command')}: {result['error']}"
+    exit_code = result.get("exit_code")
+    stdout = result.get("stdout") or ""
+    # Summarize first non-empty line of stdout if present
+    first_line = ""
+    for line in stdout.splitlines():
+        if line.strip():
+            first_line = line.strip()
+            break
+    if first_line:
+        return f"Ran command: {args.get('command')} (exit {exit_code}) - {first_line}"
+    return f"Ran command: {args.get('command')} (exit {exit_code})"

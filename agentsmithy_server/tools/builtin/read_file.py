@@ -1,11 +1,37 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+
+# Local TypedDicts for type hints
+from typing import Any, Literal, TypedDict
 
 from pydantic import BaseModel, Field
 
+from agentsmithy_server.tools.registry import register_summary_for
+
 from ..base_tool import BaseTool
+
+
+class ReadFileArgsDict(TypedDict):
+    path: str
+
+
+class ReadFileResultSuccess(TypedDict):
+    type: Literal["read_file_result"]
+    path: str
+    content: str
+
+
+class ReadFileResultError(TypedDict):
+    type: Literal["read_file_error"]
+    path: str
+    error: str
+    error_type: str
+
+
+ReadFileResult = ReadFileResultSuccess | ReadFileResultError
+
+# Summary registration is declared above with imports
 
 
 class ReadFileArgs(BaseModel):
@@ -65,3 +91,14 @@ class ReadFileTool(BaseTool):
                 "error": f"Error reading file: {str(e)}",
                 "error_type": type(e).__name__,
             }
+
+
+@register_summary_for(ReadFileTool)
+def _summarize_read_file(args: ReadFileArgsDict, result: ReadFileResult) -> str:
+    if result["type"] == "read_file_error":
+        return f"Error reading {args.get('path')}: {result['error']}"
+    content = result["content"]
+    preview = content.splitlines()[0].strip() if content else ""
+    if preview:
+        return f"Read file {args.get('path')} - {preview[:80]}"
+    return f"Read file {args.get('path')}"

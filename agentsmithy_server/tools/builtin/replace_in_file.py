@@ -4,14 +4,32 @@ import difflib
 import os
 import re
 from pathlib import Path
-from typing import Any
+
+# Local TypedDicts for type hints
+from typing import Any, Literal, TypedDict
 
 from pydantic import BaseModel, Field
 
 from agentsmithy_server.services.versioning import VersioningTracker
+from agentsmithy_server.tools.registry import register_summary_for
 from agentsmithy_server.utils.logger import agent_logger
 
 from ..base_tool import BaseTool
+
+
+class ReplaceInFileArgsDict(TypedDict):
+    path: str
+    diff: str
+
+
+class ReplaceInFileResult(TypedDict):
+    type: Literal["replace_file_result"]
+    path: str
+    diff: str | None
+    checkpoint: str | None
+
+
+# Summary registration is declared above with imports
 
 
 class ReplaceArgs(BaseModel):
@@ -132,6 +150,18 @@ class ReplaceInFileTool(BaseTool):
             "diff": diff_str,
             "checkpoint": getattr(checkpoint, "commit_id", None),
         }
+
+
+@register_summary_for(ReplaceInFileTool)
+def _summarize_replace_in_file(
+    args: ReplaceInFileArgsDict, result: ReplaceInFileResult
+) -> str:
+    # replace_in_file currently never returns an error variant; keep future-proof check
+    if result.get("type") == "replace_file_error":
+        return (
+            f"Error replacing in {args.get('path')}: {result.get('error', 'Unknown')}"
+        )
+    return f"Edited file {args.get('path')}"
 
 
 def _apply_search_replace_blocks(diff_text: str, file_path: Path) -> str:

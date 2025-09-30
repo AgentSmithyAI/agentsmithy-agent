@@ -1,29 +1,27 @@
 from __future__ import annotations
 
-from agentsmithy_server.tools.builtin import TOOL_CLASSES
-
 from .registry import ToolRegistry
 
 
 def build_registry(
-    include: set[str] | None = None, exclude: set[str] | None = None
+    include: set[str] | None = None,
+    exclude: set[str] | None = None,
 ) -> ToolRegistry:
-    """Build tool registry via static registration only.
+    """Build tool registry from explicit builtin TOOL_CLASSES.
 
-    Why static:
-    - Dynamic autodiscovery (pkgutil/importlib over package paths) breaks in
-      PyInstaller onefile binaries because packages are inside an archive and
-      not visible as filesystem directories. This leads to missing tools.
-    - To ensure consistent behavior across dev and binary builds, we register a
-      fixed list of known builtin tools explicitly.
+    Importing agentsmithy_server.tools.builtin ensures all builtin tool modules are imported,
+    so any decorators (e.g., register_summary_for) run at import time. We then register the
+    statically exported TOOL_CLASSES. This approach is robust for PyInstaller onefile builds.
     """
     registry = ToolRegistry()
 
     include = include or set()
     exclude = exclude or set()
 
-    # Register using the explicit list from builtin package
-    for tool_cls in TOOL_CLASSES:
+    from agentsmithy_server.tools.builtin import TOOL_CLASSES as BUILTIN_TOOL_CLASSES
+
+    # Register tools filtered by include/exclude
+    for tool_cls in BUILTIN_TOOL_CLASSES:
         tool_name = getattr(tool_cls, "name", tool_cls.__name__.lower())
         if include and tool_name not in include:
             continue

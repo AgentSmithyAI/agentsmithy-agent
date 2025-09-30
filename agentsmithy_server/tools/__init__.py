@@ -11,7 +11,14 @@ from .build_registry import build_registry
 # Re-export commonly used tools from builtin package
 from .builtin.delete_file import DeleteFileTool
 from .builtin.run_command import RunCommandTool
-from .registry import ToolRegistry
+
+# Re-export summary registration helpers for convenience
+from .registry import (
+    ToolRegistry,
+    register_summaries,
+    register_summary,
+    register_summary_for,
+)
 from .tool_executor import ToolExecutor
 
 __all__ = [
@@ -21,4 +28,7 @@ __all__ = [
     "build_registry",
     "DeleteFileTool",
     "RunCommandTool",
+    "register_summary",
+    "register_summaries",
+    "register_summary_for",
 ]

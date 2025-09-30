@@ -1,13 +1,39 @@
 from __future__ import annotations
 
-from typing import Any, cast
+# Local TypedDicts for type hints
+from typing import Any, Literal, TypedDict, cast
 
 import duckduckgo_search as ddg
 from pydantic import BaseModel, Field
 
 from agentsmithy_server.config import settings
+from agentsmithy_server.tools.registry import register_summary_for
 
 from ..base_tool import BaseTool
+
+
+class WebSearchArgsDict(TypedDict, total=False):
+    query: str
+    num_results: int
+
+
+class WebSearchResultSuccess(TypedDict):
+    type: Literal["web_search_result"]
+    query: str
+    results: list[dict[str, str]]
+    count: int
+
+
+class WebSearchResultError(TypedDict):
+    type: Literal["web_search_error"]
+    query: str
+    error: str
+    error_type: str
+
+
+WebSearchResult = WebSearchResultSuccess | WebSearchResultError
+
+# Summary registration is declared above with imports
 
 AsyncDDGS = cast(Any, getattr(ddg, "AsyncDDGS", None))
 DDGS = cast(Any, getattr(ddg, "DDGS", None))
@@ -83,3 +109,10 @@ class WebSearchTool(BaseTool):
                 "error": f"Error performing web search: {str(e)}",
                 "error_type": type(e).__name__,
             }
+
+
+@register_summary_for(WebSearchTool)
+def _summarize_web_search(args: WebSearchArgsDict, result: WebSearchResult) -> str:
+    if result["type"] == "web_search_error":
+        return f"Web search failed for '{args.get('query')}': {result['error']}"
+    return f"Web searched '{args.get('query')}' -> {result.get('count', 0)} results"

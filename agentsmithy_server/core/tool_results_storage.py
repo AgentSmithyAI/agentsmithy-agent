@@ -20,6 +20,14 @@ from sqlalchemy.engine import Engine
 from agentsmithy_server.core.dialog_history import DialogHistory
 from agentsmithy_server.db import BaseORM, ToolResultORM
 from agentsmithy_server.db.base import get_engine, get_session
+
+# Use central registry for tool summary generators so tools can register
+# summaries without importing core storage. The registry supports plain
+# functions and descriptors like staticmethod/classmethod.
+from agentsmithy_server.tools.registry import (
+    CLASS_SUMMARY_REGISTRY,
+    SUMMARY_REGISTRY,
+)
 from agentsmithy_server.utils.logger import agent_logger
 
 if TYPE_CHECKING:
@@ -58,6 +66,15 @@ class ToolResultReference:
 class ToolResultsStorage:
     """Manages storage of tool execution results using SQLAlchemy ORM.
 
+    # Backwards-compatible aliases as static methods for type checkers
+    @staticmethod
+    def register_summary(tool_name: str):
+        return register_summary
+
+    @staticmethod
+    def register_summaries(*tool_names: str):
+        return register_summaries
+
     Data is stored in the same SQLite database as dialog history and accessed
     via ORM models. Rows are scoped by `dialog_id`.
     """
@@ -84,55 +101,43 @@ class ToolResultsStorage:
         engine = self._get_engine()
         BaseORM.metadata.create_all(engine)
 
-    # ---------- Storage logic (class-owned) ----------
+    # Use module-level SUMMARY_REGISTRY and decorators (register_summary /
+    # register_summaries). Built-in summaries should be declared in their
+    # respective tool modules using the decorators so new tools register
+    # summaries next to their implementation.
 
+    # _generate_summary will consult module-level SUMMARY_REGISTRY.
     def _generate_summary(
         self, tool_name: str, args: dict[str, Any], result: dict[str, Any]
     ) -> str:
-        # Tool-specific summary generation
-        if tool_name == "read_file":
-            file_path = args.get("path", args.get("target_file", "unknown"))
-            content = result.get("content", "")
-            lines = content.count("\n") + 1 if content else 0
-            return f"Read file: {file_path} ({lines} lines)"
-        elif tool_name == "write_file" or tool_name == "write_to_file":
-            file_path = args.get("path", args.get("file_path", "unknown"))
-            content = args.get("content", args.get("contents", ""))
-            lines = content.count("\n") + 1 if content else 0
-            return f"Wrote file: {file_path} ({lines} lines)"
-        elif tool_name == "run_command":
-            command = args.get("command", "unknown")
-            exit_code = result.get("exit_code", -1)
-            status = "success" if exit_code == 0 else f"failed (exit {exit_code})"
-            return f"Ran command: {command} - {status}"
-        elif tool_name == "search_files":
-            pattern = args.get("regex", args.get("pattern", "unknown"))
-            # Our search_files tool returns {"type": "search_files_result", "results": [...]},
-            # while older/other implementations may use 'matches'. Prefer 'results' then 'matches'.
-            matches = result.get("results") or result.get("matches") or []
+        # Try registry by name first (fast path, backwards compatible)
+        func = SUMMARY_REGISTRY.get(tool_name)
+        if func:
             try:
-                count = len(matches)
+                return func(args, result)
             except Exception:
-                count = 0
-            return f"Searched for '{pattern}' - found {count} matches"
-        elif tool_name == "list_files":
-            path = args.get("path", args.get("target_directory", "."))
-            # Simpler summary: prefer `items` list and report simple count of items.
-            # Keep backward compatibility with older `files`/`directories` fields.
-            items = result.get("items")
-            files = result.get("files", [])
-            dirs = result.get("directories", [])
+                agent_logger.exception(
+                    "Summary generator for %s raised exception, falling back", tool_name
+                )
+        # Try to resolve by class if the tool object is available
+        try:
+            tool_obj = self.project.get_tool_manager().get(tool_name)  # type: ignore[attr-defined]
+            if tool_obj is not None:
+                cls = type(tool_obj)
+                func2 = CLASS_SUMMARY_REGISTRY.get(cls)
+                if func2:
+                    try:
+                        return func2(args, result)
+                    except Exception:
+                        agent_logger.exception(
+                            "Class summary generator for %s failed, falling back",
+                            tool_name,
+                        )
+        except Exception:
+            pass
 
-            if items is not None:
-                try:
-                    count = len(items)
-                except Exception:
-                    count = 0
-                return f"Listed {path} - {count} items"
-
-            return f"Listed {path} - {len(files)} files, {len(dirs)} directories"
-        else:
-            return f"Executed {tool_name}"
+        # Fallback: simple, generic summary
+        return f"Executed {tool_name}"
 
     async def store_result(
         self,

@@ -4,6 +4,12 @@ from typing import Any, Literal
 
 from pydantic import BaseModel
 
+# Public types this module exports
+__all__ = [
+    "ToolError",
+    "ToolResult",
+]
+
 
 class ToolError(BaseModel):
     type: Literal["tool_error"] = "tool_error"

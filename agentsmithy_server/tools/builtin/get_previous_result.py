@@ -2,15 +2,33 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+# Local TypedDicts for type hints
+from typing import TYPE_CHECKING, Any, Literal, TypedDict
 
 from pydantic import BaseModel, Field
 
 from agentsmithy_server.core.tool_results_storage import ToolResultsStorage
 from agentsmithy_server.tools.core import result as result_factory
+from agentsmithy_server.tools.registry import register_summary_for
 from agentsmithy_server.utils.logger import agent_logger
 
 from ..base_tool import BaseTool
+
+
+class GetPreviousResultArgsDict(TypedDict):
+    tool_call_id: str
+
+
+class PreviousResultSuccess(TypedDict, total=False):
+    type: Literal["previous_result"]
+    tool_call_id: str
+    tool_name: str | None
+    original_args: dict[str, Any] | None
+    result: dict[str, Any] | None
+    timestamp: float | int | None
+
+
+# Summary registration is declared above with imports
 
 if TYPE_CHECKING:
     from agentsmithy_server.core.project import Project
@@ -119,3 +137,13 @@ class GetPreviousResultTool(BaseTool):
                 f"Failed to retrieve tool result: {str(e)}",
                 error_type=type(e).__name__,
             )
+
+
+@register_summary_for(GetPreviousResultTool)
+def _summarize_get_previous_result(
+    args: GetPreviousResultArgsDict, result: PreviousResultSuccess | dict[str, Any]
+) -> str:
+    if result.get("type") != "previous_result":
+        return "Previous tool result not found"
+    name = result.get("tool_name") or "tool"
+    return f"Loaded previous result for {name}"

@@ -2,12 +2,39 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Any
+
+# Local TypedDicts for type hints
+from typing import Any, Literal, TypedDict
 
 from pydantic import BaseModel, Field
 
+from agentsmithy_server.tools.registry import register_summary_for
+
 from ..base_tool import BaseTool
 from ..guards.file_restrictions import get_file_restrictions
+
+
+class SearchFilesArgsDict(TypedDict, total=False):
+    path: str
+    regex: str
+    file_pattern: str | None
+
+
+class SearchFilesResultSuccess(TypedDict):
+    type: Literal["search_files_result"]
+    results: list[dict[str, Any]]
+
+
+class SearchFilesResultError(TypedDict):
+    type: Literal["search_files_error"]
+    path: str
+    error: str
+    error_type: str
+
+
+SearchFilesResult = SearchFilesResultSuccess | SearchFilesResultError
+
+# Summary registration is declared above with imports
 
 
 class SearchFilesArgs(BaseModel):
@@ -127,3 +154,13 @@ class SearchFilesTool(BaseTool):
                 "error": f"Error searching files: {str(e)}",
                 "error_type": type(e).__name__,
             }
+
+
+@register_summary_for(SearchFilesTool)
+def _summarize_search_files(
+    args: SearchFilesArgsDict, result: SearchFilesResult
+) -> str:
+    if result["type"] == "search_files_error":
+        return f"Error searching {args.get('path')}: {result['error']}"
+    count = len(result["results"])
+    return f"Searched {args.get('path')} - {count} matches"

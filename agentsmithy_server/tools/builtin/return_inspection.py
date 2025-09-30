@@ -4,6 +4,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from agentsmithy_server.tools.registry import register_summary_for
+
 from ..base_tool import BaseTool
 
 
@@ -29,3 +31,10 @@ class ReturnInspectionTool(BaseTool):
     async def _arun(self, **kwargs: Any) -> dict[str, Any]:
         # Pydantic validated kwargs match ReturnInspectionArgs
         return {"type": "inspection_result", "analysis": kwargs}
+
+
+@register_summary_for(ReturnInspectionTool)
+def _summarize_return_inspection(args: dict[str, Any], result: dict[str, Any]) -> str:
+    if result.get("type") == "inspection_result":
+        return "Returned project inspection"
+    return "Inspection return"

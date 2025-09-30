@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, TypedDict
 
 from pydantic import BaseModel, Field
+
+from agentsmithy_server.tools.registry import register_summary_for
 
 from ..base_tool import BaseTool
 from ..guards.file_restrictions import get_file_restrictions
@@ -113,3 +115,37 @@ class ListFilesTool(BaseTool):
                 "error": f"Error listing directory: {str(e)}",
                 "error_type": type(e).__name__,
             }
+
+
+# Summary registration for tools
+# Local TypedDicts for type hints
+
+
+class ListFilesArgsDict(TypedDict, total=False):
+    path: str
+    recursive: bool
+    hidden_files: bool
+
+
+class ListFilesResultSuccess(TypedDict):
+    type: Literal["list_files_result"]
+    path: str
+    items: list[str]
+
+
+class ListFilesResultError(TypedDict):
+    type: Literal["list_files_error"]
+    path: str
+    error: str
+    error_type: str
+
+
+ListFilesResult = ListFilesResultSuccess | ListFilesResultError
+
+
+@register_summary_for(ListFilesTool)
+def _summarize_list_files(args: ListFilesArgsDict, result: ListFilesResult) -> str:
+    if result["type"] == "list_files_error":
+        return f"Error listing {args.get('path')}: {result['error']}"
+    items = result["items"]
+    return f"Listed {len(items)} items in {args.get('path')}"
