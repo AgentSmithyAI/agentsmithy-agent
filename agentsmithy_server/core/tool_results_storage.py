@@ -117,8 +117,19 @@ class ToolResultsStorage:
             return f"Searched for '{pattern}' - found {count} matches"
         elif tool_name == "list_files":
             path = args.get("path", args.get("target_directory", "."))
+            # Simpler summary: prefer `items` list and report simple count of items.
+            # Keep backward compatibility with older `files`/`directories` fields.
+            items = result.get("items")
             files = result.get("files", [])
             dirs = result.get("directories", [])
+
+            if items is not None:
+                try:
+                    count = len(items)
+                except Exception:
+                    count = 0
+                return f"Listed {path} - {count} items"
+
             return f"Listed {path} - {len(files)} files, {len(dirs)} directories"
         else:
             return f"Executed {tool_name}"
