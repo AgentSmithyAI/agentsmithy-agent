@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Any
 
 from .base import BaseOSAdapter
 
@@ -110,3 +111,26 @@ class PosixAdapter(BaseOSAdapter):
 
         # 5) Last resort
         return "/bin/sh"
+
+    def make_shell_exec(self, command: str) -> tuple[list[str], dict[str, Any]]:
+        # Always run through POSIX shell with -c; start a new session so we can kill the group on timeout
+        shell_path = self.detect_shell() or "/bin/sh"
+        argv = [shell_path, "-c", command]
+        kwargs = {"start_new_session": True}
+        return argv, kwargs
+
+    def terminate_process(self, proc: Any) -> None:
+        try:
+            import os as _os
+            import signal
+
+            # Kill the whole process group if possible
+            if getattr(proc, "pid", None):
+                try:
+                    _os.killpg(proc.pid, signal.SIGKILL)
+                    return
+                except Exception:
+                    pass
+            proc.kill()
+        except Exception:
+            pass

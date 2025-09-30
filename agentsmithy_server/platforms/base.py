@@ -9,6 +9,8 @@ class OSAdapter(Protocol):
     def detect_shell(self) -> str | None: ...
     def os_context(self) -> dict[str, Any]: ...
     def shlex_split(self, command: str) -> list[str]: ...
+    def make_shell_exec(self, command: str) -> tuple[list[str], dict[str, Any]]: ...
+    def terminate_process(self, proc: Any) -> None: ...
 
 
 class BaseOSAdapter:
@@ -38,3 +40,20 @@ class BaseOSAdapter:
         import shlex
 
         return shlex.split(command, posix=True)
+
+    def make_shell_exec(self, command: str) -> tuple[list[str], dict[str, Any]]:
+        """Build argv and extra subprocess kwargs to execute a command via system shell.
+
+        Subclasses should override for platform-specific behavior.
+        """
+        raise NotImplementedError
+
+    def terminate_process(self, proc: Any) -> None:
+        """Terminate a running process tree appropriately for the platform.
+
+        Subclasses should override; the default best-effort kill is provided for safety.
+        """
+        try:
+            proc.kill()
+        except Exception:
+            pass

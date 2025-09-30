@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-import shlex
-import sys
 import time
 from pathlib import Path
 from typing import Any, Literal, TypedDict
@@ -60,23 +58,20 @@ class RunCommandArgs(BaseModel):
         default="utf-8",
         description="Text encoding for decoding stdout/stderr (errors replaced)",
     )
-    shell: bool = Field(
-        default=True,
-        description="Execute via system shell; keep True unless you know what you're doing",
-    )
 
 
+_ctx = _os_context()
 _OS_DESC = (
-    f"System context: system={_os_context().get('system')} {_os_context().get('release')}"
-    f", machine={_os_context().get('machine')}, python={_os_context().get('python')}"
-    f", shell={_os_context().get('shell') or 'unknown'}"
+    f"System context: system={_ctx.get('system')} {_ctx.get('release')},"
+    f" machine={_ctx.get('machine')}, python={_ctx.get('python')},"
+    f" shell={_ctx.get('shell') or 'unknown'}"
 )
 
 
 class RunCommandTool(BaseTool):
     name: str = "run_command"
     description: str = (
-        "Execute an operating system command and return stdout, stderr, exit code,"
+        "Execute an operating system command via system shell and return stdout, stderr, exit code,"
         " duration, and environment context. " + _OS_DESC
     )
     args_schema: type[BaseModel] | dict[str, Any] | None = RunCommandArgs
@@ -115,70 +110,17 @@ class RunCommandTool(BaseTool):
         # Start the process
         start = time.perf_counter()
         try:
-            if args.shell:
-                # When using shell=True, pass a single string command
-                cmd = args.command
-                proc = await asyncio.create_subprocess_shell(
-                    cmd,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                    cwd=str(cwd_path) if cwd_path else None,
-                    env=env,
-                )
-            else:
-                # Build argv for shell=False
-                argv_tmp = _adapter.shlex_split(args.command)
-
-                # Detect Python executable and '-c' usage based on argv_tmp, but reconstruct code from the original string
-                is_python = False
-                try:
-                    exe_base = Path(argv_tmp[0]).name.lower() if argv_tmp else ""
-                    is_python = (
-                        exe_base.startswith("python")
-                        or exe_base == Path(sys.executable).name.lower()
-                    )
-                except Exception:
-                    is_python = False
-
-                if is_python and "-c" in argv_tmp:
-                    # Locate '-c' in the original string and keep everything after it as a single code argument
-                    try:
-                        c_pos = args.command.index("-c")
-                    except ValueError:
-                        c_pos = -1
-                    if c_pos != -1:
-                        j = c_pos + 2
-                        # Skip following whitespace
-                        while j < len(args.command) and args.command[j].isspace():
-                            j += 1
-                        prefix = args.command[:j].strip()
-                        code_str = args.command[j:]
-                        # Normalize accidental literal newlines in code string to escaped form for Python -c
-                        if "\n" in code_str:
-                            code_str = code_str.replace("\n", r"\n")
-                        # Parse prefix (up to and including -c) to argv, then append code verbatim
-                        if os.name == "nt":
-                            prefix_argv = _adapter.shlex_split(prefix)
-                        else:
-                            prefix_argv = shlex.split(prefix, posix=True)
-                        argv = prefix_argv + [code_str]
-                    else:
-                        # Fallback: join the remainder tokens after '-c' (may lose quotes, but last resort)
-                        c_index = argv_tmp.index("-c")
-                        argv = argv_tmp[: c_index + 1] + [
-                            " ".join(argv_tmp[c_index + 1 :])
-                        ]
-                else:
-                    argv = argv_tmp
-
-                agent_logger.debug("run_command exec", argv=argv, shell=args.shell)
-                proc = await asyncio.create_subprocess_exec(
-                    *argv,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                    cwd=str(cwd_path) if cwd_path else None,
-                    env=env,
-                )
+            # Always execute via adapter-provided shell argv/kwargs
+            argv, extra_kwargs = _adapter.make_shell_exec(args.command)
+            agent_logger.debug("run_command exec", argv=argv)
+            proc = await asyncio.create_subprocess_exec(
+                *argv,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=str(cwd_path) if cwd_path else None,
+                env=env,
+                **extra_kwargs,
+            )
 
             try:
                 out_b, err_b = await asyncio.wait_for(
@@ -192,7 +134,7 @@ class RunCommandTool(BaseTool):
             except TimeoutError:
                 # Kill and collect any partial output
                 try:
-                    proc.kill()
+                    _adapter.terminate_process(proc)
                 except Exception:
                     pass
                 # Attempt to read any pending output briefly
@@ -344,7 +286,6 @@ class RunCommandArgsDict(TypedDict, total=False):
     env: dict[str, str]
     max_output_bytes: int
     encoding: str
-    shell: bool
 
 
 @register_summary_for(RunCommandTool)
