@@ -6,6 +6,14 @@ from typing import Any
 
 from .base import BaseOSAdapter
 
+# Locale defaults for POSIX to force English
+POSIX_LOCALE_DEFAULTS = {
+    "LC_ALL": "C",
+    "LC_MESSAGES": "C",
+    "LANG": "C",
+    "LANGUAGE": "en_US:en",
+}
+
 # NOTE: Keep previous behavior but extend coverage; do not remove prior entries.
 # Two lists as requested: where to search and what executable names to try.
 SHELL_SEARCH_DIRS: tuple[str, ...] = (
@@ -75,6 +83,15 @@ def _is_executable(path: str | os.PathLike[str]) -> bool:
 
 
 class PosixAdapter(BaseOSAdapter):
+    def english_locale_env(self, user_env: dict[str, str] | None) -> dict[str, str]:
+        import os as _os
+
+        base = _os.environ.copy()
+        base.update(POSIX_LOCALE_DEFAULTS)
+        if user_env:
+            base.update({str(k): str(v) for k, v in user_env.items()})
+        return base
+
     def detect_shell(self) -> str | None:
         # 1) Respect SHELL if it points to an existing executable
         shell = os.environ.get("SHELL")

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import time
 from pathlib import Path
 from typing import Any, Literal, TypedDict
@@ -9,6 +8,7 @@ from typing import Any, Literal, TypedDict
 from pydantic import BaseModel, Field
 
 from agentsmithy_server.platforms import get_os_adapter
+from agentsmithy_server.platforms.base import LocaleEnvBuilder
 from agentsmithy_server.tools.core import result as result_factory
 from agentsmithy_server.tools.core.types import ToolError, parse_tool_result
 from agentsmithy_server.tools.registry import register_summary_for
@@ -17,6 +17,9 @@ from agentsmithy_server.utils.logger import agent_logger
 from ..base_tool import BaseTool
 
 _adapter = get_os_adapter()
+
+# Help type-checkers know _adapter also builds locale envs
+_adapter_locale: LocaleEnvBuilder = _adapter  # type: ignore[assignment]
 
 
 def _detect_shell() -> str | None:
@@ -76,6 +79,13 @@ class RunCommandTool(BaseTool):
     )
     args_schema: type[BaseModel] | dict[str, Any] | None = RunCommandArgs
 
+    def _english_locale_env(self, user_env: dict[str, str] | None) -> dict[str, str]:
+        """Build English-locale environment via platform adapter.
+
+        If the adapter cannot determine locale env, let the exception propagate.
+        """
+        return _adapter_locale.english_locale_env(user_env)
+
     async def _arun(self, **kwargs: Any) -> dict[str, Any]:
         args = RunCommandArgs(**kwargs)
 
@@ -101,11 +111,8 @@ class RunCommandTool(BaseTool):
                     details={"cwd": args.cwd, "os": _os_context()},
                 )
 
-        env = None
-        if args.env:
-            # Merge with current environment
-            env = os.environ.copy()
-            env.update({str(k): str(v) for k, v in args.env.items()})
+        # Build environment with enforced English locale (caller can override via args.env)
+        env = self._english_locale_env(args.env)
 
         # Start the process
         start = time.perf_counter()

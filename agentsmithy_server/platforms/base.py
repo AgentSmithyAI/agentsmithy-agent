@@ -5,6 +5,10 @@ import sys
 from typing import Any, Protocol
 
 
+class LocaleEnvBuilder(Protocol):
+    def english_locale_env(self, user_env: dict[str, str] | None) -> dict[str, str]: ...
+
+
 class OSAdapter(Protocol):
     def detect_shell(self) -> str | None: ...
     def os_context(self) -> dict[str, Any]: ...
