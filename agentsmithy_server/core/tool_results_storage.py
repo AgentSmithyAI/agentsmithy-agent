@@ -110,6 +110,14 @@ class ToolResultsStorage:
     def _generate_summary(
         self, tool_name: str, args: dict[str, Any], result: dict[str, Any]
     ) -> str:
+        # Ensure builtin tool modules are imported so their @register_summary_for
+        # decorators execute at import time (defensive against call sites that
+        # haven't built the registry yet).
+        try:
+            import agentsmithy_server.tools.builtin  # noqa: F401
+        except Exception:
+            pass
+
         # Try registry by name first (fast path, backwards compatible)
         func = SUMMARY_REGISTRY.get(tool_name)
         if func:
