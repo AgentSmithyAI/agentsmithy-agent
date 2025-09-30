@@ -38,8 +38,9 @@ class GetPreviousResultTool(BaseTool):
         "Retrieve the full result of a PREVIOUS tool execution from EARLIER in the conversation. "
         "ONLY use this when you need specific data from a tool that was executed BEFORE the current task, "
         "and that data is REQUIRED to complete your current objective. Do not use this for retrieving results "
-        "of file operations, it's more correct to use the appropriate file operation tool again."
-        "Use it for non-idempotent tools, like web search."
+        "of file operations, it's more correct to use the appropriate file operation tool again. "
+        "This is especially important for non-idempotent tools, like web search, where running the tool again may yield different results. "
+        "Retrieving the previous result ensures consistency and avoids unnecessary repeated actions."
     )
     args_schema: type[BaseModel] = GetPreviousResultArgs
 
