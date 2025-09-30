@@ -137,7 +137,7 @@ class ToolRegistry:
         # Execute tool and wrap any exception as a structured error
         try:
             # Pass arguments via tool_input dict to satisfy BaseTool.arun signature
-            return await tool.arun(args)
+            return await tool.arun(tool_input=args)
         except Exception as e:
             try:
                 agent_logger.error(
