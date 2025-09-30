@@ -107,8 +107,14 @@ class ToolResultsStorage:
             return f"Ran command: {command} - {status}"
         elif tool_name == "search_files":
             pattern = args.get("regex", args.get("pattern", "unknown"))
-            matches = result.get("matches", [])
-            return f"Searched for '{pattern}' - found {len(matches)} matches"
+            # Our search_files tool returns {"type": "search_files_result", "results": [...]},
+            # while older/other implementations may use 'matches'. Prefer 'results' then 'matches'.
+            matches = result.get("results") or result.get("matches") or []
+            try:
+                count = len(matches)
+            except Exception:
+                count = 0
+            return f"Searched for '{pattern}' - found {count} matches"
         elif tool_name == "list_files":
             path = args.get("path", args.get("target_directory", "."))
             files = result.get("files", [])

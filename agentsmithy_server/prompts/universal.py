@@ -14,7 +14,7 @@ UNIVERSAL_SYSTEM = (
     "- If you are starting from scratch, use the web search tool to find the best practices."
     "# Rules"
     "- Respond using user's language, keep professional tone."
-    "- Always use English for source code, comments, documentation unless user specifies otherwise."
+    "- Always use English for source code, comments, documentation, commit messages unless user specifies otherwise."
     "- Respond as short as possible keeping the meaning intact."
     "- Never assume outcomes from tool calls; always process actions step-by-step."
     "- Maintain concise, technical responses."
