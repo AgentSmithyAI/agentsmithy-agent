@@ -237,9 +237,21 @@ jobs:
         shell: bash
         run: |
           pyinstaller --version
+          
+          # Detect UPX directory safely
+          UPX_ARG=""
+          if command -v upx >/dev/null 2>&1; then
+            UPX_PATH="$(command -v upx)"
+            UPX_DIR="$(dirname "$UPX_PATH")"
+            UPX_ARG="--upx-dir=$UPX_DIR"
+            echo "UPX found at: $UPX_PATH"
+          else
+            echo "Warning: UPX not found, building without compression"
+          fi
+          
           pyinstaller --onefile \
             --name agentsmithy \
-            --upx-dir=$(which upx | xargs dirname) \
+            $UPX_ARG \
             --collect-submodules agentsmithy_server.tools \
             --collect-submodules agentsmithy_server.tools.builtin \
             --collect-submodules chromadb \
