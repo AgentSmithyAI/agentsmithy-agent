@@ -38,6 +38,20 @@ class DialogUsageStorage:
             self._engine = get_engine(self._db_path)
         return self._engine
 
+    def dispose(self) -> None:
+        """Dispose the database engine and close connections."""
+        if self._engine is not None:
+            try:
+                self._engine.dispose()
+            except Exception:
+                pass
+            finally:
+                self._engine = None
+
+    def __del__(self) -> None:
+        """Clean up resources on garbage collection."""
+        self.dispose()
+
     def _ensure_db(self) -> None:
         engine = self._get_engine()
         BaseORM.metadata.create_all(engine)

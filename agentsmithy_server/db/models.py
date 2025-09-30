@@ -1,11 +1,50 @@
 from __future__ import annotations
 
-from sqlalchemy import Index, Integer, String, Text
+import zlib
+
+from sqlalchemy import Index, Integer, LargeBinary, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.types import TypeDecorator
 
 
 class BaseORM(DeclarativeBase):
     pass
+
+
+def compress_text(text: str) -> bytes:
+    """Compress text using zlib for storage."""
+    return zlib.compress(text.encode("utf-8"), level=6)
+
+
+def decompress_text(data: bytes) -> str:
+    """Decompress zlib-compressed data back to text."""
+    return zlib.decompress(data).decode("utf-8")
+
+
+class CompressedText(TypeDecorator):
+    """SQLAlchemy type that automatically compresses text data.
+
+    Stores data as compressed bytes in the database but presents it as
+    text in Python.
+    """
+
+    impl = LargeBinary
+    cache_ok = True
+
+    def process_bind_param(self, value, dialect):
+        """Compress text before storing in database."""
+        if value is None:
+            return None
+        # Skip if already bytes (already compressed)
+        if isinstance(value, bytes):
+            return value
+        return compress_text(value)
+
+    def process_result_value(self, value, dialect):
+        """Decompress data when reading from database."""
+        if value is None:
+            return None
+        return decompress_text(value)
 
 
 class ToolResultORM(BaseORM):
@@ -14,8 +53,8 @@ class ToolResultORM(BaseORM):
     tool_call_id: Mapped[str] = mapped_column(String, primary_key=True)
     dialog_id: Mapped[str] = mapped_column(String, index=True)
     tool_name: Mapped[str] = mapped_column(String)
-    args_json: Mapped[str] = mapped_column(Text)
-    result_json: Mapped[str] = mapped_column(Text)
+    args_json: Mapped[str] = mapped_column(CompressedText)
+    result_json: Mapped[str] = mapped_column(CompressedText)
     timestamp: Mapped[str] = mapped_column(String)
     size_bytes: Mapped[int] = mapped_column(Integer)
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -28,7 +67,7 @@ class DialogSummaryORM(BaseORM):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     dialog_id: Mapped[str] = mapped_column(String, index=True)
     cutoff_message_index: Mapped[int] = mapped_column(Integer)
-    summary_text: Mapped[str] = mapped_column(Text)
+    summary_text: Mapped[str] = mapped_column(CompressedText)
     keep_last: Mapped[int] = mapped_column(Integer)
     created_at: Mapped[str] = mapped_column(String)
     summarized_count: Mapped[int] = mapped_column(Integer)

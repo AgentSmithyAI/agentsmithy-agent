@@ -93,6 +93,20 @@ class ToolResultsStorage:
             self._engine = get_engine(self._db_path)
         return self._engine
 
+    def dispose(self) -> None:
+        """Dispose the database engine and close connections."""
+        if self._engine is not None:
+            try:
+                self._engine.dispose()
+            except Exception:
+                pass
+            finally:
+                self._engine = None
+
+    def __del__(self) -> None:
+        """Clean up resources on garbage collection."""
+        self.dispose()
+
     def _ensure_db(self) -> None:
         """Ensure the SQLite tables exist using SQLAlchemy metadata.
 
@@ -184,7 +198,7 @@ class ToolResultsStorage:
             error_value = None
         engine = self._get_engine()
         with get_session(engine) as session:
-            session.merge(
+            session.add(
                 ToolResultORM(
                     tool_call_id=tool_call_id,
                     dialog_id=self.dialog_id,
