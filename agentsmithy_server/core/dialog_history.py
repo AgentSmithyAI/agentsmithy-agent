@@ -54,9 +54,10 @@ class DialogHistory:
             # Construct SQLite URL; use absolute path
             db_url = f"sqlite:///{self.db_path}"
 
+            # LangChain 0.2.2+ uses `connection` (connection_string was deprecated).
             self._history = SQLChatMessageHistory(
                 session_id=self.dialog_id,
-                connection_string=db_url,
+                connection=db_url,
             )
         return self._history
 
