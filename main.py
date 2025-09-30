@@ -19,7 +19,17 @@ sys.path.insert(0, str(Path(__file__).parent))
 shutdown_event = asyncio.Event()
 
 if __name__ == "__main__":
-    # Setup logging for startup
+    # Parse arguments FIRST (before any config validation) so --help works always
+    parser = ArgumentParser(description="Start AgentSmithy server")
+    parser.add_argument(
+        "--workdir",
+        required=True,
+        help="Absolute path to the working directory (agent state stored here)",
+    )
+    # No --project: workdir is the project
+    args, _ = parser.parse_known_args()
+
+    # Setup logging for startup (after argparse, so --help doesn't need logger)
     from agentsmithy_server.utils.logger import get_logger
 
     startup_logger = get_logger("server.startup")
@@ -35,7 +45,7 @@ if __name__ == "__main__":
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
-    # Check if .env file exists
+    # Check if .env file exists (after argparse, so --help doesn't need .env)
     if not os.path.exists(".env"):
         startup_logger.error(
             ".env file not found! Please create it from .env.example and add your OPENAI_API_KEY"
@@ -52,15 +62,6 @@ if __name__ == "__main__":
         sys.exit(1)
 
     try:
-        # Parse required --workdir before importing the server
-        parser = ArgumentParser(description="Start AgentSmithy server")
-        parser.add_argument(
-            "--workdir",
-            required=True,
-            help="Absolute path to the working directory (agent state stored here)",
-        )
-        # No --project: workdir is the project
-        args, _ = parser.parse_known_args()
 
         workdir_path = Path(args.workdir).expanduser().resolve()
         if not workdir_path.exists():

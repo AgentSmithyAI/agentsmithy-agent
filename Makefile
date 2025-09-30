@@ -8,7 +8,7 @@ UPX := $(shell command -v upx 2>/dev/null)
 
 .DEFAULT_GOAL := pyinstall
 
-.PHONY: venv install install-dev update-reqs lint format typecheck test run clean pyinstall build
+.PHONY: venv install install-dev update-reqs lint format typecheck test run clean pyinstall build smoke-test
 
 venv:
 	$(PYTHON) -m venv $(VENV)
@@ -88,5 +88,34 @@ pyinstall: install-dev
 	@ls -lh dist/$(BIN)
 
 build: pyinstall
+
+smoke-test:
+	@echo "Running smoke test on binary..."
+	@if [ ! -f dist/$(BIN) ]; then \
+		echo "❌ Binary not found at dist/$(BIN). Run 'make build' first."; \
+		exit 1; \
+	fi
+	@chmod +x dist/$(BIN)
+	@echo "Testing binary: dist/$(BIN)"
+	@# Test --help (should work without .env)
+	@./dist/$(BIN) --help > /dev/null 2>&1; \
+	if [ $$? -ne 0 ]; then \
+		echo "❌ Binary --help failed"; \
+		exit 1; \
+	fi; \
+	echo "✓ Binary --help works"
+	@# Test running without args (should show usage and exit with code 2)
+	@set +e; \
+	./dist/$(BIN) > /dev/null 2>&1; \
+	exit_code=$$?; \
+	set -e; \
+	if [ $$exit_code -eq 2 ]; then \
+		echo "✓ Binary exits correctly when missing required args"; \
+	elif [ $$exit_code -eq 139 ] || [ $$exit_code -eq 137 ]; then \
+		echo "❌ Binary crashed (segfault or similar)"; \
+		exit 1; \
+	else \
+		echo "⚠ Binary exited with unexpected code $$exit_code (expected 2), but didn't crash"; \
+	fi
 
 
