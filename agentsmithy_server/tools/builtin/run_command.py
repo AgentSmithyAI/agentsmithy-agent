@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-import platform
 import shlex
 import sys
 import time
@@ -11,6 +10,7 @@ from typing import Any, Literal, TypedDict
 
 from pydantic import BaseModel, Field
 
+from agentsmithy_server.platforms import get_os_adapter
 from agentsmithy_server.tools.core import result as result_factory
 from agentsmithy_server.tools.core.types import ToolError, parse_tool_result
 from agentsmithy_server.tools.registry import register_summary_for
@@ -18,64 +18,20 @@ from agentsmithy_server.utils.logger import agent_logger
 
 from ..base_tool import BaseTool
 
+_adapter = get_os_adapter()
+
 
 def _detect_shell() -> str | None:
-    """Detect the preferred system shell executable.
-
-    Resolution strategy:
-    - Windows: return COMSPEC if set, otherwise 'cmd.exe'.
-    - POSIX (Linux/macOS/BSD): return SHELL if set.
-      If SHELL is unset on macOS (Darwin), prefer '/bin/zsh' (default since 10.15),
-      then '/bin/bash' if available, else fall back to '/bin/sh'.
-      On other POSIX systems, fall back to '/bin/sh'.
-
-    Returns:
-        Path to the shell executable as a string, or None if detection fails.
-        Note: with current fallbacks this function typically returns a string.
-    """
-    # Prefer explicit environment variables
-    if os.name == "nt":
-        return os.environ.get("COMSPEC") or "cmd.exe"
-
-    shell = os.environ.get("SHELL")
-    if shell:
-        return shell
-
-    # Platform-specific sensible defaults
-    if sys.platform == "darwin":  # macOS
-        for candidate in ("/bin/zsh", "/bin/bash", "/bin/sh"):
-            if Path(candidate).exists():
-                return candidate
-        return "/bin/sh"
-
-    # Generic POSIX fallback
-    return "/bin/sh"
+    return _adapter.detect_shell()
 
 
 def _os_context() -> dict[str, Any]:
     """Collect a snapshot of OS and runtime context for diagnostics.
 
-    Returns a mapping with keys such as:
-    - platform, system, release, version, machine, python, shell, and optionally processor.
-
-    The function is defensive and never raises; it returns an empty dict on failure.
+    Delegates to the platform adapter and never raises.
     """
     try:
-        ctx: dict[str, Any] = {
-            "platform": sys.platform,
-            "system": platform.system(),
-            "release": platform.release(),
-            "version": platform.version(),
-            "machine": platform.machine(),
-            "python": platform.python_version(),
-            "shell": _detect_shell(),
-        }
-        # Additional hints
-        try:
-            ctx["processor"] = platform.processor()
-        except Exception:
-            pass
-        return ctx
+        return _adapter.os_context()
     except Exception:
         return {}
 
@@ -111,9 +67,9 @@ class RunCommandArgs(BaseModel):
 
 
 _OS_DESC = (
-    f"System context: system={platform.system()} {platform.release()}"
-    f", machine={platform.machine()}, python={platform.python_version()}"
-    f", shell={_detect_shell() or 'unknown'}"
+    f"System context: system={_os_context().get('system')} {_os_context().get('release')}"
+    f", machine={_os_context().get('machine')}, python={_os_context().get('python')}"
+    f", shell={_os_context().get('shell') or 'unknown'}"
 )
 
 
@@ -171,10 +127,7 @@ class RunCommandTool(BaseTool):
                 )
             else:
                 # Build argv for shell=False
-                if os.name == "nt":
-                    argv_tmp = shlex.split(args.command, posix=False)
-                else:
-                    argv_tmp = shlex.split(args.command, posix=True)
+                argv_tmp = _adapter.shlex_split(args.command)
 
                 # Detect Python executable and '-c' usage based on argv_tmp, but reconstruct code from the original string
                 is_python = False
@@ -205,7 +158,7 @@ class RunCommandTool(BaseTool):
                             code_str = code_str.replace("\n", r"\n")
                         # Parse prefix (up to and including -c) to argv, then append code verbatim
                         if os.name == "nt":
-                            prefix_argv = shlex.split(prefix, posix=False)
+                            prefix_argv = _adapter.shlex_split(prefix)
                         else:
                             prefix_argv = shlex.split(prefix, posix=True)
                         argv = prefix_argv + [code_str]
