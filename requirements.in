@@ -1,6 +1,6 @@
 # Core dependencies
 fastapi
-uvicorn[standard]
+uvicorn  # Without [standard] to avoid Unix-only deps like uvloop
 sse-starlette
 python-multipart
 

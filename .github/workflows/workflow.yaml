@@ -178,6 +178,18 @@ jobs:
           fi
           echo "tag=$TAG" >> $GITHUB_OUTPUT
           echo "version=$VER" >> $GITHUB_OUTPUT
+      - name: Install UPX for compression
+        if: steps.ver.outputs.version != ''
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            sudo apt-get update && sudo apt-get install -y upx-ucl
+          elif [ "${{ runner.os }}" = "macOS" ]; then
+            brew install upx
+          elif [ "${{ runner.os }}" = "Windows" ]; then
+            choco install upx -y
+          fi
+          upx --version
       - name: Install build dependencies
         if: steps.ver.outputs.version != ''
         shell: bash
@@ -191,7 +203,22 @@ jobs:
           pyinstaller --version
           pyinstaller --onefile \
             --name agentsmithy \
+            --upx-dir=$(which upx | xargs dirname) \
+            --collect-submodules agentsmithy_server.tools \
+            --collect-submodules agentsmithy_server.tools.builtin \
+            --collect-submodules chromadb \
+            --collect-submodules chromadb.telemetry.product \
+            --collect-data chromadb \
+            --collect-submodules tiktoken \
+            --collect-submodules tiktoken_ext \
+            --exclude-module pytest \
+            --exclude-module pytest_asyncio \
+            --exclude-module black \
+            --exclude-module isort \
+            --exclude-module mypy \
+            --exclude-module ruff \
             main.py
+          ls -lh dist/agentsmithy${{ matrix.ext }}
       - name: Rename artifacts with version and latest aliases
         if: steps.ver.outputs.version != ''
         shell: bash
@@ -206,6 +233,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: agentsmithy-${{ matrix.label }}-${{ steps.ver.outputs.version }}
+          retention-days: 1
           path: |
             dist/agentsmithy-${{ matrix.label }}-${{ steps.ver.outputs.version }}${{ matrix.ext }}
   release_upload:
