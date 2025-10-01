@@ -1,3 +1,10 @@
+## [1.1.2](https://github.com/AgentSmithyAI/agentsmithy-agent/compare/v1.1.1...v1.1.2) (2025-10-01)
+
+
+### Bug Fixes
+
+* Improve agent tools flow ([#19](https://github.com/AgentSmithyAI/agentsmithy-agent/issues/19)) ([952b9f5](https://github.com/AgentSmithyAI/agentsmithy-agent/commit/952b9f510add69ad209d2d80d33245f6ce4c2e6c))
+
 ## [1.1.1](https://github.com/AgentSmithyAI/agentsmithy-agent/compare/v1.1.0...v1.1.1) (2025-09-30)
 
 
