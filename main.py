@@ -121,6 +121,7 @@ if __name__ == "__main__":
             project = get_current_project()
             project.root.mkdir(parents=True, exist_ok=True)
             project.ensure_state_dir()
+            project.ensure_gitignore_entry()  # Ensure .agentsmithy is in .gitignore
             should_inspect = not project.has_metadata()
             if should_inspect:
                 startup_logger.info(
