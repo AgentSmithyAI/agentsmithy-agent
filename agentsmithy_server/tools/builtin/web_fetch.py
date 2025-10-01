@@ -1,14 +1,36 @@
 from __future__ import annotations
 
-from typing import Any
+# Local TypedDicts for type hints
+from typing import Any, Literal, TypedDict
 
 import aiohttp
 from playwright.async_api import async_playwright
 from pydantic import BaseModel, Field, HttpUrl
 
 from agentsmithy_server.config import settings
+from agentsmithy_server.tools.core import result as result_factory
+from agentsmithy_server.tools.core.types import ToolError, parse_tool_result
+from agentsmithy_server.tools.registry import register_summary_for
 
 from ..base_tool import BaseTool
+
+
+class WebFetchArgsDict(TypedDict):
+    url: str
+
+
+class WebFetchSuccess(BaseModel):
+    type: Literal["web_browse_result"] = "web_browse_result"
+    mode: Literal["http", "js"]
+    url: str
+    final_url: str
+    status: int | None = None
+    content_type: str | None = None
+    encoding: str | None = None
+    text: str | None = None
+
+
+# Summary registration is declared above with imports
 
 
 class WebFetchArgs(BaseModel):
@@ -102,21 +124,21 @@ class WebFetchTool(BaseTool):
                         "text": text,
                     }
             except TimeoutError:
-                return {
-                    "type": "web_browse_error",
-                    "mode": "http",
-                    "url": str(args.url),
-                    "error": "HTTP timeout",
-                    "error_type": "Timeout",
-                }
+                return result_factory.error(
+                    "web_fetch",
+                    code="timeout",
+                    message="HTTP timeout",
+                    error_type="Timeout",
+                    details={"mode": "http", "url": str(args.url)},
+                )
             except Exception as e:
-                return {
-                    "type": "web_browse_error",
-                    "mode": "http",
-                    "url": str(args.url),
-                    "error": str(e),
-                    "error_type": type(e).__name__,
-                }
+                return result_factory.error(
+                    "web_fetch",
+                    code="http_error",
+                    message=str(e),
+                    error_type=type(e).__name__,
+                    details={"mode": "http", "url": str(args.url)},
+                )
 
     async def _render_js(self, args: WebFetchArgs) -> dict[str, Any]:
         try:
@@ -159,10 +181,19 @@ class WebFetchTool(BaseTool):
                     "text": html,
                 }
         except Exception as e:
-            return {
-                "type": "web_browse_error",
-                "mode": "js",
-                "url": str(args.url),
-                "error": str(e),
-                "error_type": type(e).__name__,
-            }
+            return result_factory.error(
+                "web_fetch",
+                code="js_error",
+                message=str(e),
+                error_type=type(e).__name__,
+                details={"mode": "js", "url": str(args.url)},
+            )
+
+
+@register_summary_for(WebFetchTool)
+def _summarize_web_fetch(args: WebFetchArgsDict, result: dict[str, Any]) -> str:
+    r = parse_tool_result(result, WebFetchSuccess)
+    if isinstance(r, ToolError):
+        return f"{args.get('url')}: {r.error}"
+    text_len = len(r.text or "")
+    return f"{r.url} ({r.mode}, {r.status}): {text_len} bytes"

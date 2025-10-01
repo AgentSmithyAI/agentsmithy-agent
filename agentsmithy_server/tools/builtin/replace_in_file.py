@@ -4,14 +4,36 @@ import difflib
 import os
 import re
 from pathlib import Path
-from typing import Any
+
+# Local TypedDicts for type hints
+from typing import Any, Literal, TypedDict
 
 from pydantic import BaseModel, Field
 
 from agentsmithy_server.services.versioning import VersioningTracker
+from agentsmithy_server.tools.core.types import ToolError, parse_tool_result
+from agentsmithy_server.tools.registry import register_summary_for
 from agentsmithy_server.utils.logger import agent_logger
 
 from ..base_tool import BaseTool
+
+
+class ReplaceInFileArgsDict(TypedDict):
+    path: str
+    diff: str
+
+
+class ReplaceInFileSuccess(BaseModel):
+    type: Literal["replace_file_result"] = "replace_file_result"
+    path: str
+    diff: str | None = None
+    checkpoint: str | None = None
+
+
+ReplaceInFileResult = ReplaceInFileSuccess | ToolError
+
+
+# Summary registration is declared above with imports
 
 
 class ReplaceArgs(BaseModel):
@@ -132,6 +154,28 @@ class ReplaceInFileTool(BaseTool):
             "diff": diff_str,
             "checkpoint": getattr(checkpoint, "commit_id", None),
         }
+
+
+@register_summary_for(ReplaceInFileTool)
+def _summarize_replace_in_file(
+    args: ReplaceInFileArgsDict, result: dict[str, Any]
+) -> str:
+    r = parse_tool_result(result, ReplaceInFileSuccess)
+    if isinstance(r, ToolError):
+        return f"{args.get('path')}: {r.error}"
+
+    # Extract diff stats if available
+    if r.diff:
+        lines = r.diff.splitlines()
+        added = sum(
+            1 for line in lines if line.startswith("+") and not line.startswith("+++")
+        )
+        removed = sum(
+            1 for line in lines if line.startswith("-") and not line.startswith("---")
+        )
+        return f"{r.path}: +{added} -{removed}"
+
+    return f"{r.path}"
 
 
 def _apply_search_replace_blocks(diff_text: str, file_path: Path) -> str:

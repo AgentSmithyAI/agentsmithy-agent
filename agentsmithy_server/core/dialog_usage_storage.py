@@ -33,10 +33,33 @@ class DialogUsageStorage:
         self._db_path: Path = DialogHistory(project, dialog_id).db_path
         self._engine: Engine | None = engine
 
+    def __enter__(self):
+        """Context manager entry."""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit - dispose resources."""
+        self.dispose()
+        return False
+
     def _get_engine(self) -> Engine:
         if self._engine is None:
             self._engine = get_engine(self._db_path)
         return self._engine
+
+    def dispose(self) -> None:
+        """Dispose the database engine and close connections."""
+        if self._engine is not None:
+            try:
+                self._engine.dispose()
+            except Exception:
+                pass
+            finally:
+                self._engine = None
+
+    def __del__(self) -> None:
+        """Clean up resources on garbage collection."""
+        self.dispose()
 
     def _ensure_db(self) -> None:
         engine = self._get_engine()

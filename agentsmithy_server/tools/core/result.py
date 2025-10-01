@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+__all__ = ["error", "not_found"]
+
 
 def error(
     tool: str,
@@ -11,16 +13,16 @@ def error(
     error_type: str | None = None,
     details: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Standard error envelope for tools.
+    """Standard error envelope for tools (JSON friendly).
 
-    Example:
-    {"type": "error", "tool": "web_search", "code": "rate_limited", "message": "..."}
+    Shape:
+    {"type": "tool_error", "name": "<tool>", "code": "<code>", "error": "<message>", "error_type": "<Exc>", "details": {...}}
     """
     payload: dict[str, Any] = {
-        "type": "error",
-        "tool": tool,
+        "type": "tool_error",
+        "name": tool,
         "code": code,
-        "message": message,
+        "error": message,
     }
     if error_type:
         payload["error_type"] = error_type
@@ -40,11 +42,11 @@ def not_found(
     """Standard not-found envelope as an error with code=not_found.
 
     Example:
-    {"type": "error", "tool": "get_tool_result", "code": "not_found", "resource": "tool_result", "id": "..."}
+    {"type": "tool_error", "name": "get_tool_result", "code": "not_found", "resource": "tool_result", "id": "..."}
     """
     payload: dict[str, Any] = {
-        "type": "error",
-        "tool": tool,
+        "type": "tool_error",
+        "name": tool,
         "code": "not_found",
         "resource": resource,
         "id": resource_id,

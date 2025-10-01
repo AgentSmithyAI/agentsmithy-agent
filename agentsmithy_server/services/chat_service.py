@@ -208,8 +208,8 @@ class ChatService:
         try:
             # Try persisted summary to decide whether to load only tail K
             try:
-                storage = DialogSummaryStorage(project, dialog_id)
-                stored = storage.load()
+                with DialogSummaryStorage(project, dialog_id) as storage:
+                    stored = storage.load()
             except Exception:
                 stored = None
 

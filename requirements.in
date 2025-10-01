@@ -27,7 +27,7 @@ dulwich
 structlog
 
 # Web Search
-duckduckgo-search
+ddgs
 
 # Web rendering (mandatory)
 playwright

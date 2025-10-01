@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, TypedDict
 
 from pydantic import BaseModel, Field
+
+from agentsmithy_server.tools.core import result as result_factory
+from agentsmithy_server.tools.core.types import ToolError, parse_tool_result
+from agentsmithy_server.tools.registry import register_summary_for
 
 from ..base_tool import BaseTool
 from ..guards.file_restrictions import get_file_restrictions
@@ -50,29 +54,32 @@ class ListFilesTool(BaseTool):
 
         try:
             if not base.exists():
-                return {
-                    "type": "list_files_error",
-                    "path": str(base),
-                    "error": f"Path does not exist: {base}",
-                    "error_type": "PathNotFoundError",
-                }
+                return result_factory.error(
+                    "list_files",
+                    code="not_found",
+                    message=f"Path does not exist: {base}",
+                    error_type="PathNotFoundError",
+                    details={"path": str(base)},
+                )
 
             if not base.is_dir():
-                return {
-                    "type": "list_files_error",
-                    "path": str(base),
-                    "error": f"Path is not a directory: {base}",
-                    "error_type": "NotADirectoryError",
-                }
+                return result_factory.error(
+                    "list_files",
+                    code="not_a_directory",
+                    message=f"Path is not a directory: {base}",
+                    error_type="NotADirectoryError",
+                    details={"path": str(base)},
+                )
 
             # Check if the path is restricted (e.g., root or home directory)
             if restrictions.is_restricted_path(base):
-                return {
-                    "type": "list_files_error",
-                    "path": str(base),
-                    "error": f"Access to this directory is restricted: {base}",
-                    "error_type": "RestrictedPathError",
-                }
+                return result_factory.error(
+                    "list_files",
+                    code="restricted",
+                    message=f"Access to this directory is restricted: {base}",
+                    error_type="RestrictedPathError",
+                    details={"path": str(base)},
+                )
 
             if recursive:
                 for p in base.rglob("*"):
@@ -100,16 +107,45 @@ class ListFilesTool(BaseTool):
             }
 
         except PermissionError:
-            return {
-                "type": "list_files_error",
-                "path": str(base),
-                "error": f"Permission denied accessing directory: {base}",
-                "error_type": "PermissionError",
-            }
+            return result_factory.error(
+                "list_files",
+                code="permission_denied",
+                message=f"Permission denied accessing directory: {base}",
+                error_type="PermissionError",
+                details={"path": str(base)},
+            )
         except Exception as e:
-            return {
-                "type": "list_files_error",
-                "path": str(base),
-                "error": f"Error listing directory: {str(e)}",
-                "error_type": type(e).__name__,
-            }
+            return result_factory.error(
+                "list_files",
+                code="exception",
+                message=f"Error listing directory: {str(e)}",
+                error_type=type(e).__name__,
+                details={"path": str(base)},
+            )
+
+
+# Summary registration for tools
+# Local TypedDicts for type hints
+
+
+class ListFilesArgsDict(TypedDict, total=False):
+    path: str
+    recursive: bool
+    hidden_files: bool
+
+
+class ListFilesSuccess(BaseModel):
+    type: Literal["list_files_result"] = "list_files_result"
+    path: str
+    items: list[str]
+
+
+ListFilesResult = ListFilesSuccess | ToolError
+
+
+@register_summary_for(ListFilesTool)
+def _summarize_list_files(args: ListFilesArgsDict, result: dict[str, Any]) -> str:
+    r = parse_tool_result(result, ListFilesSuccess)
+    if isinstance(r, ToolError):
+        return f"{args.get('path')}: {r.error}"
+    return f"{r.path}: {len(r.items)} items"

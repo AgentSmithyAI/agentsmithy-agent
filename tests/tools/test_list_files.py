@@ -66,12 +66,12 @@ async def test_list_files_restricted_paths(tmp_path: Path):
 
     # Test root directory access
     res = await _run(t, path="/")
-    assert res["type"] == "list_files_error"
+    assert res["type"] in {"list_files_error", "tool_error"}
     assert "restricted" in res["error"].lower()
 
     # Test home directory access
     res = await _run(t, path=str(Path.home()))
-    assert res["type"] == "list_files_error"
+    assert res["type"] in {"list_files_error", "tool_error"}
     assert "restricted" in res["error"].lower()
 
     # Test normal directory access
@@ -84,7 +84,7 @@ async def test_list_files_nonexistent_path(tmp_path: Path):
     t = ListFilesTool()
     res = await _run(t, path=str(tmp_path / "nonexistent"))
 
-    assert res["type"] == "list_files_error"
+    assert res["type"] in {"list_files_error", "tool_error"}
     assert res["error_type"] == "PathNotFoundError"
     assert "does not exist" in res["error"]
 
@@ -97,6 +97,6 @@ async def test_list_files_file_instead_of_directory(tmp_path: Path):
     t = ListFilesTool()
     res = await _run(t, path=str(file_path))
 
-    assert res["type"] == "list_files_error"
+    assert res["type"] in {"list_files_error", "tool_error"}
     assert res["error_type"] == "NotADirectoryError"
     assert "not a directory" in res["error"]

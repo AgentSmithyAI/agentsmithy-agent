@@ -1,11 +1,30 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, TypedDict
 
 from pydantic import BaseModel, Field
 
+from agentsmithy_server.tools.core import result as result_factory
+from agentsmithy_server.tools.core.types import ToolError, parse_tool_result
+from agentsmithy_server.tools.registry import register_summary_for
+
 from ..base_tool import BaseTool
+
+
+class ReadFileArgsDict(TypedDict):
+    path: str
+
+
+class ReadFileSuccess(BaseModel):
+    type: Literal["read_file_result"] = "read_file_result"
+    path: str
+    content: str
+
+
+ReadFileResult = ReadFileSuccess | ToolError
+
+# Summary registration is declared above with imports
 
 
 class ReadFileArgs(BaseModel):
@@ -22,46 +41,62 @@ class ReadFileTool(BaseTool):
 
         try:
             if not file_path.exists():
-                return {
-                    "type": "read_file_error",
-                    "path": str(file_path),
-                    "error": f"File not found: {file_path}",
-                    "error_type": "FileNotFoundError",
-                }
+                return result_factory.error(
+                    "read_file",
+                    code="not_found",
+                    message=f"File not found: {file_path}",
+                    error_type="FileNotFoundError",
+                    details={"path": str(file_path)},
+                )
 
             if not file_path.is_file():
-                return {
-                    "type": "read_file_error",
-                    "path": str(file_path),
-                    "error": f"Path is not a file: {file_path}",
-                    "error_type": "NotAFileError",
-                }
+                return result_factory.error(
+                    "read_file",
+                    code="not_a_file",
+                    message=f"Path is not a file: {file_path}",
+                    error_type="NotAFileError",
+                    details={"path": str(file_path)},
+                )
 
             content = file_path.read_text(encoding="utf-8")
-            return {
-                "type": "read_file_result",
-                "path": str(file_path),
-                "content": content,
-            }
+            return ReadFileSuccess(
+                path=str(file_path),
+                content=content,
+            ).model_dump()
 
         except PermissionError:
-            return {
-                "type": "read_file_error",
-                "path": str(file_path),
-                "error": f"Permission denied reading file: {file_path}",
-                "error_type": "PermissionError",
-            }
+            return result_factory.error(
+                "read_file",
+                code="permission_denied",
+                message=f"Permission denied reading file: {file_path}",
+                error_type="PermissionError",
+                details={"path": str(file_path)},
+            )
         except UnicodeDecodeError:
-            return {
-                "type": "read_file_error",
-                "path": str(file_path),
-                "error": f"File is not a valid UTF-8 text file: {file_path}",
-                "error_type": "UnicodeDecodeError",
-            }
+            return result_factory.error(
+                "read_file",
+                code="decode_error",
+                message=f"File is not a valid UTF-8 text file: {file_path}",
+                error_type="UnicodeDecodeError",
+                details={"path": str(file_path)},
+            )
         except Exception as e:
-            return {
-                "type": "read_file_error",
-                "path": str(file_path),
-                "error": f"Error reading file: {str(e)}",
-                "error_type": type(e).__name__,
-            }
+            return result_factory.error(
+                "read_file",
+                code="exception",
+                message=f"Error reading file: {str(e)}",
+                error_type=type(e).__name__,
+                details={"path": str(file_path)},
+            )
+
+
+@register_summary_for(ReadFileTool)
+def _summarize_read_file(args: ReadFileArgsDict, result: dict[str, Any]) -> str:
+    r = parse_tool_result(result, ReadFileSuccess)
+    if isinstance(r, ToolError):
+        return f"{args.get('path')}: {r.error}"
+
+    preview = r.content.splitlines()[0].strip() if r.content else ""
+    if preview:
+        return f"{r.path} ({len(r.content)} bytes) - {preview[:60]}"
+    return f"{r.path} ({len(r.content)} bytes)"

@@ -105,7 +105,11 @@ class ToolExecutor:
                 "tool_call_id": tool_call_id,
                 "tool_name": name,
                 "status": (
-                    "error" if result.get("type") == "tool_error" else "success"
+                    "error"
+                    if isinstance(result, dict)
+                    and isinstance(result.get("type"), str)
+                    and ("error" in result["type"] or result["type"] == "tool_error")
+                    else "success"
                 ),
                 "metadata": {
                     "size_bytes": metadata.size_bytes if metadata else 0,
@@ -133,7 +137,13 @@ class ToolExecutor:
         content = {
             "tool_call_id": tool_call_id,
             "tool_name": name,
-            "status": ("error" if result.get("type") == "tool_error" else "success"),
+            "status": (
+                "error"
+                if isinstance(result, dict)
+                and isinstance(result.get("type"), str)
+                and ("error" in result["type"] or result["type"] == "tool_error")
+                else "success"
+            ),
             "metadata": {
                 "size_bytes": len(inline_result_json.encode("utf-8")),
                 "summary": "",
@@ -319,12 +329,15 @@ class ToolExecutor:
                     completion_val = usage.get("completion_tokens")
                     if completion_val is None:
                         completion_val = usage.get("output_tokens")
-                    DialogUsageStorage(self._project, self._dialog_id).upsert(
-                        prompt_tokens=prompt_val,
-                        completion_tokens=completion_val,
-                        total_tokens=usage.get("total_tokens"),
-                        model_name=self.llm_provider.get_model_name(),
-                    )
+                    with DialogUsageStorage(
+                        self._project, self._dialog_id
+                    ) as usage_storage:
+                        usage_storage.upsert(
+                            prompt_tokens=prompt_val,
+                            completion_tokens=completion_val,
+                            total_tokens=usage.get("total_tokens"),
+                            model_name=self.llm_provider.get_model_name(),
+                        )
             except Exception as e:
                 agent_logger.error(
                     "Failed to persist usage",
@@ -399,14 +412,12 @@ class ToolExecutor:
             reasoning_started = False
 
             last_usage: dict[str, Any] | None = None
-            # Require usage in stream; if unsupported, fail fast to surface misconfig
-            try:
-                stream_iter = bound_llm.astream(conversation, stream_usage=True)
-            except TypeError as e:
-                error_msg = "LangChain/OpenAI client does not support stream_usage=True; upgrade dependencies or switch model family"
-                agent_logger.error(error_msg, exc_info=True, error=str(e))
-                yield {"type": "error", "error": error_msg}
-                return
+            # Get stream kwargs from provider (vendor-specific)
+            stream_kwargs: dict[str, Any] = getattr(
+                self.llm_provider, "get_stream_kwargs", lambda: {}
+            )()
+            stream_iter = bound_llm.astream(conversation, **stream_kwargs)
+
             async for chunk in stream_iter:
                 # Capture usage tokens if provider exposes them on chunks
                 try:
@@ -428,11 +439,19 @@ class ToolExecutor:
                     pass
                 # Try to extract reasoning from provider-specific metadata (minimal and robust)
                 try:
+                    # First, check if reasoning_content is directly in the chunk (OpenAI o1/gpt-5)
+                    reasoning_content = getattr(chunk, "reasoning_content", None)
                     additional_kwargs = getattr(chunk, "additional_kwargs", {}) or {}
                     response_metadata = getattr(chunk, "response_metadata", {}) or {}
+
                     reasoning = None
-                    if isinstance(additional_kwargs, dict):
+                    # Check reasoning_content first (new OpenAI format)
+                    if reasoning_content and isinstance(reasoning_content, str):
+                        reasoning = reasoning_content
+                    # Fallback to additional_kwargs.reasoning
+                    elif isinstance(additional_kwargs, dict):
                         reasoning = additional_kwargs.get("reasoning")
+                    # Fallback to response_metadata.reasoning
                     if reasoning is None and isinstance(response_metadata, dict):
                         reasoning = response_metadata.get("reasoning")
 
@@ -573,12 +592,15 @@ class ToolExecutor:
                         completion_val = last_usage.get("completion_tokens")
                         if completion_val is None:
                             completion_val = last_usage.get("output_tokens")
-                        DialogUsageStorage(self._project, self._dialog_id).upsert(
-                            prompt_tokens=prompt_val,
-                            completion_tokens=completion_val,
-                            total_tokens=last_usage.get("total_tokens"),
-                            model_name=self.llm_provider.get_model_name(),
-                        )
+                        with DialogUsageStorage(
+                            self._project, self._dialog_id
+                        ) as usage_storage:
+                            usage_storage.upsert(
+                                prompt_tokens=prompt_val,
+                                completion_tokens=completion_val,
+                                total_tokens=last_usage.get("total_tokens"),
+                                model_name=self.llm_provider.get_model_name(),
+                            )
                 except Exception as e:
                     agent_logger.error(
                         "Failed to persist usage (streaming)",

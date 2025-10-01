@@ -2,13 +2,34 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any
+
+# Local TypedDicts for type hints
+from typing import Any, Literal, TypedDict
 
 from pydantic import BaseModel, Field
 
 from agentsmithy_server.services.versioning import VersioningTracker
+from agentsmithy_server.tools.core.types import ToolError, parse_tool_result
+from agentsmithy_server.tools.registry import register_summary_for
 
 from ..base_tool import BaseTool
+
+
+class WriteFileArgsDict(TypedDict):
+    path: str
+    content: str
+
+
+class WriteFileSuccess(BaseModel):
+    type: Literal["write_file_result"] = "write_file_result"
+    path: str
+    checkpoint: str | None = None
+
+
+WriteFileResult = WriteFileSuccess | ToolError
+
+
+# Summary registration is declared above with imports
 
 
 class WriteFileArgs(BaseModel):
@@ -51,3 +72,12 @@ class WriteFileTool(BaseTool):
             "path": str(file_path),
             "checkpoint": getattr(checkpoint, "commit_id", None),
         }
+
+
+@register_summary_for(WriteFileTool)
+def _summarize_write_file(args: WriteFileArgsDict, result: dict[str, Any]) -> str:
+    r = parse_tool_result(result, WriteFileSuccess)
+    if isinstance(r, ToolError):
+        return f"{args.get('path')}: {r.error}"
+    content_len = len(args.get("content", ""))
+    return f"{r.path}: {content_len} bytes"

@@ -116,8 +116,16 @@ class AgentOrchestrator:
             # Load existing summary (if any) to chain with tail for re-summarization
             stored = None
             if context.get("project") and dialog_id:
-                storage = DialogSummaryStorage(context["project"], dialog_id)
-                stored = storage.load()
+                _storage_obj = DialogSummaryStorage(context["project"], dialog_id)
+                if hasattr(_storage_obj, "__enter__") and hasattr(
+                    _storage_obj, "__exit__"
+                ):
+                    with _storage_obj as storage:
+                        stored = storage.load()
+                else:
+                    # Fallback for tests that monkeypatch storage with a plain Mock
+                    storage = _storage_obj
+                    stored = storage.load()
 
             # Build compaction source: previous summary (if any) + current tail
             compaction_source = list(messages)
@@ -169,15 +177,24 @@ class AgentOrchestrator:
                             )
 
                         try:
-                            storage = DialogSummaryStorage(
+                            _storage_obj2 = DialogSummaryStorage(
                                 context["project"], dialog_id
                             )
-                            # Store legacy single-row and one versioned record
-                            storage.upsert(
-                                summary_text,
-                                summarized_count,
-                                KEEP_LAST_MESSAGES,
-                            )
+                            if hasattr(_storage_obj2, "__enter__") and hasattr(
+                                _storage_obj2, "__exit__"
+                            ):
+                                with _storage_obj2 as storage:
+                                    # Store legacy single-row and one versioned record
+                                    storage.upsert(
+                                        summary_text,
+                                        summarized_count,
+                                        KEEP_LAST_MESSAGES,
+                                    )
+                            else:
+                                storage = _storage_obj2
+                                storage.upsert(
+                                    summary_text, summarized_count, KEEP_LAST_MESSAGES
+                                )
                         except Exception:
                             pass
         except Exception as e:

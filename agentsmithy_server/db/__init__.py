@@ -4,7 +4,6 @@ from .base import get_engine, get_session
 from .models import (
     BaseORM,
     DialogSummaryORM,
-    DialogSummaryVersionORM,
     DialogUsageEventORM,
     ToolResultORM,
 )
@@ -15,6 +14,5 @@ __all__ = [
     "BaseORM",
     "ToolResultORM",
     "DialogSummaryORM",
-    "DialogSummaryVersionORM",
     "DialogUsageEventORM",
 ]

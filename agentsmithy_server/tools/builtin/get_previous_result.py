@@ -2,15 +2,37 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+# Local TypedDicts for type hints
+from typing import TYPE_CHECKING, Any, Literal, TypedDict
 
 from pydantic import BaseModel, Field
 
 from agentsmithy_server.core.tool_results_storage import ToolResultsStorage
 from agentsmithy_server.tools.core import result as result_factory
+from agentsmithy_server.tools.core.types import ToolError, parse_tool_result
+from agentsmithy_server.tools.registry import register_summary_for
 from agentsmithy_server.utils.logger import agent_logger
 
 from ..base_tool import BaseTool
+
+
+class GetPreviousResultArgsDict(TypedDict):
+    tool_call_id: str
+
+
+class PreviousResultSuccess(BaseModel):
+    type: Literal["previous_result"] = "previous_result"
+    tool_call_id: str
+    tool_name: str | None = None
+    original_args: dict[str, Any] | None = None
+    result: dict[str, Any] | None = None
+    timestamp: float | int | None = None
+
+
+PreviousResult = PreviousResultSuccess | ToolError
+
+
+# Summary registration is declared above with imports
 
 if TYPE_CHECKING:
     from agentsmithy_server.core.project import Project
@@ -73,13 +95,19 @@ class GetPreviousResultTool(BaseTool):
             )
 
         try:
-            storage = ToolResultsStorage(self._project, self._dialog_id)
-            result_data = await storage.get_result(tool_call_id)
+            with ToolResultsStorage(self._project, self._dialog_id) as storage:
+                result_data = await storage.get_result(tool_call_id)
+
+                if not result_data:
+                    # List available tool results to help the user
+                    available = await storage.list_results()
+                    available_ids = [
+                        r.tool_call_id for r in available[:10]
+                    ]  # Show max 10
+                else:
+                    available_ids = None
 
             if not result_data:
-                # List available tool results to help the user
-                available = await storage.list_results()
-                available_ids = [r.tool_call_id for r in available[:10]]  # Show max 10
 
                 return result_factory.not_found(
                     "get_tool_result",
@@ -119,3 +147,13 @@ class GetPreviousResultTool(BaseTool):
                 f"Failed to retrieve tool result: {str(e)}",
                 error_type=type(e).__name__,
             )
+
+
+@register_summary_for(GetPreviousResultTool)
+def _summarize_get_previous_result(
+    args: GetPreviousResultArgsDict, result: dict[str, Any]
+) -> str:
+    r = parse_tool_result(result, PreviousResultSuccess)
+    if isinstance(r, ToolError):
+        return f"{args.get('tool_call_id')}: {r.error}"
+    return f"{r.tool_name or 'unknown'} [{r.tool_call_id}]"

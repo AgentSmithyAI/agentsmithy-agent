@@ -1,6 +1,6 @@
 """Tests for WebSearchTool."""
 
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 
@@ -27,23 +27,16 @@ async def test_web_search_success():
         },
     ]
 
-    # Mock AsyncDDGS class used in the tool module
-    mock_ddgs_instance = AsyncMock()
-    mock_ddgs_class = Mock(return_value=mock_ddgs_instance)
-
-    # Set up async context manager
-    mock_ddgs_instance.__aenter__.return_value = mock_ddgs_instance
-    mock_ddgs_instance.__aexit__.return_value = None
-
-    # Create an async generator for results
-    async def async_gen():
-        for result in mock_results:
-            yield result
-
-    mock_ddgs_instance.text.return_value = async_gen()
+    # Mock DDGS class used in the tool module
+    mock_ddgs_client = Mock()
+    mock_ddgs_client.text.return_value = mock_results
+    mock_ddgs_manager = MagicMock()
+    mock_ddgs_manager.__enter__.return_value = mock_ddgs_client
+    mock_ddgs_manager.__exit__.return_value = None
 
     with patch(
-        "agentsmithy_server.tools.builtin.web_search.AsyncDDGS", mock_ddgs_class
+        "agentsmithy_server.tools.builtin.web_search.DDGS",
+        return_value=mock_ddgs_manager,
     ):
         result = await tool._arun(query="test query", num_results=2)
 
@@ -65,21 +58,20 @@ async def test_web_search_exception():
     tool = WebSearchTool()
     tool._sse_callback = AsyncMock()
 
-    # Mock AsyncDDGS class used in the tool module
-    mock_ddgs_instance = AsyncMock()
-    mock_ddgs_class = Mock(return_value=mock_ddgs_instance)
-
-    # Set up async context manager
-    mock_ddgs_instance.__aenter__.return_value = mock_ddgs_instance
-    mock_ddgs_instance.__aexit__.return_value = None
-    mock_ddgs_instance.text.side_effect = Exception("Network error")
+    # Mock DDGS class used in the tool module
+    mock_ddgs_client = Mock()
+    mock_ddgs_client.text.side_effect = Exception("Network error")
+    mock_ddgs_manager = MagicMock()
+    mock_ddgs_manager.__enter__.return_value = mock_ddgs_client
+    mock_ddgs_manager.__exit__.return_value = None
 
     with patch(
-        "agentsmithy_server.tools.builtin.web_search.AsyncDDGS", mock_ddgs_class
+        "agentsmithy_server.tools.builtin.web_search.DDGS",
+        return_value=mock_ddgs_manager,
     ):
         result = await tool._arun(query="test query")
 
-    assert result["type"] == "web_search_error"
+    assert result["type"] in {"web_search_error", "tool_error"}
     assert result["query"] == "test query"
     assert "Network error" in result["error"]
     assert result["error_type"] == "Exception"
@@ -96,22 +88,16 @@ async def test_web_search_default_num_results():
         for i in range(5)
     ]
 
-    # Mock AsyncDDGS class used in the tool module
-    mock_ddgs_instance = AsyncMock()
-    mock_ddgs_class = Mock(return_value=mock_ddgs_instance)
-
-    # Set up async context manager
-    mock_ddgs_instance.__aenter__.return_value = mock_ddgs_instance
-    mock_ddgs_instance.__aexit__.return_value = None
-
-    async def async_gen():
-        for result in mock_results:
-            yield result
-
-    mock_ddgs_instance.text.return_value = async_gen()
+    # Mock DDGS class used in the tool module
+    mock_ddgs_client = Mock()
+    mock_ddgs_client.text.return_value = mock_results
+    mock_ddgs_manager = MagicMock()
+    mock_ddgs_manager.__enter__.return_value = mock_ddgs_client
+    mock_ddgs_manager.__exit__.return_value = None
 
     with patch(
-        "agentsmithy_server.tools.builtin.web_search.AsyncDDGS", mock_ddgs_class
+        "agentsmithy_server.tools.builtin.web_search.DDGS",
+        Mock(return_value=mock_ddgs_manager),
     ):
         result = await tool._arun(query="test query")
 

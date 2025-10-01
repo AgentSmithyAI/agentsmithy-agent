@@ -67,8 +67,13 @@ class OpenAIProvider(LLMProvider):
 
         # Base kwargs split to allow per-family specialization
         base_kwargs, model_kwargs = build_openai_langchain_kwargs(
-            self.model, self.temperature, self.max_tokens
+            self.model,
+            self.temperature,
+            self.max_tokens,
+            reasoning_effort=settings.reasoning_effort,
+            reasoning_verbosity=settings.reasoning_verbosity,
         )
+        # Only set model_kwargs if non-empty (for stream_options etc)
         if model_kwargs:
             base_kwargs["model_kwargs"] = model_kwargs
 
@@ -154,6 +159,19 @@ class OpenAIProvider(LLMProvider):
     def get_last_usage(self) -> dict[str, Any] | None:
         """Return last observed usage from streaming; may be None if unavailable."""
         return self._last_usage
+
+    def get_stream_kwargs(self) -> dict[str, Any]:
+        """Return vendor-specific kwargs for astream() calls.
+
+        For chat_completions family: include stream_usage=True
+        For responses family (o1/gpt-5): no stream_usage (unsupported)
+        """
+        model_lower = self.model.lower()
+        # Responses family doesn't support stream_usage parameter
+        if model_lower.startswith("o1") or model_lower.startswith("gpt-5"):
+            return {}
+        # Chat completions family supports stream_usage
+        return {"stream_usage": True}
 
 
 class LLMFactory:

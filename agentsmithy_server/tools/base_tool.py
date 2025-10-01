@@ -68,6 +68,33 @@ class BaseTool(LCBaseTool, ABC):
         merged_kwargs: dict[Any, Any] = {**tool_input, **kwargs}
         return await self._arun(**merged_kwargs)
 
-    # Provide a default _run so subclasses are not abstract for mypy
+    # Provide a compatibility _run that bridges to async _arun when LangChain
+    # chooses the sync path (it offloads _run via thread executor by default).
+    # This lets tests and runtime succeed even if LC calls _arun -> _run.
     def _run(self, *args: Any, **kwargs: Any) -> Any:  # pragma: no cover
-        raise NotImplementedError("Synchronous run is not supported; use arun")
+        import asyncio
+        import inspect
+
+        # Find the first _arun defined by a concrete tool subclass (not LCBaseTool)
+        impl = None
+        for cls in type(self).__mro__:
+            if cls is BaseTool:
+                continue
+            # Avoid picking LCBaseTool._arun which offloads to _run again
+            if cls.__name__ == "BaseTool" and cls.__module__.startswith(
+                "langchain_core.tools"
+            ):
+                continue
+            maybe = cls.__dict__.get("_arun")
+            if maybe is not None:
+                impl = maybe.__get__(self, type(self))  # bind to instance
+                break
+
+        if impl is None:
+            raise NotImplementedError("Tool must implement async _arun")
+
+        coro = impl(**kwargs)
+        if inspect.iscoroutine(coro):
+            return asyncio.run(coro)
+        # If implementation returned a plain value, return as-is
+        return coro

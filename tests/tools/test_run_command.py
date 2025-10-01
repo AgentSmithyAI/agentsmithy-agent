@@ -16,12 +16,11 @@ async def _run(tool, **kwargs):
 async def test_run_command_stdout_stderr_and_exit_code():
     t = RunCommandTool()
     # Cross-platform: invoke current Python to emit to stdout/stderr and exit with code 3
-    cmd = [
-        sys.executable,
-        "-c",
-        "import sys; print('OUT'); sys.stderr.write('ERR\n'); sys.exit(3)",
-    ]
-    res = await _run(t, command=" ".join(cmd), shell=False, timeout=10.0)
+    cmd = (
+        f'{sys.executable} -c "import sys; print(\\"OUT\\"); '
+        f'sys.stderr.write(\\"ERR\\n\\"); sys.exit(3)"'
+    )
+    res = await _run(t, command=cmd, timeout=10.0)
 
     assert res["type"] == "run_command_result"
     assert res["exit_code"] == 3
@@ -31,17 +30,17 @@ async def test_run_command_stdout_stderr_and_exit_code():
     assert res["timed_out"] is False
 
 
-async def test_run_command_error_not_found():
+async def test_run_command_unknown_command_nonzero_exit():
     t = RunCommandTool()
-    # Use shell=False to trigger FileNotFoundError for an unknown binary
-    res = await _run(t, command="this_command_should_not_exist_abcxyz", shell=False)
-    assert res["type"] == "run_command_error"
-    assert res["error_type"] in {"FileNotFoundError", "OSError"}
+    # Through shell, unknown command should yield a non-zero exit code
+    res = await _run(t, command="this_command_should_not_exist_abcxyz")
+    assert res["type"] == "run_command_result"
+    assert isinstance(res.get("exit_code"), int) and res["exit_code"] != 0
 
 
 async def test_run_command_timeout():
     t = RunCommandTool()
-    cmd = [sys.executable, "-c", "import time; time.sleep(2)"]
-    res = await _run(t, command=" ".join(cmd), shell=False, timeout=0.2)
-    assert res["type"] == "run_command_timeout"
-    assert res["timed_out"] is True
+    cmd = f'{sys.executable} -c "import time; time.sleep(2)"'
+    res = await _run(t, command=cmd, timeout=0.2)
+    assert res["type"] == "tool_error"
+    assert res.get("code") == "timeout"

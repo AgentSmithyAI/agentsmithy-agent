@@ -25,11 +25,13 @@ def build_openai_langchain_kwargs(
     model: str,
     temperature: float | None,
     max_tokens: int | None,
+    reasoning_effort: str | None = None,
+    reasoning_verbosity: str | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Return (base_kwargs, model_kwargs) for ChatOpenAI depending on model family.
 
     - For chat-completions family, attach stream_options.include_usage=True
-    - For responses family, do not attach stream_options (unsupported)
+    - For responses family (o1/gpt-5), add reasoning parameter for extended thinking
     """
     base_kwargs: dict[str, Any] = {
         "model": model,
@@ -41,12 +43,27 @@ def build_openai_langchain_kwargs(
 
     model_kwargs: dict[str, Any] = {}
     fam = detect_openai_family(model)
+
     if fam == "chat_completions":
         # Usage is available on final chunk when include_usage is enabled
         model_kwargs["stream_options"] = {"include_usage": True}
+        if max_tokens is not None:
+            base_kwargs["max_tokens"] = max_tokens
+    elif fam == "responses":
+        # For o1/gpt-5 models: add reasoning parameter directly (not in model_kwargs)
+        # Reasoning content then comes in additional_kwargs.reasoning or response_metadata.reasoning
+        reasoning_kwargs: dict[str, Any] = {}
+        # Always request a reasoning summary; default to 'auto' if not configured
+        verbosity = reasoning_verbosity or "auto"
+        reasoning_kwargs["summary"] = verbosity
+        # Include effort if configured
+        if reasoning_effort:
+            reasoning_kwargs["effort"] = reasoning_effort
+        # Pass reasoning as direct parameter to ChatOpenAI
+        base_kwargs["reasoning"] = reasoning_kwargs
 
-    if max_tokens is not None:
-        # ChatOpenAI binds to OpenAI API; non-Responses models accept max_tokens directly
-        base_kwargs["max_tokens"] = max_tokens
+        # Responses API expects max_output_tokens, not max_tokens
+        if max_tokens is not None:
+            base_kwargs["max_completion_tokens"] = max_tokens
 
     return base_kwargs, model_kwargs

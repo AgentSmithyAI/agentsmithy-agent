@@ -9,36 +9,61 @@ from structlog.types import FilteringBoundLogger
 
 # Configure structlog based on environment
 def configure_structlog():
-    """Configure structlog with pretty or JSON output based on LOG_FORMAT env."""
+    """Configure structlog with pretty or JSON output based on LOG_FORMAT env.
+
+    Properly route stdlib logging through structlog so external libs are structured
+    and controllable by levels. No stdout/stderr suppression hacks needed.
+    """
     log_format = os.getenv("LOG_FORMAT", "pretty").lower()
 
-    # Setup root logger with handler
+    # Choose renderer for final output
+    if log_format == "json":
+        renderer = structlog.processors.JSONRenderer()
+    else:
+        renderer = structlog.dev.ConsoleRenderer(colors=True)
+
+    # Root logger + handler with ProcessorFormatter
     logging.root.handlers = []
     handler = logging.StreamHandler()
     handler.setLevel(logging.DEBUG)
+    handler.setFormatter(
+        structlog.stdlib.ProcessorFormatter(
+            processor=renderer,
+            foreign_pre_chain=[
+                structlog.stdlib.add_logger_name,
+                structlog.stdlib.add_log_level,
+                structlog.processors.TimeStamper(fmt="iso"),
+            ],
+        )
+    )
     logging.root.addHandler(handler)
     logging.root.setLevel(logging.INFO)
 
-    # Common processors
-    processors = [
-        structlog.stdlib.add_logger_name,
-        structlog.stdlib.add_log_level,
-        structlog.stdlib.PositionalArgumentsFormatter(),
-        structlog.processors.TimeStamper(fmt="iso"),
-        structlog.processors.StackInfoRenderer(),
-        structlog.processors.UnicodeDecoder(),
-    ]
+    # Capture warnings to logging
+    logging.captureWarnings(True)
 
-    # Add appropriate renderer based on format
-    if log_format == "json":
-        processors.extend(
-            [structlog.processors.format_exc_info, structlog.processors.JSONRenderer()]
-        )
-    else:
-        processors.append(structlog.dev.ConsoleRenderer(colors=True))
+    # Library log levels (inherited fmt via ProcessorFormatter)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    logging.getLogger("openai").setLevel(logging.INFO)
+    logging.getLogger("ddgs").setLevel(logging.WARNING)
+    logging.getLogger("duckduckgo_search").setLevel(logging.WARNING)
+    # Verbose HTTP response logs come from primp used by ddgs
+    logging.getLogger("primp").setLevel(logging.WARNING)
+    logging.getLogger("primp.primp").setLevel(logging.WARNING)
 
+    # structlog pipeline; wrap_for_formatter hands off to ProcessorFormatter above
     structlog.configure(
-        processors=processors,
+        processors=[
+            structlog.stdlib.filter_by_level,
+            structlog.stdlib.add_logger_name,
+            structlog.stdlib.add_log_level,
+            structlog.stdlib.PositionalArgumentsFormatter(),
+            structlog.processors.StackInfoRenderer(),
+            structlog.processors.format_exc_info,
+            structlog.processors.TimeStamper(fmt="iso"),
+            structlog.stdlib.ProcessorFormatter.wrap_for_formatter,
+        ],
         context_class=dict,
         logger_factory=structlog.stdlib.LoggerFactory(),
         cache_logger_on_first_use=True,

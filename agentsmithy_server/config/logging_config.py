@@ -66,5 +66,31 @@ LOGGING_CONFIG = {
             "level": get_uvicorn_log_level(),
             "propagate": False,
         },
+        "httpx": {
+            "handlers": ["default"],
+            "level": "WARNING",
+            "propagate": False,
+        },
+        "openai": {
+            "handlers": ["default"],
+            "level": "INFO",
+            "propagate": False,
+        },
+        "httpcore": {
+            "handlers": ["default"],
+            "level": "WARNING",
+            "propagate": False,
+        },
+        # Suppress noisy INFO logs from ddgs dependency 'primp'
+        "primp": {
+            "handlers": ["default"],
+            "level": "WARNING",
+            "propagate": False,
+        },
+        "primp.primp": {
+            "handlers": ["default"],
+            "level": "WARNING",
+            "propagate": False,
+        },
     },
 }

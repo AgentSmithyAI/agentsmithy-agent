@@ -2,13 +2,33 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any
+
+# Local TypedDicts for type hints
+from typing import Any, Literal, TypedDict
 
 from pydantic import BaseModel, Field
 
 from agentsmithy_server.services.versioning import VersioningTracker
+from agentsmithy_server.tools.core.types import ToolError, parse_tool_result
+from agentsmithy_server.tools.registry import register_summary_for
 
 from ..base_tool import BaseTool
+
+
+class DeleteFileArgsDict(TypedDict):
+    path: str
+
+
+class DeleteFileSuccess(BaseModel):
+    type: Literal["delete_file_result"] = "delete_file_result"
+    path: str
+    checkpoint: str | None = None
+
+
+DeleteFileResult = DeleteFileSuccess | ToolError
+
+
+# Summary registration is declared above with imports
 
 
 class DeleteFileArgs(BaseModel):
@@ -58,3 +78,11 @@ class DeleteFileTool(BaseTool):
             "path": str(file_path),
             "checkpoint": getattr(checkpoint, "commit_id", None),
         }
+
+
+@register_summary_for(DeleteFileTool)
+def _summarize_delete_file(args: DeleteFileArgsDict, result: dict[str, Any]) -> str:
+    r = parse_tool_result(result, DeleteFileSuccess)
+    if isinstance(r, ToolError):
+        return f"{args.get('path')}: {r.error}"
+    return f"{r.path}"

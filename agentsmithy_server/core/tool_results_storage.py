@@ -20,6 +20,14 @@ from sqlalchemy.engine import Engine
 from agentsmithy_server.core.dialog_history import DialogHistory
 from agentsmithy_server.db import BaseORM, ToolResultORM
 from agentsmithy_server.db.base import get_engine, get_session
+
+# Use central registry for tool summary generators so tools can register
+# summaries without importing core storage. The registry supports plain
+# functions and descriptors like staticmethod/classmethod.
+from agentsmithy_server.tools.registry import (
+    CLASS_SUMMARY_REGISTRY,
+    SUMMARY_REGISTRY,
+)
 from agentsmithy_server.utils.logger import agent_logger
 
 if TYPE_CHECKING:
@@ -58,6 +66,15 @@ class ToolResultReference:
 class ToolResultsStorage:
     """Manages storage of tool execution results using SQLAlchemy ORM.
 
+    # Backwards-compatible aliases as static methods for type checkers
+    @staticmethod
+    def register_summary(tool_name: str):
+        return register_summary
+
+    @staticmethod
+    def register_summaries(*tool_names: str):
+        return register_summaries
+
     Data is stored in the same SQLite database as dialog history and accessed
     via ORM models. Rows are scoped by `dialog_id`.
     """
@@ -69,12 +86,35 @@ class ToolResultsStorage:
         self._db_path: Path = DialogHistory(project, dialog_id).db_path
         self._engine: Engine | None = engine
 
+    def __enter__(self):
+        """Context manager entry."""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit - dispose resources."""
+        self.dispose()
+        return False
+
     # --- SQLAlchemy ORM model definitions ---
 
     def _get_engine(self) -> Engine:
         if self._engine is None:
             self._engine = get_engine(self._db_path)
         return self._engine
+
+    def dispose(self) -> None:
+        """Dispose the database engine and close connections."""
+        if self._engine is not None:
+            try:
+                self._engine.dispose()
+            except Exception:
+                pass
+            finally:
+                self._engine = None
+
+    def __del__(self) -> None:
+        """Clean up resources on garbage collection."""
+        self.dispose()
 
     def _ensure_db(self) -> None:
         """Ensure the SQLite tables exist using SQLAlchemy metadata.
@@ -84,38 +124,63 @@ class ToolResultsStorage:
         engine = self._get_engine()
         BaseORM.metadata.create_all(engine)
 
-    # ---------- Storage logic (class-owned) ----------
+    # Use module-level SUMMARY_REGISTRY and decorators (register_summary /
+    # register_summaries). Built-in summaries should be declared in their
+    # respective tool modules using the decorators so new tools register
+    # summaries next to their implementation.
 
+    # _generate_summary will consult module-level SUMMARY_REGISTRY.
     def _generate_summary(
         self, tool_name: str, args: dict[str, Any], result: dict[str, Any]
     ) -> str:
-        # Tool-specific summary generation
-        if tool_name == "read_file":
-            file_path = args.get("path", args.get("target_file", "unknown"))
-            content = result.get("content", "")
-            lines = content.count("\n") + 1 if content else 0
-            return f"Read file: {file_path} ({lines} lines)"
-        elif tool_name == "write_file" or tool_name == "write_to_file":
-            file_path = args.get("path", args.get("file_path", "unknown"))
-            content = args.get("content", args.get("contents", ""))
-            lines = content.count("\n") + 1 if content else 0
-            return f"Wrote file: {file_path} ({lines} lines)"
-        elif tool_name == "run_command":
-            command = args.get("command", "unknown")
-            exit_code = result.get("exit_code", -1)
-            status = "success" if exit_code == 0 else f"failed (exit {exit_code})"
-            return f"Ran command: {command} - {status}"
-        elif tool_name == "search_files":
-            pattern = args.get("regex", args.get("pattern", "unknown"))
-            matches = result.get("matches", [])
-            return f"Searched for '{pattern}' - found {len(matches)} matches"
-        elif tool_name == "list_files":
-            path = args.get("path", args.get("target_directory", "."))
-            files = result.get("files", [])
-            dirs = result.get("directories", [])
-            return f"Listed {path} - {len(files)} files, {len(dirs)} directories"
-        else:
-            return f"Executed {tool_name}"
+        # Ensure builtin tool modules are imported so their @register_summary_for
+        # decorators execute at import time (defensive against call sites that
+        # haven't built the registry yet).
+        try:
+            import agentsmithy_server.tools.builtin  # noqa: F401
+        except Exception:
+            pass
+
+        # Try registry by name first (fast path, backwards compatible)
+        func = SUMMARY_REGISTRY.get(tool_name)
+        if func:
+            try:
+                return func(args, result)
+            except Exception:
+                agent_logger.exception(
+                    "Summary generator for %s raised exception, falling back", tool_name
+                )
+        # Try to resolve by class if the tool object is available
+        try:
+            tool_obj = self.project.get_tool_manager().get(tool_name)  # type: ignore[attr-defined]
+            if tool_obj is not None:
+                cls = type(tool_obj)
+                func2 = CLASS_SUMMARY_REGISTRY.get(cls)
+                if func2:
+                    try:
+                        return func2(args, result)
+                    except Exception:
+                        agent_logger.exception(
+                            "Class summary generator for %s failed, falling back",
+                            tool_name,
+                        )
+        except Exception:
+            pass
+
+        # Fallback: minimal fallback for when summary functions fail
+        try:
+            rtype = result.get("type")
+            # Unified error
+            if rtype == "tool_error":
+                err = result.get("error") or result.get("message") or "error"
+                return f"{err}"
+
+            # Generic fallback - just return empty or minimal info
+            # Tool name is already in the log, no need to repeat it
+            return ""
+        except Exception:
+            pass
+        return ""
 
     async def store_result(
         self,
@@ -132,12 +197,17 @@ class ToolResultsStorage:
         packed_result = json.dumps(result, ensure_ascii=False)
         summary = self._generate_summary(tool_name, args, result)
         size_bytes = len(packed_result.encode("utf-8"))
-        error_value = (
-            result.get("error") if result.get("type") == "tool_error" else None
-        )
+        # Normalize error_value from both unified and legacy shapes
+        rtype = result.get("type")
+        if rtype == "tool_error":
+            error_value = result.get("error") or result.get("message")
+        elif isinstance(rtype, str) and rtype.endswith("_error"):
+            error_value = result.get("error")
+        else:
+            error_value = None
         engine = self._get_engine()
         with get_session(engine) as session:
-            session.merge(
+            session.add(
                 ToolResultORM(
                     tool_call_id=tool_call_id,
                     dialog_id=self.dialog_id,
