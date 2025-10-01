@@ -29,6 +29,12 @@ class ToolManager:
         for tool in self._tools.values():
             tool.set_dialog_id(dialog_id)
 
+    def set_project_root(self, project_root: str | None) -> None:
+        """Set project_root for all registered tools."""
+        for tool in self._tools.values():
+            if hasattr(tool, "set_project_root"):
+                tool.set_project_root(project_root)
+
     def register(self, tool: BaseTool) -> None:
         # Ensure tool has a usable name/description even if pydantic fields are not set as attrs
         tool_name = getattr(tool, "name", None)

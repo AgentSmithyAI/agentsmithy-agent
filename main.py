@@ -45,6 +45,19 @@ if __name__ == "__main__":
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
+    # Validate and change to workdir early (before .env and settings loading)
+    workdir_path = Path(args.workdir).expanduser().resolve()
+    if not workdir_path.exists():
+        startup_logger.error("--workdir does not exist", path=str(workdir_path))
+        sys.exit(1)
+    if not workdir_path.is_dir():
+        startup_logger.error("--workdir is not a directory", path=str(workdir_path))
+        sys.exit(1)
+
+    # Change working directory to workdir so relative paths work correctly
+    os.chdir(workdir_path)
+    startup_logger.debug("Changed working directory", workdir=str(workdir_path))
+
     # Check if .env file exists (after argparse, so --help doesn't need .env)
     if not os.path.exists(".env"):
         startup_logger.error(
@@ -62,15 +75,6 @@ if __name__ == "__main__":
         sys.exit(1)
 
     try:
-
-        workdir_path = Path(args.workdir).expanduser().resolve()
-        if not workdir_path.exists():
-            startup_logger.error("--workdir does not exist", path=str(workdir_path))
-            sys.exit(1)
-        if not workdir_path.is_dir():
-            startup_logger.error("--workdir is not a directory", path=str(workdir_path))
-            sys.exit(1)
-
         # Ensure hidden state directory exists
         try:
             # Initialize a workspace entity to own directory management

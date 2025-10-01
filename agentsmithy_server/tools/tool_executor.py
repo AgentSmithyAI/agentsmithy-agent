@@ -51,6 +51,18 @@ class ToolExecutor:
         else:
             self._tool_results_storage = None
 
+        # Propagate project root to all tools
+        if project:
+            self.tool_manager.set_project_root(str(project.root))
+
+        # Some tools have their own set_context method (e.g., GetPreviousResultTool)
+        for tool in self.tool_manager._tools.values():
+            if hasattr(tool, "set_context") and callable(tool.set_context):
+                try:
+                    tool.set_context(project, dialog_id)
+                except Exception:
+                    pass
+
     async def emit_event(self, event: dict[str, Any]) -> None:
         if self._sse_callback is not None:
             try:

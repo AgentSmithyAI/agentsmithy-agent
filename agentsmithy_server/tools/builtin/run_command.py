@@ -93,7 +93,22 @@ class RunCommandTool(BaseTool):
         cwd_path: Path | None = None
         if args.cwd:
             try:
-                cwd_path = Path(args.cwd).expanduser().resolve()
+                # Use project root if available, fallback to cwd
+                import os
+
+                project_root = (
+                    self._project_root
+                    if hasattr(self, "_project_root") and self._project_root
+                    else os.getcwd()
+                )
+
+                # Resolve path relative to project root
+                input_path = Path(args.cwd).expanduser()
+                if input_path.is_absolute():
+                    cwd_path = input_path
+                else:
+                    cwd_path = (Path(project_root) / input_path).resolve()
+
                 if not cwd_path.exists() or not cwd_path.is_dir():
                     return result_factory.error(
                         "run_command",
