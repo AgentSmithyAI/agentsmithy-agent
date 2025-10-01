@@ -29,7 +29,7 @@ def build_openai_langchain_kwargs(
     """Return (base_kwargs, model_kwargs) for ChatOpenAI depending on model family.
 
     - For chat-completions family, attach stream_options.include_usage=True
-    - For responses family, do not attach stream_options (unsupported)
+    - For responses family, attach stream_options with include_reasoning_content=True
     """
     base_kwargs: dict[str, Any] = {
         "model": model,
@@ -44,6 +44,13 @@ def build_openai_langchain_kwargs(
     if fam == "chat_completions":
         # Usage is available on final chunk when include_usage is enabled
         model_kwargs["stream_options"] = {"include_usage": True}
+    elif fam == "responses":
+        # For o1/gpt-5 models, enable reasoning content streaming
+        # Include both usage and reasoning_content in stream_options
+        model_kwargs["stream_options"] = {
+            "include_usage": True,
+            "include_reasoning_content": True,
+        }
 
     if max_tokens is not None:
         # ChatOpenAI binds to OpenAI API; non-Responses models accept max_tokens directly

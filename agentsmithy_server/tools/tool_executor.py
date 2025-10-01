@@ -441,11 +441,19 @@ class ToolExecutor:
                     pass
                 # Try to extract reasoning from provider-specific metadata (minimal and robust)
                 try:
+                    # First, check if reasoning_content is directly in the chunk (OpenAI o1/gpt-5)
+                    reasoning_content = getattr(chunk, "reasoning_content", None)
                     additional_kwargs = getattr(chunk, "additional_kwargs", {}) or {}
                     response_metadata = getattr(chunk, "response_metadata", {}) or {}
+                    
                     reasoning = None
-                    if isinstance(additional_kwargs, dict):
+                    # Check reasoning_content first (new OpenAI format)
+                    if reasoning_content and isinstance(reasoning_content, str):
+                        reasoning = reasoning_content
+                    # Fallback to additional_kwargs.reasoning
+                    elif isinstance(additional_kwargs, dict):
                         reasoning = additional_kwargs.get("reasoning")
+                    # Fallback to response_metadata.reasoning
                     if reasoning is None and isinstance(response_metadata, dict):
                         reasoning = response_metadata.get("reasoning")
 
