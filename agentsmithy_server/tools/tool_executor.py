@@ -412,14 +412,12 @@ class ToolExecutor:
             reasoning_started = False
 
             last_usage: dict[str, Any] | None = None
-            # Require usage in stream; if unsupported, fail fast to surface misconfig
-            try:
-                stream_iter = bound_llm.astream(conversation, stream_usage=True)
-            except TypeError as e:
-                error_msg = "LangChain/OpenAI client does not support stream_usage=True; upgrade dependencies or switch model family"
-                agent_logger.error(error_msg, exc_info=True, error=str(e))
-                yield {"type": "error", "error": error_msg}
-                return
+            # Get stream kwargs from provider (vendor-specific)
+            stream_kwargs: dict[str, Any] = getattr(
+                self.llm_provider, "get_stream_kwargs", lambda: {}
+            )()
+            stream_iter = bound_llm.astream(conversation, **stream_kwargs)
+
             async for chunk in stream_iter:
                 # Capture usage tokens if provider exposes them on chunks
                 try:
