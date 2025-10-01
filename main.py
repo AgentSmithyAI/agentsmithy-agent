@@ -58,21 +58,46 @@ if __name__ == "__main__":
     os.chdir(workdir_path)
     startup_logger.debug("Changed working directory", workdir=str(workdir_path))
 
-    # Check if .env file exists (after argparse, so --help doesn't need .env)
-    if not os.path.exists(".env"):
-        startup_logger.error(
-            ".env file not found! Please create it from .env.example and add your OPENAI_API_KEY"
+    # Initialize configuration manager
+    from agentsmithy_server.config import (
+        create_config_manager,
+        get_default_config,
+        settings,
+    )
+
+    try:
+        # Create .agentsmithy directory if it doesn't exist
+        config_dir = workdir_path / ".agentsmithy"
+        config_dir.mkdir(parents=True, exist_ok=True)
+
+        # Create and initialize config manager
+        config_manager = create_config_manager(
+            config_dir, defaults=get_default_config()
         )
+
+        # Run async initialization
+        async def init_config():
+            await config_manager.initialize()
+            await config_manager.start_watching()
+
+        asyncio.run(init_config())
+
+        # Update global settings instance to use config manager
+        settings._config_manager = config_manager
+
+        startup_logger.info(
+            "Configuration initialized",
+            config_file=str(config_dir / "config.json"),
+        )
+    except Exception as e:
+        startup_logger.error("Failed to initialize configuration", error=str(e))
         sys.exit(1)
 
     # Validate required settings
-    from agentsmithy_server.config import settings
-
     if not settings.default_model:
-        startup_logger.error(
-            "DEFAULT_MODEL not set in .env file! Please specify the LLM model to use."
+        startup_logger.warning(
+            "DEFAULT_MODEL not set in config! You may need to configure it via IDE plugin."
         )
-        sys.exit(1)
 
     try:
         # Ensure hidden state directory exists
@@ -96,15 +121,13 @@ if __name__ == "__main__":
 
         chosen_port = ensure_singleton_and_select_port(
             get_current_project(),
-            base_port=int(os.getenv("SERVER_PORT", "11434")),
+            base_port=settings.server_port,
             host=settings.server_host,
             max_probe=20,
         )
-        # Keep settings in sync with the chosen port for logging/uvicorn
-        try:
-            settings.server_port = chosen_port
-        except Exception:
-            pass
+        # Update config with the chosen port
+        if config_manager:
+            asyncio.run(config_manager.set("server_port", chosen_port))
 
         # Treat workdir as the active project; inspect and save metadata if missing
         should_inspect = False
@@ -164,7 +187,6 @@ if __name__ == "__main__":
             port=chosen_port,
             reload=reload_enabled,
             log_config=LOGGING_CONFIG,
-            env_file=".env",
         )
         server = uvicorn.Server(config)
 

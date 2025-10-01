@@ -1,94 +1,137 @@
-"""Configuration settings for AgentSmithy server."""
+"""Configuration settings for AgentSmithy server.
 
-from pydantic import Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+This module provides a Settings class that wraps the ConfigManager,
+providing property-based access to configuration values with hot-reload support.
+"""
+
+from __future__ import annotations
+
+import os
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from agentsmithy_server.config.manager import ConfigManager
 
 
-class Settings(BaseSettings):
-    """Application settings loaded from environment variables."""
+class Settings:
+    """Application settings with hot-reload support.
 
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        case_sensitive=False,  # Allow uppercase env vars like DEFAULT_MODEL to match lowercase fields
-    )
+    This class wraps ConfigManager and provides property-based access
+    to configuration values. It supports both ConfigManager and environment
+    variable fallbacks for backwards compatibility.
+    """
+
+    def __init__(self, config_manager: ConfigManager | None = None):
+        self._config_manager = config_manager
+
+    def _get(
+        self,
+        key: str,
+        default: str | int | float | bool | None,
+        env_key: str | None = None,
+    ):
+        """Get config value from manager, fallback to env, then default."""
+        if self._config_manager:
+            return self._config_manager.get(key, default)
+        # Fallback to environment variable
+        if env_key and (env_val := os.getenv(env_key)):
+            # Type conversion based on default type
+            if isinstance(default, bool):
+                return env_val.lower() in ("true", "1", "yes")
+            elif isinstance(default, int):
+                return int(env_val)
+            elif isinstance(default, float):
+                return float(env_val)
+            return env_val
+        return default
 
     # OpenAI Configuration
-    openai_api_key: str | None = Field(default=None, description="OpenAI API key")
+    @property
+    def openai_api_key(self) -> str | None:
+        return self._get("openai_api_key", None, "OPENAI_API_KEY")
 
     # Server Configuration
-    server_host: str = Field(default="localhost", description="Server host")
-    server_port: int = Field(default=11434, description="Server port")
+    @property
+    def server_host(self) -> str:
+        return self._get("server_host", "localhost", "SERVER_HOST")
+
+    @property
+    def server_port(self) -> int:
+        return self._get("server_port", 11434, "SERVER_PORT")
 
     # RAG Configuration
-    chroma_persist_directory: str = Field(
-        default="./chroma_db", description="Directory for ChromaDB persistence"
-    )
-    max_context_length: int = Field(
-        default=10000, description="Maximum context length in characters"
-    )
-    max_open_files: int = Field(
-        default=5, description="Maximum number of open files to include in context"
-    )
+    @property
+    def chroma_persist_directory(self) -> str:
+        return self._get(
+            "chroma_persist_directory", "./chroma_db", "CHROMA_PERSIST_DIRECTORY"
+        )
 
-    # Summarization threshold (single knob, tokens)
-    summary_trigger_token_budget: int = Field(
-        default=20000,
-        description=(
-            "Approximate total input tokens in dialog after which summarization should be applied"
-        ),
-        validation_alias="SUMMARY_TRIGGER_TOKEN_BUDGET",
-    )
+    @property
+    def max_context_length(self) -> int:
+        return self._get("max_context_length", 10000, "MAX_CONTEXT_LENGTH")
+
+    @property
+    def max_open_files(self) -> int:
+        return self._get("max_open_files", 5, "MAX_OPEN_FILES")
+
+    # Summarization
+    @property
+    def summary_trigger_token_budget(self) -> int:
+        return self._get(
+            "summary_trigger_token_budget", 20000, "SUMMARY_TRIGGER_TOKEN_BUDGET"
+        )
 
     # LLM Configuration
-    default_model: str = Field(
-        default="", description="Default LLM model", validation_alias="DEFAULT_MODEL"
-    )
-    default_temperature: float = Field(
-        default=0.7,
-        description="Default temperature for LLM",
-        validation_alias="DEFAULT_TEMPERATURE",
-    )
-    # Reasoning controls (GPT-5)
-    reasoning_effort: str | None = Field(
-        default=None,
-        description="Reasoning depth effort for GPT-5 (e.g., 'low', 'medium', 'high')",
-        validation_alias="REASONING_EFFORT",
-    )
-    reasoning_verbosity: str | None = Field(
-        default=None,
-        description="Verbosity level for GPT-5 outputs (e.g., 'low', 'medium', 'high')",
-        validation_alias="REASONING_VERBOSITY",
-    )
-    default_embedding_model: str = Field(
-        default="text-embedding-3-small",
-        description="Default embedding model",
-        validation_alias="DEFAULT_EMBEDDING_MODEL",
-    )
-    max_tokens: int = Field(
-        default=4000,
-        description="Maximum tokens for LLM response",
-        validation_alias="MAX_TOKENS",
-    )
-    streaming_enabled: bool = Field(
-        default=True, description="Enable streaming responses"
-    )
+    @property
+    def default_model(self) -> str:
+        return self._get("default_model", "", "DEFAULT_MODEL")
+
+    @property
+    def default_temperature(self) -> float:
+        return self._get("default_temperature", 0.7, "DEFAULT_TEMPERATURE")
+
+    @property
+    def reasoning_effort(self) -> str | None:
+        return self._get("reasoning_effort", None, "REASONING_EFFORT")
+
+    @property
+    def reasoning_verbosity(self) -> str | None:
+        return self._get("reasoning_verbosity", None, "REASONING_VERBOSITY")
+
+    @property
+    def default_embedding_model(self) -> str:
+        return self._get(
+            "default_embedding_model",
+            "text-embedding-3-small",
+            "DEFAULT_EMBEDDING_MODEL",
+        )
+
+    @property
+    def max_tokens(self) -> int:
+        return self._get("max_tokens", 4000, "MAX_TOKENS")
+
+    @property
+    def streaming_enabled(self) -> bool:
+        return self._get("streaming_enabled", True, "STREAMING_ENABLED")
 
     # Web/HTTP Configuration
-    web_user_agent: str = Field(
-        default=(
+    @property
+    def web_user_agent(self) -> str:
+        default_ua = (
             "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
             "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
-        ),
-        description="Default User-Agent for outbound HTTP requests and headless browser contexts",
-    )
+        )
+        return self._get("web_user_agent", default_ua, "WEB_USER_AGENT")
 
     # Logging Configuration
-    log_level: str = Field(
-        default="INFO", description="Logging level (DEBUG, INFO, WARNING, ERROR)"
-    )
-    log_format: str = Field(default="pretty", description="Log format (pretty or json)")
+    @property
+    def log_level(self) -> str:
+        return self._get("log_level", "INFO", "LOG_LEVEL")
+
+    @property
+    def log_format(self) -> str:
+        return self._get("log_format", "pretty", "LOG_FORMAT")
 
 
-# Global settings instance
+# Global settings instance (will be initialized with config manager)
 settings = Settings()

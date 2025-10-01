@@ -25,6 +25,7 @@ pydantic
 pydantic-settings
 dulwich
 structlog
+watchdog
 
 # Web Search
 ddgs
