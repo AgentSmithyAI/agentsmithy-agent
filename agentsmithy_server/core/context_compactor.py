@@ -37,8 +37,8 @@ async def maybe_compact_dialog(
         prompt_tokens: int | None = None
         try:
             if project and dialog_id:
-                usage_store = DialogUsageStorage(project, dialog_id)
-                usage = usage_store.load()
+                with DialogUsageStorage(project, dialog_id) as usage_store:
+                    usage = usage_store.load()
                 if usage:
                     prompt_tokens = usage.prompt_tokens
         except Exception:

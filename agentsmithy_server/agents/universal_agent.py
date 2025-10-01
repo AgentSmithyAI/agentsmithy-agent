@@ -120,13 +120,13 @@ class UniversalAgent(BaseAgent):
                 )
                 usage = result.get("usage") if isinstance(result, dict) else None
                 if project and dialog_id and usage and hasattr(project, "dialogs_dir"):
-                    storage = DialogUsageStorage(project, dialog_id)
-                    storage.upsert(
-                        prompt_tokens=usage.get("prompt_tokens"),
-                        completion_tokens=usage.get("completion_tokens"),
-                        total_tokens=usage.get("total_tokens"),
-                        model_name=self.llm_provider.get_model_name(),
-                    )
+                    with DialogUsageStorage(project, dialog_id) as storage:
+                        storage.upsert(
+                            prompt_tokens=usage.get("prompt_tokens"),
+                            completion_tokens=usage.get("completion_tokens"),
+                            total_tokens=usage.get("total_tokens"),
+                            model_name=self.llm_provider.get_model_name(),
+                        )
             except Exception:
                 pass
             return {

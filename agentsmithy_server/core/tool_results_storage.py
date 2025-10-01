@@ -86,6 +86,15 @@ class ToolResultsStorage:
         self._db_path: Path = DialogHistory(project, dialog_id).db_path
         self._engine: Engine | None = engine
 
+    def __enter__(self):
+        """Context manager entry."""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit - dispose resources."""
+        self.dispose()
+        return False
+
     # --- SQLAlchemy ORM model definitions ---
 
     def _get_engine(self) -> Engine:

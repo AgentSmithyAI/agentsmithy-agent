@@ -116,8 +116,8 @@ class AgentOrchestrator:
             # Load existing summary (if any) to chain with tail for re-summarization
             stored = None
             if context.get("project") and dialog_id:
-                storage = DialogSummaryStorage(context["project"], dialog_id)
-                stored = storage.load()
+                with DialogSummaryStorage(context["project"], dialog_id) as storage:
+                    stored = storage.load()
 
             # Build compaction source: previous summary (if any) + current tail
             compaction_source = list(messages)
@@ -169,15 +169,15 @@ class AgentOrchestrator:
                             )
 
                         try:
-                            storage = DialogSummaryStorage(
+                            with DialogSummaryStorage(
                                 context["project"], dialog_id
-                            )
-                            # Store legacy single-row and one versioned record
-                            storage.upsert(
-                                summary_text,
-                                summarized_count,
-                                KEEP_LAST_MESSAGES,
-                            )
+                            ) as storage:
+                                # Store legacy single-row and one versioned record
+                                storage.upsert(
+                                    summary_text,
+                                    summarized_count,
+                                    KEEP_LAST_MESSAGES,
+                                )
                         except Exception:
                             pass
         except Exception as e:

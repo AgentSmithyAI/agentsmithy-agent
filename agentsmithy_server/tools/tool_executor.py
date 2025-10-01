@@ -329,12 +329,15 @@ class ToolExecutor:
                     completion_val = usage.get("completion_tokens")
                     if completion_val is None:
                         completion_val = usage.get("output_tokens")
-                    DialogUsageStorage(self._project, self._dialog_id).upsert(
-                        prompt_tokens=prompt_val,
-                        completion_tokens=completion_val,
-                        total_tokens=usage.get("total_tokens"),
-                        model_name=self.llm_provider.get_model_name(),
-                    )
+                    with DialogUsageStorage(
+                        self._project, self._dialog_id
+                    ) as usage_storage:
+                        usage_storage.upsert(
+                            prompt_tokens=prompt_val,
+                            completion_tokens=completion_val,
+                            total_tokens=usage.get("total_tokens"),
+                            model_name=self.llm_provider.get_model_name(),
+                        )
             except Exception as e:
                 agent_logger.error(
                     "Failed to persist usage",
@@ -583,12 +586,15 @@ class ToolExecutor:
                         completion_val = last_usage.get("completion_tokens")
                         if completion_val is None:
                             completion_val = last_usage.get("output_tokens")
-                        DialogUsageStorage(self._project, self._dialog_id).upsert(
-                            prompt_tokens=prompt_val,
-                            completion_tokens=completion_val,
-                            total_tokens=last_usage.get("total_tokens"),
-                            model_name=self.llm_provider.get_model_name(),
-                        )
+                        with DialogUsageStorage(
+                            self._project, self._dialog_id
+                        ) as usage_storage:
+                            usage_storage.upsert(
+                                prompt_tokens=prompt_val,
+                                completion_tokens=completion_val,
+                                total_tokens=last_usage.get("total_tokens"),
+                                model_name=self.llm_provider.get_model_name(),
+                            )
                 except Exception as e:
                     agent_logger.error(
                         "Failed to persist usage (streaming)",

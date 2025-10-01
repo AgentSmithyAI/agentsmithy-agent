@@ -22,8 +22,8 @@ async def list_tool_results(
     """
     api_logger.info("Listing tool results", dialog_id=dialog_id)
 
-    storage = ToolResultsStorage(project, dialog_id)
-    results = await storage.list_results()
+    with ToolResultsStorage(project, dialog_id) as storage:
+        results = await storage.list_results()
 
     return [
         {
@@ -54,8 +54,8 @@ async def get_tool_result(
         tool_call_id=tool_call_id,
     )
 
-    storage = ToolResultsStorage(project, dialog_id)
-    result = await storage.get_result(tool_call_id)
+    with ToolResultsStorage(project, dialog_id) as storage:
+        result = await storage.get_result(tool_call_id)
 
     if not result:
         raise HTTPException(

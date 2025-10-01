@@ -95,13 +95,19 @@ class GetPreviousResultTool(BaseTool):
             )
 
         try:
-            storage = ToolResultsStorage(self._project, self._dialog_id)
-            result_data = await storage.get_result(tool_call_id)
+            with ToolResultsStorage(self._project, self._dialog_id) as storage:
+                result_data = await storage.get_result(tool_call_id)
+
+                if not result_data:
+                    # List available tool results to help the user
+                    available = await storage.list_results()
+                    available_ids = [
+                        r.tool_call_id for r in available[:10]
+                    ]  # Show max 10
+                else:
+                    available_ids = None
 
             if not result_data:
-                # List available tool results to help the user
-                available = await storage.list_results()
-                available_ids = [r.tool_call_id for r in available[:10]]  # Show max 10
 
                 return result_factory.not_found(
                     "get_tool_result",
