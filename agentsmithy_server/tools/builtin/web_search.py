@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 # Local TypedDicts for type hints
-from typing import Any, Literal, TypedDict, cast
+from typing import Any, Literal, TypedDict
 
-import duckduckgo_search as ddg
+from ddgs import DDGS
 from pydantic import BaseModel, Field
 
-from agentsmithy_server.config import settings
 from agentsmithy_server.tools.core import result as result_factory
 from agentsmithy_server.tools.core.types import ToolError, parse_tool_result
 from agentsmithy_server.tools.registry import register_summary_for
@@ -30,9 +29,6 @@ WebSearchResult = WebSearchSuccess | ToolError
 
 # Summary registration is declared above with imports
 
-AsyncDDGS = cast(Any, getattr(ddg, "AsyncDDGS", None))
-DDGS = cast(Any, getattr(ddg, "DDGS", None))
-
 
 class WebSearchArgs(BaseModel):
     query: str = Field(..., description="Search query to look up on the web")
@@ -46,23 +42,17 @@ class WebSearchTool(BaseTool):
 
     async def _arun(self, **kwargs: Any) -> dict[str, Any]:
         query = kwargs["query"]
-        num_results = kwargs.get(
-            "num_results", 5
-        )  # TODO: investigate optiomal number & configureable
+        num_results = kwargs.get("num_results", 5)
 
         try:
-            results: list[dict[str, str]] = []
-            if AsyncDDGS is not None:
-                # Prefer async implementation when available
-                async with AsyncDDGS(
-                    headers={"User-Agent": settings.web_user_agent}
-                ) as ddgs:
-                    maybe_iter = ddgs.text(query, max_results=num_results)
-                    # Support both: returning an async iterator directly or a coroutine that resolves to it (as in tests)
-                    if not hasattr(maybe_iter, "__aiter__"):
-                        maybe_iter = await maybe_iter
-                    async for result in maybe_iter:
-                        results.append(
+            import asyncio as _asyncio
+
+            def run_sync() -> list[dict[str, str]]:
+                local_results: list[dict[str, str]] = []
+                with DDGS() as ddgs:
+                    results_list = ddgs.text(query, max_results=num_results)
+                    for result in results_list:
+                        local_results.append(
                             {
                                 "title": result.get("title", ""),
                                 "url": result.get("href", result.get("link", "")),
@@ -71,25 +61,9 @@ class WebSearchTool(BaseTool):
                                 ),
                             }
                         )
-            else:
-                import asyncio as _asyncio
+                return local_results
 
-                def run_sync() -> list[dict[str, str]]:
-                    local_results: list[dict[str, str]] = []
-                    with DDGS(headers={"User-Agent": settings.web_user_agent}) as ddgs:
-                        for result in ddgs.text(query, max_results=num_results):
-                            local_results.append(
-                                {
-                                    "title": result.get("title", ""),
-                                    "url": result.get("href", result.get("link", "")),
-                                    "snippet": result.get(
-                                        "body", result.get("snippet", "")
-                                    ),
-                                }
-                            )
-                    return local_results
-
-                results = await _asyncio.to_thread(run_sync)
+            results = await _asyncio.to_thread(run_sync)
 
             return {
                 "type": "web_search_result",
@@ -105,7 +79,6 @@ class WebSearchTool(BaseTool):
                 error_type=type(e).__name__,
                 details={"query": query},
             )
-            # Back-compat: include query at top-level for tests/consumers
             err["query"] = query
             return err
 

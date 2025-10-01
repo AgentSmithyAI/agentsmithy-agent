@@ -445,7 +445,7 @@ class ToolExecutor:
                     reasoning_content = getattr(chunk, "reasoning_content", None)
                     additional_kwargs = getattr(chunk, "additional_kwargs", {}) or {}
                     response_metadata = getattr(chunk, "response_metadata", {}) or {}
-                    
+
                     reasoning = None
                     # Check reasoning_content first (new OpenAI format)
                     if reasoning_content and isinstance(reasoning_content, str):

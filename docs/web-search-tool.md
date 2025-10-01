@@ -6,20 +6,20 @@ The `WebSearchTool` enables AI agents to search the web using DuckDuckGo search 
 
 ## Features
 
-- **Free Web Search**: Uses DuckDuckGo API without requiring API keys
-- **Async Support**: Runs synchronous searches in a thread pool for async compatibility
+- **Free Web Search**: Uses ddgs (metasearch) without API keys
+- **Async Support**: Uses synchronous ddgs.DDGS under the hood in a thread pool
 - **Streaming Events**: No dedicated SSE event; rely on `tool_call` and subsequent `chat` updates
 - **Rate Limiting**: Handles rate limits gracefully with appropriate error messages
 
 ## Installation
 
-The web search functionality requires the `duckduckgo-search` library:
+The web search functionality requires the `ddgs` library:
 
 ```bash
-pip install duckduckgo-search==7.1.1
+pip install ddgs
 ```
 
-This dependency is already included in the project's `requirements.txt`.
+This dependency is included in the project's `requirements.txt`.
 
 ### Usage
 
