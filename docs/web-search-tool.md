@@ -57,8 +57,9 @@ registry = build_registry()
 ### Error Response
 ```json
 {
-    "type": "web_search_error",
-    "query": "Python programming tutorials",
+    "type": "tool_error",
+    "name": "web_search",
+    "code": "exception",
     "error": "Error message",
     "error_type": "ExceptionType"
 }
@@ -75,6 +76,31 @@ DuckDuckGo may impose rate limits on searches. The tool handles these gracefully
 1. Implementing request caching
 2. Adding delays between searches
 3. Using multiple search backends as fallbacks
+
+## PyInstaller Support
+
+The `ddgs` library uses dynamic module discovery via `pkgutil.iter_modules` to build its search engine registry. This doesn't work in PyInstaller frozen binaries by default, causing `KeyError: 'text'` errors.
+
+### Solution
+
+To fix this, explicitly include all `ddgs.engines` submodules in PyInstaller:
+
+**In `agentsmithy.spec`:**
+```python
+hiddenimports += collect_submodules('ddgs')
+hiddenimports += collect_submodules('ddgs.engines')  # ← Required for frozen builds
+```
+
+**Or via command line:**
+```bash
+pyinstaller --onefile \
+  --collect-submodules ddgs \
+  --collect-submodules ddgs.engines \
+  --collect-data ddgs \
+  main.py
+```
+
+Without `--collect-submodules ddgs.engines`, the `ENGINES` dictionary will be empty in frozen builds, causing `KeyError` when attempting to access `ENGINES['text']`.
 
 ## Testing
 

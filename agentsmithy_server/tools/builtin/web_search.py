@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import sys
+from importlib import metadata as _metadata
+
 # Local TypedDicts for type hints
 from typing import Any, Literal, TypedDict
 
@@ -9,6 +12,7 @@ from pydantic import BaseModel, Field
 from agentsmithy_server.tools.core import result as result_factory
 from agentsmithy_server.tools.core.types import ToolError, parse_tool_result
 from agentsmithy_server.tools.registry import register_summary_for
+from agentsmithy_server.utils.logger import agent_logger
 
 from ..base_tool import BaseTool
 
@@ -44,8 +48,41 @@ class WebSearchTool(BaseTool):
         query = kwargs["query"]
         num_results = kwargs.get("num_results", 5)
 
+        def _pkg_ver(name: str) -> str | None:
+            try:
+                return _metadata.version(name)
+            except Exception:
+                return None
+
         try:
             import asyncio as _asyncio
+
+            # Log environment context once per call
+            agent_logger.debug(
+                "web_search: start",
+                query=query,
+                num_results=num_results,
+                ddgs_version=_pkg_ver("ddgs"),
+                primp_version=_pkg_ver("primp"),
+                lxml_version=_pkg_ver("lxml"),
+                frozen=getattr(sys, "frozen", False),
+            )
+
+            # In frozen builds, verify that ENGINES was built correctly
+            if getattr(sys, "frozen", False):
+                try:
+                    from ddgs.engines import ENGINES
+
+                    if not ENGINES.get("text"):
+                        agent_logger.warning(
+                            "web_search: ENGINES['text'] is empty in frozen build",
+                            engines_keys=list(ENGINES.keys()),
+                        )
+                except Exception as engines_check_error:
+                    agent_logger.warning(
+                        "web_search: failed to check ENGINES",
+                        error=str(engines_check_error),
+                    )
 
             def run_sync() -> list[dict[str, str]]:
                 local_results: list[dict[str, str]] = []
@@ -65,6 +102,13 @@ class WebSearchTool(BaseTool):
 
             results = await _asyncio.to_thread(run_sync)
 
+            agent_logger.debug(
+                "web_search: success",
+                query=query,
+                count=len(results),
+                first_keys=list(results[0].keys()) if results else [],
+            )
+
             return {
                 "type": "web_search_result",
                 "query": query,
@@ -77,7 +121,14 @@ class WebSearchTool(BaseTool):
                 code="exception",
                 message=f"Error performing web search: {str(e)}",
                 error_type=type(e).__name__,
-                details={"query": query},
+                details={
+                    "query": query,
+                    "ddgs_version": _pkg_ver("ddgs"),
+                    "primp_version": _pkg_ver("primp"),
+                    "lxml_version": _pkg_ver("lxml"),
+                    "frozen": getattr(sys, "frozen", False),
+                    "exc_repr": repr(e),
+                },
             )
             err["query"] = query
             return err

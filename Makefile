@@ -59,6 +59,11 @@ pyinstall: install-dev
 			--collect-data chromadb \
 			--collect-submodules tiktoken \
 			--collect-submodules tiktoken_ext \
+			--collect-submodules ddgs \
+			--collect-submodules ddgs.engines \
+			--collect-submodules primp \
+			--collect-data ddgs \
+			--collect-data primp \
 			--exclude-module pytest \
 			--exclude-module pytest_asyncio \
 			--exclude-module black \
@@ -76,6 +81,11 @@ pyinstall: install-dev
 			--collect-data chromadb \
 			--collect-submodules tiktoken \
 			--collect-submodules tiktoken_ext \
+			--collect-submodules ddgs \
+			--collect-submodules ddgs.engines \
+			--collect-submodules primp \
+			--collect-data ddgs \
+			--collect-data primp \
 			--exclude-module pytest \
 			--exclude-module pytest_asyncio \
 			--exclude-module black \
