@@ -69,7 +69,7 @@ def set_scan_status(
     if progress is not None:
         doc["scan_progress"] = max(0, min(100, int(progress)))
     if error is not None:
-        doc["scan_error"] = error
+        doc["error"] = error
     if pid is not None:
         doc["scan_pid"] = pid
     if task_id is not None:
@@ -127,7 +127,7 @@ def ensure_singleton_and_select_port(
         "scan_updated_at": existing.get("scan_updated_at"),
         "scan_pid": existing.get("scan_pid"),
         "scan_task_id": existing.get("scan_task_id"),
-        "scan_error": existing.get("scan_error"),
+        "error": existing.get("error"),
         "scan_progress": existing.get("scan_progress"),
     }
     write_status(project, status_doc)

@@ -74,7 +74,7 @@ async def test_config_manager_initialization():
 
         await manager.initialize()
 
-        assert manager.get("default_model") == defaults["default_model"]
+        assert manager.get("model") == defaults["model"]
         assert manager.get("max_tokens") == defaults["max_tokens"]
 
 
@@ -166,7 +166,7 @@ async def test_settings_with_config_manager():
         settings = Settings(config_manager=manager)
 
         # Test property access
-        assert settings.default_model == defaults["default_model"]
+        assert settings.model == defaults["model"]
         assert settings.max_tokens == defaults["max_tokens"]
         assert settings.streaming_enabled == defaults["streaming_enabled"]
 
@@ -175,15 +175,15 @@ def test_settings_env_fallback():
     """Test Settings falls back to environment variables."""
     import os
 
-    # Set env var
-    os.environ["DEFAULT_MODEL"] = "test-model"
+    # Set env var (using new key name)
+    os.environ["MODEL"] = "test-model"
 
     # Settings without config manager should use env
     settings = Settings(config_manager=None)
-    assert settings.default_model == "test-model"
+    assert settings.model == "test-model"
 
     # Cleanup
-    del os.environ["DEFAULT_MODEL"]
+    del os.environ["MODEL"]
 
 
 @pytest.mark.asyncio

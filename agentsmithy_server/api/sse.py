@@ -50,6 +50,19 @@ def stream_response(
                 yield SSEEventFactory.done(dialog_id=dialog_id).to_sse()
                 done_sent = True
             raise
+        except ValueError as e:
+            # Configuration errors (e.g., missing model) - log without full traceback
+            api_logger.error(
+                "Configuration error",
+                error_type="ValueError",
+                error=str(e),
+            )
+            # Send error to client
+            yield SSEEventFactory.error(message=str(e), dialog_id=dialog_id).to_sse()
+            if not done_sent:
+                yield SSEEventFactory.done(dialog_id=dialog_id).to_sse()
+                done_sent = True
+            return
         except Exception as e:
             api_logger.error("SSE pipeline crashed", exc_info=True, error=str(e))
             # Always send error, then done (if not yet sent)

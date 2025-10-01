@@ -46,16 +46,16 @@ class OpenAIProvider(LLMProvider):
         agent_name: str | None = None,
     ):
         # Use explicit model/temperature or fall back to global settings only
-        self.model = model or settings.default_model
-        self.temperature = temperature or settings.default_temperature
+        self.model = model or settings.model
+        self.temperature = temperature or settings.temperature
         self.max_tokens = max_tokens or settings.max_tokens
         self.api_key = api_key or settings.openai_api_key
 
         # Validate that model is set
         if not self.model:
             raise ValueError(
-                "LLM model not specified. Please set DEFAULT_MODEL in .env file "
-                "or pass model parameter explicitly"
+                "LLM model not specified. Please set 'model' in "
+                ".agentsmithy/config.json or pass model parameter explicitly"
             )
 
         agent_logger.info(
@@ -71,7 +71,6 @@ class OpenAIProvider(LLMProvider):
             self.temperature,
             self.max_tokens,
             reasoning_effort=settings.reasoning_effort,
-            reasoning_verbosity=settings.reasoning_verbosity,
         )
         # Only set model_kwargs if non-empty (for stream_options etc)
         if model_kwargs:

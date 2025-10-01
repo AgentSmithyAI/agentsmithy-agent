@@ -83,28 +83,20 @@ class Settings:
 
     # LLM Configuration
     @property
-    def default_model(self) -> str:
-        return self._get("default_model", "", "DEFAULT_MODEL")
+    def model(self) -> str:
+        return self._get("model", "gpt-5", "MODEL")
 
     @property
-    def default_temperature(self) -> float:
-        return self._get("default_temperature", 0.7, "DEFAULT_TEMPERATURE")
+    def temperature(self) -> float:
+        return self._get("temperature", 0.7, "TEMPERATURE")
 
     @property
-    def reasoning_effort(self) -> str | None:
-        return self._get("reasoning_effort", None, "REASONING_EFFORT")
+    def reasoning_effort(self) -> str:
+        return self._get("reasoning_effort", "low", "REASONING_EFFORT")
 
     @property
-    def reasoning_verbosity(self) -> str | None:
-        return self._get("reasoning_verbosity", None, "REASONING_VERBOSITY")
-
-    @property
-    def default_embedding_model(self) -> str:
-        return self._get(
-            "default_embedding_model",
-            "text-embedding-3-small",
-            "DEFAULT_EMBEDDING_MODEL",
-        )
+    def embedding_model(self) -> str:
+        return self._get("embedding_model", "text-embedding-3-small", "EMBEDDING_MODEL")
 
     @property
     def max_tokens(self) -> int:

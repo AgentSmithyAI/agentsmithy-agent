@@ -23,7 +23,7 @@ class EmbeddingsManager:
         from agentsmithy_server.config import settings
 
         self.provider = provider
-        self.model = model or settings.default_embedding_model
+        self.model = model or settings.embedding_model
         self._embeddings: Embeddings | None = None
 
     @property

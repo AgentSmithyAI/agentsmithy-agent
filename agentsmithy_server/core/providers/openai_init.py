@@ -25,13 +25,12 @@ def build_openai_langchain_kwargs(
     model: str,
     temperature: float | None,
     max_tokens: int | None,
-    reasoning_effort: str | None = None,
-    reasoning_verbosity: str | None = None,
+    reasoning_effort: str = "low",
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Return (base_kwargs, model_kwargs) for ChatOpenAI depending on model family.
 
     - For chat-completions family, attach stream_options.include_usage=True
-    - For responses family (o1/gpt-5), add reasoning parameter for extended thinking
+    - For responses family (o1/gpt-5), add reasoning parameter with effort (low/medium/high)
     """
     base_kwargs: dict[str, Any] = {
         "model": model,
@@ -51,14 +50,8 @@ def build_openai_langchain_kwargs(
             base_kwargs["max_tokens"] = max_tokens
     elif fam == "responses":
         # For o1/gpt-5 models: add reasoning parameter directly (not in model_kwargs)
-        # Reasoning content then comes in additional_kwargs.reasoning or response_metadata.reasoning
-        reasoning_kwargs: dict[str, Any] = {}
-        # Always request a reasoning summary; default to 'auto' if not configured
-        verbosity = reasoning_verbosity or "auto"
-        reasoning_kwargs["summary"] = verbosity
-        # Include effort if configured
-        if reasoning_effort:
-            reasoning_kwargs["effort"] = reasoning_effort
+        # Reasoning content comes in additional_kwargs.reasoning or response_metadata.reasoning
+        reasoning_kwargs: dict[str, Any] = {"effort": reasoning_effort}
         # Pass reasoning as direct parameter to ChatOpenAI
         base_kwargs["reasoning"] = reasoning_kwargs
 

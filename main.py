@@ -94,9 +94,9 @@ if __name__ == "__main__":
         sys.exit(1)
 
     # Validate required settings
-    if not settings.default_model:
+    if not settings.model:
         startup_logger.warning(
-            "DEFAULT_MODEL not set in config! You may need to configure it via IDE plugin."
+            "MODEL not set in config! You may need to configure it via IDE plugin."
         )
 
     try:
@@ -201,23 +201,63 @@ if __name__ == "__main__":
             if should_inspect:
 
                 async def _run_inspector():
+                    from agentsmithy_server.core.project_runtime import set_scan_status
+
                     try:
+                        # Check if model is configured
+                        inspector_model = (
+                            os.getenv("AGENTSMITHY_INSPECTOR_MODEL") or settings.model
+                        )
+                        if not inspector_model:
+                            error_msg = (
+                                "Cannot run project inspection: LLM model not configured. "
+                                "Please set 'model' in .agentsmithy/config.json or "
+                                "AGENTSMITHY_INSPECTOR_MODEL environment variable."
+                            )
+                            startup_logger.error(
+                                "Project inspection skipped",
+                                reason="model_not_configured",
+                                error=error_msg,
+                            )
+                            set_scan_status(
+                                project,
+                                status="error",
+                                error=error_msg,
+                            )
+                            return
+
+                        set_scan_status(project, status="scanning", progress=0)
+
                         inspector = ProjectInspectorAgent(
                             LLMFactory.create(
                                 "openai",
-                                model=os.getenv("AGENTSMITHY_INSPECTOR_MODEL"),
+                                model=inspector_model,
                                 agent_name="project_inspector",
                             ),
                             None,
                         )
                         await inspector.inspect_and_save(project)
+
+                        set_scan_status(project, status="done", progress=100)
+
                         startup_logger.info(
                             "Project analyzed by inspector agent and metadata saved",
                             project=project.name,
+                            model=inspector_model,
                         )
+                    except ValueError as e:
+                        # Model/config related errors
+                        error_msg = f"Configuration error: {str(e)}"
+                        startup_logger.error(
+                            "Project inspection failed",
+                            error_type="configuration",
+                            error=error_msg,
+                        )
+                        set_scan_status(project, status="error", error=error_msg)
                     except Exception as e:
                         import traceback as _tb
 
+                        error_msg = f"{type(e).__name__}: {str(e)}"
                         startup_logger.error(
                             "Background project inspection failed",
                             error=str(e),
@@ -225,6 +265,7 @@ if __name__ == "__main__":
                                 _tb.format_exception(type(e), e, e.__traceback__)
                             ),
                         )
+                        set_scan_status(project, status="error", error=error_msg)
 
                 inspector_task = asyncio.create_task(_run_inspector())
                 app.state.inspector_task = inspector_task

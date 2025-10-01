@@ -18,11 +18,10 @@ def get_default_config() -> dict[str, Any]:
         # Summarization
         "summary_trigger_token_budget": 20000,
         # LLM Configuration
-        "default_model": "",
-        "default_temperature": 0.7,
-        "reasoning_effort": None,
-        "reasoning_verbosity": None,
-        "default_embedding_model": "text-embedding-3-small",
+        "model": "gpt-5",
+        "temperature": 0.7,
+        "reasoning_effort": "low",
+        "embedding_model": "text-embedding-3-small",
         "max_tokens": 4000,
         "streaming_enabled": True,
         # Web/HTTP Configuration
