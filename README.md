@@ -100,7 +100,7 @@ Notes:
 
 - `--workdir` (required): absolute path to the project directory. On startup, the server ensures `/abs/path/to/workspace/.agentsmithy` exists. Project-specific data (e.g., RAG index, dialogs, status.json) is stored under each project's `.agentsmithy` directory. The server keeps this path in-process; no env var is used.
 
-- `--ide` (optional): IDE identifier to provide better context to the AI agent. Common values: `cursor`, `vscode`, `jetbrains`, `vim`, `emacs`, `sublime`. If not specified, the agent will see "unknown IDE". This parameter is runtime-only and not saved to configuration. The agent receives environment information (OS, shell, IDE) in its system prompt, allowing it to provide IDE-specific advice and use appropriate commands. See [docs/ide-integration.md](./docs/ide-integration.md) for details.
+- `--ide` (optional): IDE identifier to provide better context to the AI agent. Common values: `cursor`, `vscode`, `jetbrains`, `vim`, `emacs`, `sublime`. If not specified, the agent will see "unknown IDE". This parameter is runtime-only and not saved to configuration. The agent receives environment information (OS, shell, IDE) in its system prompt, allowing it to provide IDE-specific advice and use appropriate commands for your platform.
 
 ### Projects and RAG Storage
 

@@ -21,15 +21,14 @@ class _ResponsesFamilySpec(OpenAIModelSpec):
         # - To receive reasoning summaries/events, include reasoning.summary
         base_kwargs: dict[str, Any] = {
             "model": self.name,
-        }
-        model_kwargs: dict[str, Any] = {
             "reasoning": {
                 "effort": reasoning_effort,
                 # Enable summaries of chain-of-thought (reasoning) where supported
                 # Options: "auto", "detailed" (GPT-5), "concise" (not for GPT-5 per docs)
                 "summary": "auto",
-            }
+            },
         }
+        model_kwargs: dict[str, Any] = {}
         if max_tokens is not None:
             model_kwargs["max_output_tokens"] = max_tokens
         return base_kwargs, model_kwargs
