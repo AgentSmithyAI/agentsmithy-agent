@@ -68,7 +68,19 @@ if not _MODEL_REGISTRY:
         pass
 
 # Build supported chat models from registry after autodiscovery/fallback
+# NOTE: In frozen builds (PyInstaller), runtime hooks may import model modules
+# after this module is imported. Therefore, avoid freezing the set at import
+# time. Expose a function that always reflects the current registry.
 SUPPORTED_OPENAI_CHAT_MODELS = set(_MODEL_REGISTRY.keys())
+
+
+def get_supported_openai_chat_models() -> set[str]:
+    """Return the current set of supported OpenAI chat models.
+
+    Do not rely on the import-time constant in frozen environments; the
+    registry may be populated by runtime hooks after this module is imported.
+    """
+    return set(_MODEL_REGISTRY.keys())
 
 
 def get_model_spec(model: str) -> IModelSpec:
@@ -77,7 +89,7 @@ def get_model_spec(model: str) -> IModelSpec:
     """
     cls = _MODEL_REGISTRY.get(model)
     if not cls:
-        raise ValueError(
-            f"Unsupported OpenAI model '{model}'. Supported: {sorted(SUPPORTED_OPENAI_CHAT_MODELS)}"
-        )
+        # Use dynamic view to avoid stale list in frozen builds
+        supported = sorted(get_supported_openai_chat_models())
+        raise ValueError(f"Unsupported OpenAI model '{model}'. Supported: {supported}")
     return cls()

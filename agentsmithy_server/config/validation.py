@@ -6,8 +6,8 @@ import os
 from collections.abc import Iterable
 
 from agentsmithy_server.core.providers.openai.models import (
-    SUPPORTED_OPENAI_CHAT_MODELS,
     SUPPORTED_OPENAI_EMBEDDING_MODELS,
+    get_supported_openai_chat_models,
 )
 
 
@@ -26,10 +26,11 @@ def validate_or_raise(
     - OPENAI_API_KEY must be set (via settings or environment)
     """
     m = model or ""
-    if m not in SUPPORTED_OPENAI_CHAT_MODELS:
+    supported_chat = get_supported_openai_chat_models()
+    if m not in supported_chat:
         raise ValueError(
             "Unsupported OpenAI chat model: '" + (model or "") + "'. "
-            "Supported: " + _format_options(SUPPORTED_OPENAI_CHAT_MODELS)
+            "Supported: " + _format_options(supported_chat)
         )
 
     em = embedding_model or ""
