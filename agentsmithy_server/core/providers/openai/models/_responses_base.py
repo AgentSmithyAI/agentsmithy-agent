@@ -14,12 +14,20 @@ class _ResponsesFamilySpec(OpenAIModelSpec):
     def build_langchain_kwargs(
         self, temperature: float | None, max_tokens: int | None, reasoning_effort: str
     ) -> tuple[dict[str, Any], dict[str, Any]]:
+        # Build base kwargs for Responses API models (e.g., GPT-5 series)
+        # Notes:
+        # - temperature is not supported for reasoning models
+        # - Responses API uses max_output_tokens instead of max_completion_tokens
+        # - To receive reasoning summaries/events, include reasoning.summary
         base_kwargs: dict[str, Any] = {
             "model": self.name,
-            # For responses family, temperature is not supported
-            "reasoning": {"effort": reasoning_effort},
+            "reasoning": {
+                "effort": reasoning_effort,
+                # Enable summaries of chain-of-thought (reasoning) where supported
+                # Options: "auto", "detailed" (GPT-5), "concise" (not for GPT-5 per docs)
+                "summary": "auto",
+            },
         }
         if max_tokens is not None:
-            # Responses API expects max_completion_tokens
-            base_kwargs["max_completion_tokens"] = max_tokens
+            base_kwargs["max_output_tokens"] = max_tokens
         return base_kwargs, {}
