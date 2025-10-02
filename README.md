@@ -81,8 +81,13 @@ DEFAULT_MODEL=gpt-5  # required
 ### Starting the Server
 
 ```bash
-# Start via main.py with a working directory (required)
+# Basic usage
 python main.py --workdir /abs/path/to/workspace
+
+# With IDE specification (recommended for better context)
+python main.py --workdir /abs/path/to/workspace --ide cursor
+python main.py --workdir /abs/path/to/workspace --ide vscode
+python main.py --workdir /abs/path/to/workspace --ide jetbrains
 ```
 
 The server starts at base port `11434` (auto-increments if busy). Check startup logs for the actual URL, e.g., `http://localhost:11434`.
@@ -94,6 +99,8 @@ Notes:
 ### Startup Parameters
 
 - `--workdir` (required): absolute path to the project directory. On startup, the server ensures `/abs/path/to/workspace/.agentsmithy` exists. Project-specific data (e.g., RAG index, dialogs, status.json) is stored under each project's `.agentsmithy` directory. The server keeps this path in-process; no env var is used.
+
+- `--ide` (optional): IDE identifier to provide better context to the AI agent. Common values: `cursor`, `vscode`, `jetbrains`, `vim`, `emacs`, `sublime`. If not specified, the agent will see "unknown IDE". This parameter is runtime-only and not saved to configuration. The agent receives environment information (OS, shell, IDE) in its system prompt, allowing it to provide IDE-specific advice and use appropriate commands. See [docs/ide-integration.md](./docs/ide-integration.md) for details.
 
 ### Projects and RAG Storage
 

@@ -26,6 +26,11 @@ if __name__ == "__main__":
         required=True,
         help="Absolute path to the working directory (agent state stored here)",
     )
+    parser.add_argument(
+        "--ide",
+        required=False,
+        help="IDE identifier (e.g., 'vscode', 'cursor', 'jetbrains')",
+    )
     # No --project: workdir is the project
     args, _ = parser.parse_known_args()
 
@@ -196,6 +201,29 @@ if __name__ == "__main__":
             from agentsmithy_server.api.server import app
 
             app.state.shutdown_event = shutdown_event
+            # Set IDE identifier as runtime parameter
+            app.state.ide = args.ide
+
+            # Log runtime environment information
+            from agentsmithy_server.platforms import get_os_adapter
+
+            adapter = get_os_adapter()
+            os_ctx = adapter.os_context()
+            shell = os_ctx.get("shell", "Unknown shell")
+            if shell and "/" in shell:
+                shell = shell.split("/")[-1]
+            elif shell and "\\" in shell:
+                shell = shell.split("\\")[-1]
+
+            startup_logger.info(
+                "Runtime environment",
+                system=os_ctx.get("system", "Unknown"),
+                release=os_ctx.get("release", "unknown"),
+                machine=os_ctx.get("machine", "unknown"),
+                python=os_ctx.get("python", "unknown"),
+                shell=shell,
+                ide=args.ide or "unknown",
+            )
 
             # Optionally run project inspector in background (non-blocking)
             inspector_task = None

@@ -48,6 +48,9 @@ async def chat(
             dialog_id = project.create_dialog(set_current=True)
 
         request.context = dict(request.context or {})
+        # Add IDE runtime parameter to context
+        if hasattr(raw_request.app.state, "ide"):
+            request.context["ide"] = raw_request.app.state.ide
 
         if request.stream:
             api_logger.info("Returning SSE streaming response")

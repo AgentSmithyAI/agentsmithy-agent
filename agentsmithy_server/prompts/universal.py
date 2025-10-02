@@ -20,3 +20,53 @@ UNIVERSAL_SYSTEM = (
     "- Maintain concise, technical responses."
     "- When no code modification is required, provide direct answers without invoking tools."
 )
+
+
+def get_runtime_info(ide: str | None = None) -> str:
+    """Get runtime environment information (OS, shell, IDE).
+
+    Args:
+        ide: IDE identifier (e.g., 'vscode', 'cursor', 'jetbrains') or None
+
+    Returns:
+        Formatted string with runtime information
+    """
+    from agentsmithy_server.platforms import get_os_adapter
+
+    adapter = get_os_adapter()
+    os_ctx = adapter.os_context()
+
+    # Get OS info
+    system = os_ctx.get("system", "Unknown")
+    release = os_ctx.get("release", "")
+
+    # Get shell
+    shell = os_ctx.get("shell", "Unknown shell")
+    if shell and "/" in shell:
+        # Extract just the shell name from path
+        shell = shell.split("/")[-1]
+    elif shell and "\\" in shell:
+        # Windows path
+        shell = shell.split("\\")[-1]
+
+    # IDE info
+    ide_name = ide if ide else "unknown IDE"
+
+    return (
+        f"\n\n# Runtime Environment\n"
+        f"- OS: {system} {release}\n"
+        f"- Shell: {shell}\n"
+        f"- IDE: {ide_name}\n"
+    )
+
+
+def get_universal_system_prompt(ide: str | None = None) -> str:
+    """Get the complete universal system prompt with runtime information.
+
+    Args:
+        ide: IDE identifier or None
+
+    Returns:
+        Complete system prompt with runtime info
+    """
+    return UNIVERSAL_SYSTEM + get_runtime_info(ide)

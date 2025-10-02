@@ -75,7 +75,10 @@ class RunCommandTool(BaseTool):
     name: str = "run_command"
     description: str = (
         "Execute an operating system command via system shell and return stdout, stderr, exit code,"
-        " duration, and environment context. " + _OS_DESC
+        " duration, and environment context. "
+        "Use runtime environment information (OS, shell) from your system prompt "
+        "to construct correct commands for the user's platform. Consider OS-specific syntax, shell differences."
+        + _OS_DESC
     )
     args_schema: type[BaseModel] | dict[str, Any] | None = RunCommandArgs
 
