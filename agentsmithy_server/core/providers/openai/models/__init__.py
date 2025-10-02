@@ -52,7 +52,22 @@ def _autodiscover_models() -> None:
 # Perform autodiscovery once at import time
 _autodiscover_models()
 
-# Build supported chat models from registry after autodiscovery
+# PyInstaller onefile: pkgutil.iter_modules may return nothing inside the archive.
+# Fallback to explicit imports if registry stayed empty (no runtime hooks required).
+if not _MODEL_REGISTRY:
+    try:
+        # Keep this list in sync with available modules in this package
+        for mod_name in (
+            "gpt4_1",
+            "gpt5",
+            "gpt5_mini",
+        ):
+            importlib.import_module(f"{__name__}.{mod_name}")
+    except Exception:
+        # Best effort; validation layer will raise a clear error later
+        pass
+
+# Build supported chat models from registry after autodiscovery/fallback
 SUPPORTED_OPENAI_CHAT_MODELS = set(_MODEL_REGISTRY.keys())
 
 
