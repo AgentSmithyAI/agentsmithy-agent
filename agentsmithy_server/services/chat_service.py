@@ -52,6 +52,7 @@ class ChatService:
 
     def _get_orchestrator(self) -> AgentOrchestrator:
         if self._orchestrator is None:
+            # Orchestrator now supports DI; keep default provider for backwards compatibility
             self._orchestrator = AgentOrchestrator()
         return self._orchestrator
 

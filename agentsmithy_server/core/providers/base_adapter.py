@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Literal
+from typing import Any
 
-Vendor = Literal["openai", "anthropic", "xai", "deepseek", "other"]
+from .types import Vendor
 
 
 class IProviderChatAdapter(ABC):

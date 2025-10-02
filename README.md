@@ -277,9 +277,9 @@ class YourLLMProvider(LLMProvider):
         ...
 ```
 
-2. Register the provider:
+2. Instantiate your provider directly where needed:
 ```python
-LLMFactory.register_provider("your_llm", YourLLMProvider)
+provider = YourLLMProvider(...)
 ```
 
 ### Adding a New Agent

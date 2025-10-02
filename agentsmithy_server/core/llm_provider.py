@@ -79,17 +79,13 @@ class OpenAIProvider(LLMProvider):
 
         # Initialize LLM; use explicit API key if provided
         if self.api_key:
-            import os
 
-            vendor = adapter.vendor() if hasattr(adapter, "vendor") else "openai"
-            if vendor == "openai":
-                os.environ.setdefault("OPENAI_API_KEY", str(self.api_key))
-            elif vendor == "anthropic":
-                os.environ.setdefault("ANTHROPIC_API_KEY", str(self.api_key))
-            elif vendor == "xai":
-                os.environ.setdefault("XAI_API_KEY", str(self.api_key))
-            elif vendor == "deepseek":
-                os.environ.setdefault("DEEPSEEK_API_KEY", str(self.api_key))
+            # Map vendor -> env var via central helper
+            from agentsmithy_server.core.providers.vendor import set_api_key_env
+
+            vendor = adapter.vendor() if hasattr(adapter, "vendor") else None
+            if vendor is not None:
+                set_api_key_env(vendor, str(self.api_key))
 
         module_path, class_name = class_path.rsplit(".", 1)
         cls = getattr(import_module(module_path), class_name)
@@ -182,24 +178,6 @@ class OpenAIProvider(LLMProvider):
         return {"stream_usage": True}
 
 
-class LLMFactory:
-    """Factory for creating LLM providers."""
-
-    _providers: dict[str, type[LLMProvider]] = {
-        "openai": OpenAIProvider,
-    }
-
-    @classmethod
-    def create(cls, provider: str = "openai", **kwargs) -> LLMProvider:
-        """Create an LLM provider instance."""
-        if provider not in cls._providers:
-            raise ValueError(f"Unknown provider: {provider}")
-
-        provider_class = cls._providers[provider]
-        provider_instance: LLMProvider = provider_class(**kwargs)
-        return provider_instance
-
-    @classmethod
-    def register_provider(cls, name: str, provider_class: type[LLMProvider]):
-        """Register a new provider."""
-        cls._providers[name] = provider_class
+# Note: Historical LLMFactory was removed. Instantiate providers directly,
+# e.g., OpenAIProvider(...). Factory indirection is unnecessary because
+# provider resolution happens via the model adapter registry.

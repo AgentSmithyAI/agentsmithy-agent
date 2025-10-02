@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from agentsmithy_server.core.providers.base_adapter import IProviderChatAdapter, Vendor
+from agentsmithy_server.core.providers.base_adapter import IProviderChatAdapter
 from agentsmithy_server.core.providers.model_spec import IModelSpec
 from agentsmithy_server.core.providers.openai.models import (
     get_model_spec as get_openai_model_spec,
 )
+from agentsmithy_server.core.providers.types import Vendor
 
 
 class OpenAIChatAdapter(IProviderChatAdapter):
@@ -15,7 +16,7 @@ class OpenAIChatAdapter(IProviderChatAdapter):
         self._impl = impl
 
     def vendor(self) -> Vendor:
-        return "openai"
+        return Vendor.OPENAI
 
     def supports_temperature(self) -> bool:
         return self._impl.supports_temperature()

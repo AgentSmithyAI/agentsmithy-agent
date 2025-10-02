@@ -3,6 +3,8 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any
 
+from .types import Vendor
+
 
 class IModelSpec(ABC):
     """Provider-agnostic interface for per-model configuration and capabilities.
@@ -12,9 +14,9 @@ class IModelSpec(ABC):
     """
 
     name: str
-    vendor: str  # e.g., "openai", "anthropic", "xai"
+    vendor: Vendor  # e.g., Vendor.OPENAI, Vendor.ANTHROPIC
 
-    def __init__(self, name: str, vendor: str) -> None:
+    def __init__(self, name: str, vendor: Vendor) -> None:
         self.name = name
         self.vendor = vendor
 

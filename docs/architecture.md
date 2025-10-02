@@ -25,7 +25,7 @@ High level:
 - Supports streaming state iteration or one‑shot invocation
 
 ### LLM Provider (`agentsmithy_server/core/llm_provider.py`)
-- `LLMFactory` creates providers; default `OpenAIProvider`
+- Instantiate providers directly (e.g., `OpenAIProvider`) — factory removed
 - Provider integrates with `langchain_openai.ChatOpenAI`
 - Supports `bind_tools` for native function calling
 - Agent model/temperature resolved via pluggable `AgentConfigProvider`
