@@ -93,11 +93,12 @@ if __name__ == "__main__":
         startup_logger.error("Failed to initialize configuration", error=str(e))
         sys.exit(1)
 
-    # Validate required settings
-    if not settings.model:
-        startup_logger.warning(
-            "MODEL not set in config! You may need to configure it via IDE plugin."
-        )
+    # Validate required settings (strict models + API key)
+    try:
+        settings.validate_or_raise()
+    except ValueError as e:
+        startup_logger.error("Invalid configuration", error=str(e))
+        sys.exit(1)
 
     try:
         # Ensure hidden state directory exists

@@ -24,6 +24,12 @@ class Settings:
     def __init__(self, config_manager: ConfigManager | None = None):
         self._config_manager = config_manager
 
+    # Validation helper
+    def validate_or_raise(self) -> None:
+        from agentsmithy_server.config.validation import validate_or_raise as _v
+
+        _v(self.model, self.embedding_model, self.openai_api_key)
+
     def _get(
         self,
         key: str,

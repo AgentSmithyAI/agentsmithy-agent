@@ -2,14 +2,16 @@
 
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
+from importlib import import_module
 from typing import Any
 
 from langchain_core.messages import BaseMessage
 from langchain_core.tools import BaseTool
-from langchain_openai import ChatOpenAI
 
 from agentsmithy_server.config import settings
-from agentsmithy_server.core.providers.openai_init import build_openai_langchain_kwargs
+from agentsmithy_server.core.providers import register_builtin_adapters
+from agentsmithy_server.core.providers.openai.models import get_model_spec
+from agentsmithy_server.core.providers.registry import get_adapter
 from agentsmithy_server.utils.logger import agent_logger
 
 
@@ -65,38 +67,41 @@ class OpenAIProvider(LLMProvider):
             max_tokens=self.max_tokens,
         )
 
-        # Base kwargs split to allow per-family specialization
-        base_kwargs, model_kwargs = build_openai_langchain_kwargs(
-            self.model,
-            self.temperature,
-            self.max_tokens,
+        # Ensure adapters are registered (no import side-effects)
+        register_builtin_adapters()
+        # Resolve provider adapter via registry
+        adapter = get_adapter(self.model)
+        class_path, kwargs = adapter.build_langchain(
+            temperature=self.temperature,
+            max_tokens=self.max_tokens,
             reasoning_effort=settings.reasoning_effort,
         )
-        # Only set model_kwargs if non-empty (for stream_options etc)
-        if model_kwargs:
-            base_kwargs["model_kwargs"] = model_kwargs
 
         # Initialize LLM; use explicit API key if provided
         if self.api_key:
-            # Note: langchain_openai expects SecretStr; use environment variable fallback instead
             import os
 
-            os.environ.setdefault("OPENAI_API_KEY", str(self.api_key))
-            try:
-                agent_logger.debug(
-                    "Initializing ChatOpenAI", base_kwargs_keys=list(base_kwargs.keys())
-                )
-            except Exception:
-                pass
-            self.llm = ChatOpenAI(**base_kwargs)
-        else:
-            try:
-                agent_logger.debug(
-                    "Initializing ChatOpenAI", base_kwargs_keys=list(base_kwargs.keys())
-                )
-            except Exception:
-                pass
-            self.llm = ChatOpenAI(**base_kwargs)
+            vendor = adapter.vendor() if hasattr(adapter, "vendor") else "openai"
+            if vendor == "openai":
+                os.environ.setdefault("OPENAI_API_KEY", str(self.api_key))
+            elif vendor == "anthropic":
+                os.environ.setdefault("ANTHROPIC_API_KEY", str(self.api_key))
+            elif vendor == "xai":
+                os.environ.setdefault("XAI_API_KEY", str(self.api_key))
+            elif vendor == "deepseek":
+                os.environ.setdefault("DEEPSEEK_API_KEY", str(self.api_key))
+
+        module_path, class_name = class_path.rsplit(".", 1)
+        cls = getattr(import_module(module_path), class_name)
+        try:
+            agent_logger.debug(
+                "Initializing chat model",
+                class_path=class_path,
+                kwargs_keys=list(kwargs.keys()),
+            )
+        except Exception:
+            pass
+        self.llm = cls(**kwargs)
 
         # Track last observed usage in streaming mode
         self._last_usage: dict[str, Any] | None = None
@@ -163,13 +168,17 @@ class OpenAIProvider(LLMProvider):
         """Return vendor-specific kwargs for astream() calls.
 
         For chat_completions family: include stream_usage=True
-        For responses family (o1/gpt-5): no stream_usage (unsupported)
+        For responses family (gpt-5/gpt-5-mini): no stream_usage (unsupported)
         """
-        model_lower = self.model.lower()
-        # Responses family doesn't support stream_usage parameter
-        if model_lower.startswith("o1") or model_lower.startswith("gpt-5"):
+        # Prefer adapter's stream kwargs when available; fallback to OpenAI heuristic
+        try:
+            adapter = get_adapter(self.model)
+            return adapter.stream_kwargs()
+        except Exception:
+            pass
+        family = getattr(get_model_spec(self.model), "family", "chat_completions")
+        if family == "responses":
             return {}
-        # Chat completions family supports stream_usage
         return {"stream_usage": True}
 
 
