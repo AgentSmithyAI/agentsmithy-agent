@@ -1,6 +1,7 @@
 # Core dependencies
 fastapi
-uvicorn  # Without [standard] to avoid Unix-only deps like uvloop
+uvicorn[standard]  # Full performance stack
+uvloop; sys_platform != 'win32'  # Unix-only async loop (override to add platform condition)
 sse-starlette
 python-multipart
 

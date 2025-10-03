@@ -455,8 +455,10 @@ uvicorn[standard]==0.37.0
     # via
     #   -r requirements.in
     #   chromadb
-uvloop==0.21.0
-    # via uvicorn
+uvloop==0.21.0 ; sys_platform != "win32"
+    # via
+    #   -r requirements.in
+    #   uvicorn
 watchdog==6.0.0
     # via -r requirements.in
 watchfiles==1.1.0
