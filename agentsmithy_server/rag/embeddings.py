@@ -15,26 +15,36 @@ except Exception:
     # If the plugin isn't present, runtime will fail on usage; this keeps dev envs lenient.
     pass
 
+from agentsmithy_server.core.providers.types import Vendor
+
 
 class EmbeddingsManager:
     """Manager for handling document embeddings."""
 
-    def __init__(self, provider: str = "openai", model: str | None = None):
+    def __init__(
+        self, provider: Vendor | str = Vendor.OPENAI, model: str | None = None
+    ):
         from agentsmithy_server.config import settings
 
-        self.provider = provider
-        self.model = model or settings.default_embedding_model
+        # Normalize provider to enum or string value
+        self.provider: Vendor | str = provider
+        self.model = model or settings.embedding_model
         self._embeddings: Embeddings | None = None
 
     @property
     def embeddings(self) -> Embeddings:
         """Get embeddings instance."""
         if self._embeddings is None:
-            if self.provider == "openai":
+            provider_val = (
+                self.provider.value
+                if isinstance(self.provider, Vendor)
+                else self.provider
+            )
+            if provider_val == Vendor.OPENAI.value:
                 # Let SDK pick API key from environment; avoids SecretStr typing issues
                 self._embeddings = OpenAIEmbeddings(model=self.model)
             else:
-                raise ValueError(f"Unknown embeddings provider: {self.provider}")
+                raise ValueError(f"Unknown embeddings provider: {provider_val}")
 
         return self._embeddings
 

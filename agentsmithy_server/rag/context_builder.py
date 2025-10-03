@@ -40,6 +40,7 @@ class ContextBuilder:
         k_documents: int = 4,
     ) -> dict[str, Any]:
         """Build context from query and file information."""
+        # Initialize with defaults
         context: dict[str, Any] = {
             "query": query,
             "current_file": None,
@@ -47,6 +48,10 @@ class ContextBuilder:
             "relevant_documents": [],
             "total_context_length": 0,
         }
+
+        # Update with all fields from file_context (preserves everything)
+        if file_context:
+            context.update(file_context)
 
         # Inject project metadata if available
         if self.project is not None:

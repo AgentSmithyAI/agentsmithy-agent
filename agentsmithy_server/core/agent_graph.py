@@ -8,7 +8,7 @@ from langgraph.graph import END, StateGraph
 from langgraph.graph.message import add_messages
 
 from agentsmithy_server.agents.universal_agent import UniversalAgent
-from agentsmithy_server.core import LLMFactory
+from agentsmithy_server.core import OpenAIProvider
 from agentsmithy_server.core.context_compactor import maybe_compact_dialog
 from agentsmithy_server.core.dialog_summary_storage import DialogSummaryStorage
 from agentsmithy_server.core.summarization.strategy import KEEP_LAST_MESSAGES
@@ -31,11 +31,22 @@ class AgentState(TypedDict):
 class AgentOrchestrator:
     """Orchestrates multiple agents using LangGraph."""
 
-    def __init__(self, llm_provider_name: str = "openai"):
-        # Initialize LLM provider
-        agent_logger.info("Creating AgentOrchestrator", provider=llm_provider_name)
-        # No agent-specific overrides; rely on global settings/defaults
-        self.llm_provider = LLMFactory.create(llm_provider_name)
+    def __init__(self, llm_provider: Any | None = None):
+        # Initialize LLM provider (allow dependency injection)
+        if llm_provider is not None:
+            self.llm_provider = llm_provider
+            provider_label = getattr(
+                llm_provider, "__class__", type(llm_provider)
+            ).__name__
+        else:
+            # Fallback to default provider if none injected
+            self.llm_provider = OpenAIProvider()
+            provider_label = "OpenAIProvider"
+
+        agent_logger.info(
+            "Creating AgentOrchestrator",
+            provider=provider_label,
+        )
 
         # Initialize context builder
         self.context_builder = ContextBuilder()

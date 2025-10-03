@@ -16,6 +16,9 @@ from pathlib import Path
 from typing import Any
 
 from agentsmithy_server.core.dialog_history import DialogHistory
+from agentsmithy_server.utils.logger import get_logger
+
+logger = get_logger("project")
 
 
 @dataclass
@@ -42,6 +45,52 @@ class Project:
     def ensure_state_dir(self) -> None:
         """Ensure the project's hidden state directory exists."""
         self.state_dir.mkdir(parents=True, exist_ok=True)
+
+    def ensure_gitignore_entry(self) -> None:
+        """Ensure .agentsmithy is listed in .gitignore at project root.
+
+        Creates .gitignore if it doesn't exist, or appends the entry if missing.
+        """
+        gitignore_path = self.root / ".gitignore"
+        entry = ".agentsmithy"
+
+        try:
+            if gitignore_path.exists():
+                # Read existing content
+                content = gitignore_path.read_text(encoding="utf-8")
+                lines = content.splitlines()
+
+                # Check if entry already exists (exact match or with trailing slash)
+                if any(line.strip() in (entry, f"{entry}/") for line in lines):
+                    return  # Already present
+
+                # Append entry (ensure newline before if file doesn't end with one)
+                if content and not content.endswith("\n"):
+                    gitignore_path.write_text(f"{content}\n{entry}\n", encoding="utf-8")
+                else:
+                    gitignore_path.write_text(f"{content}{entry}\n", encoding="utf-8")
+
+                logger.info(
+                    "Added .agentsmithy to existing .gitignore",
+                    path=str(gitignore_path),
+                    project=self.name,
+                )
+            else:
+                # Create new .gitignore with the entry
+                gitignore_path.write_text(f"{entry}\n", encoding="utf-8")
+                logger.info(
+                    "Created .gitignore with .agentsmithy entry",
+                    path=str(gitignore_path),
+                    project=self.name,
+                )
+        except Exception as e:
+            # Log the error but don't fail - gitignore is nice to have but not critical
+            logger.warning(
+                "Failed to update .gitignore",
+                error=str(e),
+                path=str(gitignore_path),
+                project=self.name,
+            )
 
     # ---- Dialogs management (project-owned) ----
     @property

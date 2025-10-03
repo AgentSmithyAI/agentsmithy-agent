@@ -26,6 +26,11 @@ if __name__ == "__main__":
         required=True,
         help="Absolute path to the working directory (agent state stored here)",
     )
+    parser.add_argument(
+        "--ide",
+        required=False,
+        help="IDE identifier (e.g., 'vscode', 'cursor', 'jetbrains')",
+    )
     # No --project: workdir is the project
     args, _ = parser.parse_known_args()
 
@@ -45,32 +50,62 @@ if __name__ == "__main__":
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
-    # Check if .env file exists (after argparse, so --help doesn't need .env)
-    if not os.path.exists(".env"):
-        startup_logger.error(
-            ".env file not found! Please create it from .env.example and add your OPENAI_API_KEY"
-        )
+    # Validate and change to workdir early (before .env and settings loading)
+    workdir_path = Path(args.workdir).expanduser().resolve()
+    if not workdir_path.exists():
+        startup_logger.error("--workdir does not exist", path=str(workdir_path))
+        sys.exit(1)
+    if not workdir_path.is_dir():
+        startup_logger.error("--workdir is not a directory", path=str(workdir_path))
         sys.exit(1)
 
-    # Validate required settings
-    from agentsmithy_server.config import settings
+    # Change working directory to workdir so relative paths work correctly
+    os.chdir(workdir_path)
+    startup_logger.debug("Changed working directory", workdir=str(workdir_path))
 
-    if not settings.default_model:
-        startup_logger.error(
-            "DEFAULT_MODEL not set in .env file! Please specify the LLM model to use."
+    # Initialize configuration manager
+    from agentsmithy_server.config import (
+        create_config_manager,
+        get_default_config,
+        settings,
+    )
+
+    try:
+        # Create .agentsmithy directory if it doesn't exist
+        config_dir = workdir_path / ".agentsmithy"
+        config_dir.mkdir(parents=True, exist_ok=True)
+
+        # Create and initialize config manager
+        config_manager = create_config_manager(
+            config_dir, defaults=get_default_config()
         )
+
+        # Run async initialization
+        async def init_config():
+            await config_manager.initialize()
+            await config_manager.start_watching()
+
+        asyncio.run(init_config())
+
+        # Update global settings instance to use config manager
+        settings._config_manager = config_manager
+
+        startup_logger.info(
+            "Configuration initialized",
+            config_file=str(config_dir / "config.json"),
+        )
+    except Exception as e:
+        startup_logger.error("Failed to initialize configuration", error=str(e))
+        sys.exit(1)
+
+    # Validate required settings (strict models + API key)
+    try:
+        settings.validate_or_raise()
+    except ValueError as e:
+        startup_logger.error("Invalid configuration", error=str(e))
         sys.exit(1)
 
     try:
-
-        workdir_path = Path(args.workdir).expanduser().resolve()
-        if not workdir_path.exists():
-            startup_logger.error("--workdir does not exist", path=str(workdir_path))
-            sys.exit(1)
-        if not workdir_path.is_dir():
-            startup_logger.error("--workdir is not a directory", path=str(workdir_path))
-            sys.exit(1)
-
         # Ensure hidden state directory exists
         try:
             # Initialize a workspace entity to own directory management
@@ -92,15 +127,13 @@ if __name__ == "__main__":
 
         chosen_port = ensure_singleton_and_select_port(
             get_current_project(),
-            base_port=int(os.getenv("SERVER_PORT", "11434")),
+            base_port=settings.server_port,
             host=settings.server_host,
             max_probe=20,
         )
-        # Keep settings in sync with the chosen port for logging/uvicorn
-        try:
-            settings.server_port = chosen_port
-        except Exception:
-            pass
+        # Update config with the chosen port
+        if config_manager:
+            asyncio.run(config_manager.set("server_port", chosen_port))
 
         # Treat workdir as the active project; inspect and save metadata if missing
         should_inspect = False
@@ -111,12 +144,13 @@ if __name__ == "__main__":
             from agentsmithy_server.agents.project_inspector_agent import (
                 ProjectInspectorAgent,
             )
-            from agentsmithy_server.core import LLMFactory
+            from agentsmithy_server.core import OpenAIProvider
             from agentsmithy_server.core.project import get_current_project
 
             project = get_current_project()
             project.root.mkdir(parents=True, exist_ok=True)
             project.ensure_state_dir()
+            project.ensure_gitignore_entry()  # Ensure .agentsmithy is in .gitignore
             should_inspect = not project.has_metadata()
             if should_inspect:
                 startup_logger.info(
@@ -159,7 +193,6 @@ if __name__ == "__main__":
             port=chosen_port,
             reload=reload_enabled,
             log_config=LOGGING_CONFIG,
-            env_file=".env",
         )
         server = uvicorn.Server(config)
 
@@ -168,29 +201,91 @@ if __name__ == "__main__":
             from agentsmithy_server.api.server import app
 
             app.state.shutdown_event = shutdown_event
+            # Set IDE identifier as runtime parameter
+            app.state.ide = args.ide
+
+            # Log runtime environment information
+            from agentsmithy_server.platforms import get_os_adapter
+
+            adapter = get_os_adapter()
+            os_ctx = adapter.os_context()
+            shell = os_ctx.get("shell", "Unknown shell")
+            if shell and "/" in shell:
+                shell = shell.split("/")[-1]
+            elif shell and "\\" in shell:
+                shell = shell.split("\\")[-1]
+
+            startup_logger.info(
+                "Runtime environment",
+                system=os_ctx.get("system", "Unknown"),
+                release=os_ctx.get("release", "unknown"),
+                machine=os_ctx.get("machine", "unknown"),
+                python=os_ctx.get("python", "unknown"),
+                shell=shell,
+                ide=args.ide or "unknown",
+            )
 
             # Optionally run project inspector in background (non-blocking)
             inspector_task = None
             if should_inspect:
 
                 async def _run_inspector():
+                    from agentsmithy_server.core.project_runtime import set_scan_status
+
                     try:
+                        # Check if model is configured
+                        inspector_model = (
+                            os.getenv("AGENTSMITHY_INSPECTOR_MODEL") or settings.model
+                        )
+                        if not inspector_model:
+                            error_msg = (
+                                "Cannot run project inspection: LLM model not configured. "
+                                "Please set 'model' in .agentsmithy/config.json or "
+                                "AGENTSMITHY_INSPECTOR_MODEL environment variable."
+                            )
+                            startup_logger.error(
+                                "Project inspection skipped",
+                                reason="model_not_configured",
+                                error=error_msg,
+                            )
+                            set_scan_status(
+                                project,
+                                status="error",
+                                error=error_msg,
+                            )
+                            return
+
+                        set_scan_status(project, status="scanning", progress=0)
+
                         inspector = ProjectInspectorAgent(
-                            LLMFactory.create(
-                                "openai",
-                                model=os.getenv("AGENTSMITHY_INSPECTOR_MODEL"),
+                            OpenAIProvider(
+                                model=inspector_model,
                                 agent_name="project_inspector",
                             ),
                             None,
                         )
                         await inspector.inspect_and_save(project)
+
+                        set_scan_status(project, status="done", progress=100)
+
                         startup_logger.info(
                             "Project analyzed by inspector agent and metadata saved",
                             project=project.name,
+                            model=inspector_model,
                         )
+                    except ValueError as e:
+                        # Model/config related errors
+                        error_msg = f"Configuration error: {str(e)}"
+                        startup_logger.error(
+                            "Project inspection failed",
+                            error_type="configuration",
+                            error=error_msg,
+                        )
+                        set_scan_status(project, status="error", error=error_msg)
                     except Exception as e:
                         import traceback as _tb
 
+                        error_msg = f"{type(e).__name__}: {str(e)}"
                         startup_logger.error(
                             "Background project inspection failed",
                             error=str(e),
@@ -198,6 +293,7 @@ if __name__ == "__main__":
                                 _tb.format_exception(type(e), e, e.__traceback__)
                             ),
                         )
+                        set_scan_status(project, status="error", error=error_msg)
 
                 inspector_task = asyncio.create_task(_run_inspector())
                 app.state.inspector_task = inspector_task

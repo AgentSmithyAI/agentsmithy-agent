@@ -41,9 +41,21 @@ class DeleteFileTool(BaseTool):
     args_schema: type[BaseModel] | dict[str, Any] | None = DeleteFileArgs
 
     async def _arun(self, **kwargs: Any) -> dict[str, Any]:
-        file_path = Path(kwargs["path"]).resolve()
+        # Use project root if available, fallback to cwd
+        project_root = (
+            self._project_root
+            if hasattr(self, "_project_root") and self._project_root
+            else os.getcwd()
+        )
 
-        tracker = VersioningTracker(os.getcwd(), dialog_id=self._dialog_id)
+        # Resolve path relative to project root
+        input_path = Path(kwargs["path"])
+        if input_path.is_absolute():
+            file_path = input_path
+        else:
+            file_path = (Path(project_root) / input_path).resolve()
+
+        tracker = VersioningTracker(project_root, dialog_id=self._dialog_id)
         tracker.ensure_repo()
         tracker.start_edit([str(file_path)])
 

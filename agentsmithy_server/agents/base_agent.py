@@ -38,6 +38,25 @@ class BaseAgent(ABC):
         """Get the name of this agent."""
         pass
 
+    def _get_runtime_system_prompt(self, context: dict[str, Any]) -> str:
+        """Get system prompt with runtime information if available.
+
+        Args:
+            context: Context that may contain IDE information
+
+        Returns:
+            System prompt with runtime info appended
+        """
+        try:
+            from agentsmithy_server.prompts import get_runtime_info
+
+            ide = context.get("ide") if context else None
+            runtime_info = get_runtime_info(ide)
+            return self.system_prompt + runtime_info
+        except Exception:
+            # Fallback to regular prompt if runtime info fails
+            return self.system_prompt
+
     async def process(
         self, query: str, context: dict[str, Any] | None = None, stream: bool = False
     ) -> dict[str, Any]:
@@ -103,7 +122,9 @@ class BaseAgent(ABC):
                 - True: Load all tool results
                 - list[str]: Load specific tool_call_ids
         """
-        messages: list[BaseMessage] = [SystemMessage(content=self.system_prompt)]
+        # Get runtime-enhanced system prompt if available
+        system_prompt = self._get_runtime_system_prompt(context)
+        messages: list[BaseMessage] = [SystemMessage(content=system_prompt)]
 
         # If a dialog summary is available, include it as a SystemMessage first
         dialog_summary = context.get("dialog_summary")

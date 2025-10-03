@@ -31,7 +31,22 @@ class ListFilesTool(BaseTool):
     args_schema: type[BaseModel] | dict[str, Any] | None = ListFilesArgs
 
     async def _arun(self, **kwargs: Any) -> dict[str, Any]:
-        base = Path(kwargs["path"]).resolve()
+        # Use project root if available, fallback to cwd
+        import os
+
+        project_root = (
+            self._project_root
+            if hasattr(self, "_project_root") and self._project_root
+            else os.getcwd()
+        )
+
+        # Resolve path relative to project root
+        input_path = Path(kwargs["path"])
+        if input_path.is_absolute():
+            base = input_path
+        else:
+            base = (Path(project_root) / input_path).resolve()
+
         recursive = bool(kwargs.get("recursive", False))
         include_hidden = bool(kwargs.get("hidden_files", False))
         items: list[str] = []

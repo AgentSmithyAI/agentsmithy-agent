@@ -32,12 +32,16 @@ class BaseTool(LCBaseTool, ABC):
         # Internal, non-pydantic state
         self._sse_callback: SseCallback | None = None
         self._dialog_id: str | None = None
+        self._project_root: str | None = None
 
     def set_sse_callback(self, callback: SseCallback | None) -> None:
         self._sse_callback = callback
 
     def set_dialog_id(self, dialog_id: str | None) -> None:
         self._dialog_id = dialog_id
+
+    def set_project_root(self, project_root: str | None) -> None:
+        self._project_root = project_root
 
     async def emit_event(self, event: dict[str, Any]) -> None:
         if self._sse_callback is not None:
