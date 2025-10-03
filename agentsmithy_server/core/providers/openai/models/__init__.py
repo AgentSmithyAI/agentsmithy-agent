@@ -49,38 +49,20 @@ def _autodiscover_models() -> None:
         importlib.import_module(f"{pkg_name}.{mod.name}")
 
 
-# Perform autodiscovery once at import time
+# Perform autodiscovery once at import time (works in dev mode)
+# In frozen mode, rthook will import modules explicitly
 _autodiscover_models()
 
-# PyInstaller onefile: pkgutil.iter_modules may return nothing inside the archive.
-# Fallback to explicit imports if registry stayed empty (no runtime hooks required).
-if not _MODEL_REGISTRY:
-    try:
-        # Keep this list in sync with available modules in this package
-        for mod_name in (
-            "gpt4_1",
-            "gpt5",
-            "gpt5_mini",
-        ):
-            importlib.import_module(f"{__name__}.{mod_name}")
-    except Exception:
-        # Best effort; validation layer will raise a clear error later
-        pass
 
-# Build supported chat models from registry after autodiscovery/fallback
-# NOTE: In frozen builds (PyInstaller), runtime hooks may import model modules
-# after this module is imported. Therefore, avoid freezing the set at import
-# time. Expose a function that always reflects the current registry.
-SUPPORTED_OPENAI_CHAT_MODELS = set(_MODEL_REGISTRY.keys())
-
-
-def get_supported_openai_chat_models() -> set[str]:
-    """Return the current set of supported OpenAI chat models.
-
-    Do not rely on the import-time constant in frozen environments; the
-    registry may be populated by runtime hooks after this module is imported.
+def __getattr__(name: str):
+    """Lazy module attribute access.
+    
+    SUPPORTED_OPENAI_CHAT_MODELS is computed on-demand to ensure
+    _MODEL_REGISTRY is fully populated by rthook imports before access.
     """
-    return set(_MODEL_REGISTRY.keys())
+    if name == "SUPPORTED_OPENAI_CHAT_MODELS":
+        return set(_MODEL_REGISTRY.keys())
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def get_model_spec(model: str) -> IModelSpec:
@@ -89,7 +71,7 @@ def get_model_spec(model: str) -> IModelSpec:
     """
     cls = _MODEL_REGISTRY.get(model)
     if not cls:
-        # Use dynamic view to avoid stale list in frozen builds
-        supported = sorted(get_supported_openai_chat_models())
-        raise ValueError(f"Unsupported OpenAI model '{model}'. Supported: {supported}")
+        raise ValueError(
+            f"Unsupported OpenAI model '{model}'. Supported: {sorted(SUPPORTED_OPENAI_CHAT_MODELS)}"
+        )
     return cls()

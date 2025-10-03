@@ -6,13 +6,14 @@ import os
 from collections.abc import Iterable
 
 from agentsmithy_server.core.providers.openai.models import (
+    SUPPORTED_OPENAI_CHAT_MODELS,
     SUPPORTED_OPENAI_EMBEDDING_MODELS,
-    get_supported_openai_chat_models,
 )
 
 
 def _format_options(options: Iterable[str]) -> str:
-    return ", ".join(sorted(options))
+    # Convert to list to ensure we can sort it (handles lazy iterables)
+    return ", ".join(sorted(list(options)))
 
 
 def validate_or_raise(
@@ -26,11 +27,10 @@ def validate_or_raise(
     - OPENAI_API_KEY must be set (via settings or environment)
     """
     m = model or ""
-    supported_chat = get_supported_openai_chat_models()
-    if m not in supported_chat:
+    if m not in SUPPORTED_OPENAI_CHAT_MODELS:
         raise ValueError(
             "Unsupported OpenAI chat model: '" + (model or "") + "'. "
-            "Supported: " + _format_options(supported_chat)
+            "Supported: " + _format_options(SUPPORTED_OPENAI_CHAT_MODELS)
         )
 
     em = embedding_model or ""

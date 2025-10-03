@@ -19,6 +19,12 @@ hiddenimports += collect_submodules('primp')
 # Ensure OpenAI model specs are included in frozen build (dynamic autodiscovery needs submodules bundled)
 hiddenimports += collect_submodules('agentsmithy_server.core.providers.openai')
 hiddenimports += collect_submodules('agentsmithy_server.core.providers.openai.models')
+# Explicitly add model modules (collect_submodules may miss them)
+hiddenimports += [
+    'agentsmithy_server.core.providers.openai.models.gpt4_1',
+    'agentsmithy_server.core.providers.openai.models.gpt5',
+    'agentsmithy_server.core.providers.openai.models.gpt5_mini',
+]
 
 
 a = Analysis(
