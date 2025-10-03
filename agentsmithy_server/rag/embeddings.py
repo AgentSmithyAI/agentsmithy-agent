@@ -1,5 +1,7 @@
 """Embeddings module for RAG system."""
 
+from typing import Any
+
 from langchain_core.embeddings import Embeddings
 from langchain_openai import OpenAIEmbeddings
 
@@ -44,7 +46,7 @@ class EmbeddingsManager:
                 # Let SDK pick API key from environment; avoids SecretStr typing issues
                 from agentsmithy_server.config import settings
 
-                kwargs = {"model": self.model}
+                kwargs: dict[str, Any] = {"model": self.model}
                 if settings.openai_base_url:
                     kwargs["base_url"] = settings.openai_base_url
                 self._embeddings = OpenAIEmbeddings(**kwargs)
