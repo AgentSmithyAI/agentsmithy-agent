@@ -45,6 +45,7 @@ class OpenAIProvider(LLMProvider):
         temperature: float | None = None,
         max_tokens: int | None = None,
         api_key: str | None = None,
+        base_url: str | None = None,
         agent_name: str | None = None,
     ):
         # Use explicit model/temperature or fall back to global settings only
@@ -52,6 +53,7 @@ class OpenAIProvider(LLMProvider):
         self.temperature = temperature or settings.temperature
         self.max_tokens = max_tokens or settings.max_tokens
         self.api_key = api_key or settings.openai_api_key
+        self.base_url = base_url or settings.openai_base_url
 
         # Validate that model is set
         if not self.model:
@@ -65,6 +67,7 @@ class OpenAIProvider(LLMProvider):
             model=self.model,
             temperature=self.temperature,
             max_tokens=self.max_tokens,
+            base_url=self.base_url,
         )
 
         # Ensure adapters are registered (no import side-effects)
@@ -86,6 +89,10 @@ class OpenAIProvider(LLMProvider):
             vendor = adapter.vendor() if hasattr(adapter, "vendor") else None
             if vendor is not None:
                 set_api_key_env(vendor, str(self.api_key))
+
+        # Add base_url if provided
+        if self.base_url:
+            kwargs["base_url"] = self.base_url
 
         module_path, class_name = class_path.rsplit(".", 1)
         cls = getattr(import_module(module_path), class_name)

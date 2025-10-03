@@ -31,8 +31,26 @@ async def lifespan(app: FastAPI):
 
             set_shutdown_event(app.state.shutdown_event)
             api_logger.info("Shutdown event registered with chat service")
+
+        # Start config watcher in the main event loop
+        if hasattr(app.state, "config_manager"):
+            # Register callback to invalidate orchestrator on config changes
+            from agentsmithy_server.api.deps import get_chat_service
+
+            def on_config_change(new_config):
+                api_logger.info(
+                    "Configuration changed, invalidating cached components",
+                    changed_keys=list(new_config.keys()),
+                )
+                # Invalidate orchestrator so it picks up new config on next request
+                chat_service = get_chat_service()
+                chat_service.invalidate_orchestrator()
+
+            app.state.config_manager.register_change_callback(on_config_change)
+            await app.state.config_manager.start_watching()
+            api_logger.info("Config file watcher started with change callback")
     except Exception as e:
-        api_logger.error("Dialog state init failed", exc_info=True, error=str(e))
+        api_logger.error("Startup initialization failed", exc_info=True, error=str(e))
 
     yield
 
@@ -40,6 +58,11 @@ async def lifespan(app: FastAPI):
     try:
         api_logger.info("Starting shutdown cleanup")
         from agentsmithy_server.api.deps import dispose_db_engine, get_chat_service
+
+        # Stop config watcher
+        if hasattr(app.state, "config_manager"):
+            await app.state.config_manager.stop_watching()
+            api_logger.info("Config file watcher stopped")
 
         chat_service = get_chat_service()
         await chat_service.shutdown()

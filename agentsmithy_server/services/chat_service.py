@@ -56,6 +56,11 @@ class ChatService:
             self._orchestrator = AgentOrchestrator()
         return self._orchestrator
 
+    def invalidate_orchestrator(self) -> None:
+        """Invalidate cached orchestrator to force recreation with fresh config."""
+        api_logger.info("Invalidating orchestrator cache")
+        self._orchestrator = None
+
     def set_shutdown_event(self, event: asyncio.Event) -> None:
         """Set the shutdown event for graceful termination."""
         self._shutdown_event = event

@@ -8,6 +8,7 @@ def get_default_config() -> dict[str, Any]:
     return {
         # OpenAI Configuration
         "openai_api_key": None,
+        "openai_base_url": None,  # e.g., "http://localhost:1234/v1" for local servers
         # Server Configuration
         "server_host": "localhost",
         "server_port": 11434,
