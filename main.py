@@ -80,10 +80,9 @@ if __name__ == "__main__":
             config_dir, defaults=get_default_config()
         )
 
-        # Run async initialization
+        # Run async initialization (watch will start in lifespan to use correct event loop)
         async def init_config():
             await config_manager.initialize()
-            await config_manager.start_watching()
 
         asyncio.run(init_config())
 
@@ -203,6 +202,8 @@ if __name__ == "__main__":
             app.state.shutdown_event = shutdown_event
             # Set IDE identifier as runtime parameter
             app.state.ide = args.ide
+            # Pass config manager to app for lifespan
+            app.state.config_manager = config_manager
 
             # Log runtime environment information
             from agentsmithy_server.platforms import get_os_adapter

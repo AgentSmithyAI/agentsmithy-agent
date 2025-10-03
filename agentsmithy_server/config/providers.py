@@ -49,6 +49,7 @@ class LocalFileConfigProvider(ConfigProvider):
         self._callback: Callable[[dict[str, Any]], None] | None = None
         self._last_mtime: float | None = None
         self._last_valid_config: dict[str, Any] | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
 
     async def load(self) -> dict[str, Any]:
         """Load configuration from file, creating with defaults if not exists."""
@@ -145,6 +146,8 @@ class LocalFileConfigProvider(ConfigProvider):
     async def watch(self, callback: Callable[[dict[str, Any]], None]) -> None:
         """Watch for file changes and reload configuration."""
         self._callback = callback
+        # Store reference to the event loop for thread-safe task creation
+        self._loop = asyncio.get_running_loop()
 
         class ConfigFileHandler(FileSystemEventHandler):
             def __init__(self, provider: LocalFileConfigProvider):
@@ -171,8 +174,11 @@ class LocalFileConfigProvider(ConfigProvider):
 
                 logger.debug("Config file modified, reloading", path=event.src_path)
 
-                # Reload and notify in async context
-                asyncio.create_task(self.provider._handle_file_change())
+                # Schedule coroutine in the main event loop from this thread
+                if self.provider._loop and not self.provider._loop.is_closed():
+                    asyncio.run_coroutine_threadsafe(
+                        self.provider._handle_file_change(), self.provider._loop
+                    )
 
         self._observer = Observer()
         event_handler = ConfigFileHandler(self)

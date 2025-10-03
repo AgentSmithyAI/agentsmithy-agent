@@ -56,6 +56,10 @@ class Settings:
     def openai_api_key(self) -> str | None:
         return self._get("openai_api_key", None, "OPENAI_API_KEY")
 
+    @property
+    def openai_base_url(self) -> str | None:
+        return self._get("openai_base_url", None, "OPENAI_BASE_URL")
+
     # Server Configuration
     @property
     def server_host(self) -> str:
