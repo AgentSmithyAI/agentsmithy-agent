@@ -1,3 +1,10 @@
+# [1.2.0](https://github.com/AgentSmithyAI/agentsmithy-agent/compare/v1.1.2...v1.2.0) (2025-10-03)
+
+
+### Features
+
+* Agent launch improvements ([#20](https://github.com/AgentSmithyAI/agentsmithy-agent/issues/20)) ([981b26a](https://github.com/AgentSmithyAI/agentsmithy-agent/commit/981b26ab7e903cf09c6c029cc9aa3ec172d00a1e))
+
 ## [1.1.2](https://github.com/AgentSmithyAI/agentsmithy-agent/compare/v1.1.1...v1.1.2) (2025-10-01)
 
 
