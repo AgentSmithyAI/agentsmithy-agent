@@ -56,7 +56,7 @@ _autodiscover_models()
 
 def __getattr__(name: str):
     """Lazy module attribute access.
-    
+
     SUPPORTED_OPENAI_CHAT_MODELS is computed on-demand to ensure
     _MODEL_REGISTRY is fully populated by rthook imports before access.
     """
@@ -72,6 +72,6 @@ def get_model_spec(model: str) -> IModelSpec:
     cls = _MODEL_REGISTRY.get(model)
     if not cls:
         raise ValueError(
-            f"Unsupported OpenAI model '{model}'. Supported: {sorted(SUPPORTED_OPENAI_CHAT_MODELS)}"
+            f"Unsupported OpenAI model '{model}'. Supported: {sorted(_MODEL_REGISTRY.keys())}"
         )
     return cls()
