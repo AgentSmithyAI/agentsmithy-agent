@@ -23,6 +23,13 @@ def get_default_config() -> dict[str, Any]:
         # Logging Configuration
         "log_level": "INFO",
         "log_format": "pretty",
+        # Legacy model settings (for backwards compatibility)
+        "model": "gpt-5",
+        "temperature": 0.7,
+        "max_tokens": 4000,
+        "embedding_model": "text-embedding-3-small",
+        "streaming_enabled": True,
+        "reasoning_effort": "low",
         # Providers Configuration
         "providers": {
             "openai": {

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from agentsmithy_server.config import settings
 from agentsmithy_server.core.llm_provider import OpenAIProvider
@@ -15,6 +15,23 @@ if TYPE_CHECKING:
     from agentsmithy_server.core.llm_provider import LLMProvider
 
 logger = get_logger("provider_factory")
+
+
+def _cast_config_value(value: Any, expected_type: type) -> Any:
+    """Cast config value to expected type if needed.
+
+    Args:
+        value: Value from config (could be str, int, float, None, etc.)
+        expected_type: Expected type (float, int, str)
+
+    Returns:
+        Value cast to expected type, or None if value is None
+    """
+    if value is None:
+        return None
+    if isinstance(value, expected_type):
+        return value
+    return expected_type(value)
 
 
 def create_provider_for_model(
@@ -95,10 +112,10 @@ def create_provider_for_model(
     # Currently, we only have OpenAIProvider which handles OpenAI-compatible APIs
     return OpenAIProvider(
         model=model,
-        temperature=provider_config.get("temperature"),
-        max_tokens=provider_config.get("max_tokens"),
-        api_key=provider_config.get("api_key"),
-        base_url=provider_config.get("base_url"),
+        temperature=_cast_config_value(provider_config.get("temperature"), float),
+        max_tokens=_cast_config_value(provider_config.get("max_tokens"), int),
+        api_key=_cast_config_value(provider_config.get("api_key"), str),
+        base_url=_cast_config_value(provider_config.get("base_url"), str),
         agent_name=agent_name,
     )
 
