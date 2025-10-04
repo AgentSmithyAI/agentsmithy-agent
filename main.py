@@ -97,12 +97,36 @@ if __name__ == "__main__":
         startup_logger.error("Failed to initialize configuration", error=str(e))
         sys.exit(1)
 
-    # Validate required settings (strict models + API key)
+    # Basic validation: check that OpenAI models have API key
     try:
-        settings.validate_or_raise()
-    except ValueError as e:
-        startup_logger.error("Invalid configuration", error=str(e))
-        sys.exit(1)
+        from agentsmithy_server.core.providers import register_builtin_adapters
+        from agentsmithy_server.core.providers.registry import get_adapter
+        from agentsmithy_server.core.providers.types import Vendor
+
+        register_builtin_adapters()
+
+        # Check each agent's model
+        for agent_name in ["inspector", "universal"]:
+            agent_model = settings.get_agent_model(agent_name)
+            if agent_model:
+                try:
+                    adapter = get_adapter(agent_model)
+                    # Only validate OpenAI models require API key
+                    if adapter.vendor() == Vendor.OPENAI:
+                        openai_config = settings.get_provider_config("openai")
+                        if (
+                            not openai_config.get("api_key")
+                            and not settings.openai_api_key
+                        ):
+                            raise ValueError(
+                                f"Agent '{agent_name}' uses OpenAI model '{agent_model}' but no API key configured. "
+                                "Set 'providers.openai.api_key' in config or OPENAI_API_KEY environment variable."
+                            )
+                except ValueError as e:
+                    startup_logger.error("Invalid configuration", error=str(e))
+                    sys.exit(1)
+    except Exception as e:
+        startup_logger.warning("Could not validate configuration", error=str(e))
 
     try:
         # Ensure hidden state directory exists
@@ -130,9 +154,8 @@ if __name__ == "__main__":
             host=settings.server_host,
             max_probe=20,
         )
-        # Update config with the chosen port
-        if config_manager:
-            asyncio.run(config_manager.set("server_port", chosen_port))
+        # Note: chosen_port is a runtime value, not saved to config
+        # It's determined dynamically based on available ports
 
         # Treat workdir as the active project; inspect and save metadata if missing
         should_inspect = False
@@ -143,7 +166,6 @@ if __name__ == "__main__":
             from agentsmithy_server.agents.project_inspector_agent import (
                 ProjectInspectorAgent,
             )
-            from agentsmithy_server.core import OpenAIProvider
             from agentsmithy_server.core.project import get_current_project
 
             project = get_current_project()
@@ -232,39 +254,23 @@ if __name__ == "__main__":
 
                 async def _run_inspector():
                     from agentsmithy_server.core.project_runtime import set_scan_status
+                    from agentsmithy_server.core.provider_factory import (
+                        create_provider_for_agent,
+                    )
 
                     try:
-                        # Check if model is configured
-                        inspector_model = (
-                            os.getenv("AGENTSMITHY_INSPECTOR_MODEL") or settings.model
-                        )
-                        if not inspector_model:
-                            error_msg = (
-                                "Cannot run project inspection: LLM model not configured. "
-                                "Please set 'model' in .agentsmithy/config.json or "
-                                "AGENTSMITHY_INSPECTOR_MODEL environment variable."
-                            )
-                            startup_logger.error(
-                                "Project inspection skipped",
-                                reason="model_not_configured",
-                                error=error_msg,
-                            )
-                            set_scan_status(
-                                project,
-                                status="error",
-                                error=error_msg,
-                            )
-                            return
-
                         set_scan_status(project, status="scanning", progress=0)
 
-                        inspector = ProjectInspectorAgent(
-                            OpenAIProvider(
-                                model=inspector_model,
-                                agent_name="project_inspector",
-                            ),
-                            None,
+                        # Create provider using the factory - it will handle model resolution
+                        inspector_provider = create_provider_for_agent("inspector")
+                        inspector = ProjectInspectorAgent(inspector_provider, None)
+
+                        startup_logger.info(
+                            "Starting project inspection",
+                            project=project.name,
+                            model=inspector_provider.get_model_name(),
                         )
+
                         await inspector.inspect_and_save(project)
 
                         set_scan_status(project, status="done", progress=100)
@@ -272,7 +278,6 @@ if __name__ == "__main__":
                         startup_logger.info(
                             "Project analyzed by inspector agent and metadata saved",
                             project=project.name,
-                            model=inspector_model,
                         )
                     except ValueError as e:
                         # Model/config related errors
@@ -286,15 +291,49 @@ if __name__ == "__main__":
                     except Exception as e:
                         import traceback as _tb
 
-                        error_msg = f"{type(e).__name__}: {str(e)}"
-                        startup_logger.error(
-                            "Background project inspection failed",
-                            error=str(e),
-                            traceback="".join(
-                                _tb.format_exception(type(e), e, e.__traceback__)
-                            ),
+                        error_msg = str(e)
+
+                        # Check if it's a connection error (llama server not available)
+                        is_connection_error = (
+                            "Connection error" in error_msg
+                            or "ConnectError" in str(type(e))
+                            or "All connection attempts failed" in error_msg
+                            or "APIConnectionError" in str(type(e))
                         )
-                        set_scan_status(project, status="error", error=error_msg)
+
+                        if is_connection_error:
+                            startup_logger.warning(
+                                "Project inspection skipped - LLM server not available",
+                                model=(
+                                    inspector_provider.get_model_name()
+                                    if "inspector_provider" in locals()
+                                    else "unknown"
+                                ),
+                                base_url=(
+                                    inspector_provider.base_url
+                                    if "inspector_provider" in locals()
+                                    else "unknown"
+                                ),
+                                hint="Start llama.cpp server on configured port or use OpenAI model",
+                            )
+                            set_scan_status(
+                                project,
+                                status="skipped",
+                                error="LLM server not available",
+                            )
+                        else:
+                            startup_logger.error(
+                                "Background project inspection failed",
+                                error=error_msg,
+                                traceback="".join(
+                                    _tb.format_exception(type(e), e, e.__traceback__)
+                                ),
+                            )
+                            set_scan_status(
+                                project,
+                                status="error",
+                                error=f"{type(e).__name__}: {error_msg}",
+                            )
 
                 inspector_task = asyncio.create_task(_run_inspector())
                 app.state.inspector_task = inspector_task

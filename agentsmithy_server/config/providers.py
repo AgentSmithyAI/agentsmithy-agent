@@ -52,12 +52,19 @@ class LocalFileConfigProvider(ConfigProvider):
         self._loop: asyncio.AbstractEventLoop | None = None
 
     async def load(self) -> dict[str, Any]:
-        """Load configuration from file, creating with defaults if not exists."""
+        """Load configuration from file, creating with defaults if not exists.
+
+        The configuration is deep-merged with defaults in memory:
+        - User values take precedence
+        - Missing keys are filled from defaults
+        - Nested dictionaries are merged recursively
+        """
         if not self.config_path.exists():
             logger.info(
                 "Config file not found, creating with defaults",
                 path=str(self.config_path),
             )
+            # Create config file with full defaults on first run
             await self.save(self.defaults.copy())
             self._last_valid_config = self.defaults.copy()
             return self.defaults.copy()
@@ -67,9 +74,9 @@ class LocalFileConfigProvider(ConfigProvider):
             config = json.loads(content)
             self._last_mtime = self.config_path.stat().st_mtime
 
-            # Merge with defaults to ensure all keys exist
-            merged = self.defaults.copy()
-            merged.update(config)
+            # Deep merge with defaults to ensure all keys exist
+            # User config takes precedence, but missing keys are filled from defaults
+            merged = self._deep_merge(self.defaults, config)
 
             # Store as last valid config
             self._last_valid_config = merged
@@ -206,6 +213,37 @@ class LocalFileConfigProvider(ConfigProvider):
             self._observer.join(timeout=1.0)
             self._observer = None
             logger.info("Stopped watching config file")
+
+    def _deep_merge(
+        self, base: dict[str, Any], override: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Deep merge two dictionaries recursively.
+
+        Values from override take precedence. Nested dicts are merged recursively.
+        Lists and other types from override completely replace base values.
+
+        Args:
+            base: Base dictionary (defaults)
+            override: Override dictionary (user config)
+
+        Returns:
+            Merged dictionary
+        """
+        result = base.copy()
+
+        for key, value in override.items():
+            if (
+                key in result
+                and isinstance(result[key], dict)
+                and isinstance(value, dict)
+            ):
+                # Recursively merge nested dicts
+                result[key] = self._deep_merge(result[key], value)
+            else:
+                # Override value (including lists, primitives, etc.)
+                result[key] = value
+
+        return result
 
 
 class RemoteConfigProvider(ConfigProvider):

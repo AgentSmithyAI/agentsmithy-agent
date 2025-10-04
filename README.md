@@ -13,7 +13,8 @@ A local AI server similar to Cursor, built using LangGraph for orchestration, RA
 - 📚 **RAG (Retrieval-Augmented Generation)** for context handling
 - 🔄 **Streaming responses** via Server-Sent Events (SSE)
 - 🧰 **Tool-aware workflow** with structured SSE events (chat/reasoning/tool_call/file_edit)
-- 🔌 **Flexible LLM provider interface** (OpenAI supported out of the box)
+- 🔌 **Multi-provider support** with automatic provider detection (OpenAI, local models, Granite)
+- ⚙️ **Flexible configuration** - different models for different agents (inspector vs universal)
 - 🗄️ **ChromaDB** vector store for context persistence
 
 ## Architecture
@@ -59,17 +60,53 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-4. Create a `.env` file with required model and API key (minimum):
+4. Configure providers and agents in `.agentsmithy/config.json` (recommended) or use environment variables (legacy):
+
+### Recommended: Configuration File
+
+Create or edit `.agentsmithy/config.json`:
+
+```json
+{
+  "providers": {
+    "openai": {
+      "api_key": "sk-...",
+      "temperature": 0.7,
+      "max_tokens": 4000
+    },
+    "llama": {
+      "base_url": "http://localhost:8080/v1",
+      "api_key": null,
+      "temperature": 0.7,
+      "max_tokens": 4000
+    }
+  },
+  "models": {
+    "agent": {
+      "inspector": "granite-4.0-h-micro",
+      "universal": "gpt-5"
+    },
+    "embedding": "text-embedding-3-small"
+  }
+}
+```
+
+See [docs/provider-configuration.md](./docs/provider-configuration.md) for detailed configuration guide and examples.
+
+### Legacy: Environment Variables
+
+Alternatively, use `.env` file (backwards compatible):
+
 ```env
 OPENAI_API_KEY=your_openai_api_key_here
-DEFAULT_MODEL=gpt-5  # required
+MODEL=gpt-5  # required
 
 # Optional overrides
-# DEFAULT_TEMPERATURE=0.7
-# DEFAULT_EMBEDDING_MODEL=text-embedding-3-small
+# OPENAI_BASE_URL=http://localhost:1234/v1  # for local models
+# TEMPERATURE=0.7
+# EMBEDDING_MODEL=text-embedding-3-small
 # MAX_TOKENS=4000
 # REASONING_EFFORT=medium       # only for gpt-5 models
-# REASONING_VERBOSITY=auto      # only for gpt-5 models
 # SERVER_HOST=localhost
 # SERVER_PORT=11434             # base port; actual port may auto-increment
 # LOG_FORMAT=pretty             # or json

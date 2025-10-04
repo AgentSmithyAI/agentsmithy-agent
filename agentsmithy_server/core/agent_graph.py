@@ -8,9 +8,9 @@ from langgraph.graph import END, StateGraph
 from langgraph.graph.message import add_messages
 
 from agentsmithy_server.agents.universal_agent import UniversalAgent
-from agentsmithy_server.core import OpenAIProvider
 from agentsmithy_server.core.context_compactor import maybe_compact_dialog
 from agentsmithy_server.core.dialog_summary_storage import DialogSummaryStorage
+from agentsmithy_server.core.provider_factory import create_provider_for_agent
 from agentsmithy_server.core.summarization.strategy import KEEP_LAST_MESSAGES
 from agentsmithy_server.rag import ContextBuilder
 from agentsmithy_server.utils.logger import agent_logger
@@ -39,9 +39,9 @@ class AgentOrchestrator:
                 llm_provider, "__class__", type(llm_provider)
             ).__name__
         else:
-            # Fallback to default provider if none injected
-            self.llm_provider = OpenAIProvider()
-            provider_label = "OpenAIProvider"
+            # Create provider using the factory with agent-specific configuration
+            self.llm_provider = create_provider_for_agent("universal")
+            provider_label = f"{self.llm_provider.__class__.__name__}({self.llm_provider.get_model_name()})"
 
         agent_logger.info(
             "Creating AgentOrchestrator",

@@ -106,6 +106,12 @@ class Settings:
 
     @property
     def embedding_model(self) -> str:
+        # Try new location first, then legacy
+        if self._config_manager:
+            models = self._config_manager.get("models", {})
+            embedding = models.get("embedding")
+            if embedding:
+                return embedding
         return self._get("embedding_model", "text-embedding-3-small", "EMBEDDING_MODEL")
 
     @property
@@ -133,6 +139,29 @@ class Settings:
     @property
     def log_format(self) -> str:
         return self._get("log_format", "pretty", "LOG_FORMAT")
+
+    # Provider Configuration
+    def get_provider_config(
+        self, provider_name: str
+    ) -> dict[str, str | int | float | None]:
+        """Get configuration for a specific provider."""
+        if self._config_manager:
+            providers = self._config_manager.get("providers", {})
+            return providers.get(provider_name, {})
+        return {}
+
+    # Model Configuration
+    def get_agent_model(self, agent_name: str) -> str | None:
+        """Get model for a specific agent."""
+        if self._config_manager:
+            models = self._config_manager.get("models", {})
+            agents = models.get("agent", {})
+            # Support both new format (string) and old format (dict with "model" key)
+            agent_model = agents.get(agent_name)
+            if isinstance(agent_model, dict):
+                return agent_model.get("model")
+            return agent_model
+        return None
 
 
 # Global settings instance (will be initialized with config manager)

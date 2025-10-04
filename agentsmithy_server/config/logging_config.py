@@ -73,7 +73,7 @@ LOGGING_CONFIG = {
         },
         "openai": {
             "handlers": ["default"],
-            "level": "INFO",
+            "level": "WARNING",
             "propagate": False,
         },
         "httpcore": {
