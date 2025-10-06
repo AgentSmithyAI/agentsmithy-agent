@@ -1,9 +1,11 @@
 """Embeddings module for RAG system."""
 
-from typing import Any
-
 from langchain_core.embeddings import Embeddings
-from langchain_openai import OpenAIEmbeddings
+
+from agentsmithy_server.config import settings
+from agentsmithy_server.core.providers.openai.provider_embeddings import (
+    OpenAIEmbeddingsProvider,
+)
 
 # NOTE (PyInstaller): tiktoken registers OpenAI encodings (e.g., "cl100k_base") via
 # the plugin module `tiktoken_ext.openai_public`. PyInstaller one-file builds do not
@@ -43,13 +45,9 @@ class EmbeddingsManager:
                 else self.provider
             )
             if provider_val == Vendor.OPENAI.value:
-                # Let SDK pick API key from environment; avoids SecretStr typing issues
-                from agentsmithy_server.config import settings
-
-                kwargs: dict[str, Any] = {"model": self.model}
-                if settings.openai_base_url:
-                    kwargs["base_url"] = settings.openai_base_url
-                self._embeddings = OpenAIEmbeddings(**kwargs)
+                # Route through a dedicated provider for clarity and future parity
+                model_name = self.model or settings.openai_embeddings_model
+                self._embeddings = OpenAIEmbeddingsProvider(model_name).embeddings
             else:
                 raise ValueError(f"Unknown embeddings provider: {provider_val}")
 

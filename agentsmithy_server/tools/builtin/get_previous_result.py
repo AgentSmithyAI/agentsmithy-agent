@@ -108,7 +108,6 @@ class GetPreviousResultTool(BaseTool):
                     available_ids = None
 
             if not result_data:
-
                 return result_factory.not_found(
                     "get_tool_result",
                     "tool_result",

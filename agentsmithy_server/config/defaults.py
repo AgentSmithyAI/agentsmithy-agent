@@ -6,9 +6,18 @@ from typing import Any
 def get_default_config() -> dict[str, Any]:
     """Return the default configuration dictionary."""
     return {
-        # OpenAI Configuration
-        "openai_api_key": None,
-        "openai_base_url": None,  # e.g., "http://localhost:1234/v1" for local servers
+        # Note: legacy top-level 'openai' section removed from defaults.
+        # Generic providers section to hold credentials/config per vendor
+        "providers": {
+            "openai": {
+                "api_key": None,
+                "base_url": None,
+                # Provider-wide extension options; mapped appropriately per model family
+                "options": {},
+            }
+        },
+        # Note: legacy flat keys (openai_api_key, openai_base_url) are not in defaults.
+        # They are still read via Settings for backward compatibility if present in config/env.
         # Server Configuration
         "server_host": "localhost",
         "server_port": 11434,
@@ -18,12 +27,15 @@ def get_default_config() -> dict[str, Any]:
         "max_open_files": 5,
         # Summarization
         "summary_trigger_token_budget": 20000,
-        # LLM Configuration
-        "model": "gpt-5",
-        "temperature": 0.7,
-        "reasoning_effort": "low",
-        "embedding_model": "text-embedding-3-small",
-        "max_tokens": 4000,
+        # Models configuration (canonical)
+        "models": {
+            "agents": {
+                "universal": {"model": "gpt-5"},
+                "inspector": {"model": "gpt-5-mini"},
+            },
+            "embeddings": {"model": "text-embedding-3-small"},
+        },
+        # Streaming toggle
         "streaming_enabled": True,
         # Web/HTTP Configuration
         "web_user_agent": (

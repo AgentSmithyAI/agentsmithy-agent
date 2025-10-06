@@ -74,8 +74,10 @@ async def test_config_manager_initialization():
 
         await manager.initialize()
 
-        assert manager.get("model") == defaults["model"]
-        assert manager.get("max_tokens") == defaults["max_tokens"]
+        assert (
+            manager.get("models")["agents"]["universal"]["model"]
+            == defaults["models"]["agents"]["universal"]["model"]
+        )
 
 
 @pytest.mark.asyncio
@@ -166,8 +168,7 @@ async def test_settings_with_config_manager():
         settings = Settings(config_manager=manager)
 
         # Test property access
-        assert settings.model == defaults["model"]
-        assert settings.max_tokens == defaults["max_tokens"]
+        assert settings.model == defaults["models"]["agents"]["universal"]["model"]
         assert settings.streaming_enabled == defaults["streaming_enabled"]
 
 

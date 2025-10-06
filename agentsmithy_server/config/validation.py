@@ -43,6 +43,6 @@ def validate_or_raise(
     key = api_key or os.getenv("OPENAI_API_KEY")
     if not key:
         raise ValueError(
-            "OPENAI_API_KEY is required for OpenAI models. Set it in .agentsmithy/config.json "
-            "as 'openai_api_key' or via environment variable OPENAI_API_KEY."
+            "OPENAI_API_KEY is required for OpenAI models. Configure it in .agentsmithy/config.json "
+            "under 'providers.openai.api_key' (preferred), or 'openai.api_key' for legacy, or via env OPENAI_API_KEY."
         )
