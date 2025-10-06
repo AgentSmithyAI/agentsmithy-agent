@@ -98,10 +98,6 @@ class OpenAIProvider:
         try:
             extra_opts = settings.openai_chat_options or {}
             if isinstance(extra_opts, dict) and extra_opts:
-                from agentsmithy_server.core.providers.openai.models import (
-                    get_model_spec,
-                )
-
                 family = getattr(
                     get_model_spec(self.model), "family", "chat_completions"
                 )

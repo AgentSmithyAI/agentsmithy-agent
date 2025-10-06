@@ -30,4 +30,11 @@ class OpenAIEmbeddingsProvider:
         extra = prov.get("options") if isinstance(prov, dict) else None
         if isinstance(extra, dict) and extra:
             kwargs.update(extra)
+        # Embeddings-specific options from providers.openai.embeddings.options
+        if isinstance(prov, dict):
+            emb_cfg = prov.get("embeddings") or {}
+            if isinstance(emb_cfg, dict):
+                emb_extra = emb_cfg.get("options")
+                if isinstance(emb_extra, dict) and emb_extra:
+                    kwargs.update(emb_extra)
         return OpenAIEmbeddings(**kwargs)
