@@ -80,7 +80,6 @@ class ProjectInspectorAgent(BaseAgent):
 
         # Persist into project metadata
         try:
-
             # Already validated via tool schema
             analysis = analysis
             metadata = project.load_metadata() or {}

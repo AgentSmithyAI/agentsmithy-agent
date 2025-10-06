@@ -37,7 +37,8 @@ async def list_dialogs(
 
 @router.post("/api/dialogs")
 async def create_dialog(
-    payload: DialogCreateRequest, project: Project = Depends(get_project)  # noqa: B008
+    payload: DialogCreateRequest,
+    project: Project = Depends(get_project),  # noqa: B008
 ):
     dialog_id = project.create_dialog(
         title=payload.title, set_current=payload.set_current
@@ -55,7 +56,8 @@ async def get_current_dialog(project: Project = Depends(get_project)):  # noqa: 
 
 @router.patch("/api/dialogs/current")
 async def set_current_dialog(
-    id: str, project: Project = Depends(get_project)  # noqa: B008
+    id: str,
+    project: Project = Depends(get_project),  # noqa: B008
 ):
     project.set_current_dialog_id(id)
     return {"ok": True}
@@ -63,7 +65,8 @@ async def set_current_dialog(
 
 @router.get("/api/dialogs/{dialog_id}")
 async def get_dialog(
-    dialog_id: str, project: Project = Depends(get_project)  # noqa: B008
+    dialog_id: str,
+    project: Project = Depends(get_project),  # noqa: B008
 ):
     meta = project.get_dialog_meta(dialog_id)
     if not meta:
@@ -88,7 +91,8 @@ async def patch_dialog(
 
 @router.delete("/api/dialogs/{dialog_id}")
 async def delete_dialog(
-    dialog_id: str, project: Project = Depends(get_project)  # noqa: B008
+    dialog_id: str,
+    project: Project = Depends(get_project),  # noqa: B008
 ):
     project.delete_dialog(dialog_id)
     return {"ok": True}
