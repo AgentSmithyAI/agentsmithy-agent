@@ -68,24 +68,18 @@ class Settings:
     # OpenAI Configuration
     @property
     def openai_api_key(self) -> str | None:
-        # Prefer providers.openai.api_key, then nested openai.api_key, then legacy flat/env
+        # Canonical: providers.openai.api_key; fallback to env only
         prov = self.get_provider_config("openai")
         if isinstance(prov, dict) and prov.get("api_key"):
             return prov.get("api_key")
-        val = self._get("openai.api_key", None)
-        if val is not None:
-            return val
-        return self._get("openai_api_key", None, "OPENAI_API_KEY")
+        return self._get("OPENAI_API_KEY", None, "OPENAI_API_KEY")
 
     @property
     def openai_base_url(self) -> str | None:
         prov = self.get_provider_config("openai")
         if isinstance(prov, dict) and prov.get("base_url"):
             return prov.get("base_url")
-        val = self._get("openai.base_url", None)
-        if val is not None:
-            return val
-        return self._get("openai_base_url", None, "OPENAI_BASE_URL")
+        return self._get("OPENAI_BASE_URL", None, "OPENAI_BASE_URL")
 
     # OpenAI Chat nested configuration (preferred)
     @property
