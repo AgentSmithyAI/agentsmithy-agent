@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from typing import Final
 
 from .types import Vendor
@@ -18,13 +17,3 @@ API_KEY_ENV_BY_VENDOR: Final[dict[Vendor, str]] = {
 def get_api_key_env_var(vendor: Vendor) -> str | None:
     """Return the API key env var name for a given vendor, if defined."""
     return API_KEY_ENV_BY_VENDOR.get(vendor)
-
-
-def set_api_key_env(vendor: Vendor, api_key: str) -> None:
-    """Set the appropriate API key environment variable for the vendor if known.
-
-    Uses os.environ.setdefault to avoid overwriting already-configured variables.
-    """
-    env_var = get_api_key_env_var(vendor)
-    if env_var and api_key:
-        os.environ.setdefault(env_var, api_key)

@@ -115,16 +115,10 @@ class OpenAIProvider:
             # Be lenient if options cannot be applied
             pass
 
-        # Initialize LLM; set API key env var for this vendor when provided
-        if self.api_key:
-            from agentsmithy_server.core.providers.vendor import set_api_key_env
-
-            vendor = adapter.vendor() if hasattr(adapter, "vendor") else None
-            if vendor is not None:
-                set_api_key_env(vendor, str(self.api_key))
-
         if self.base_url:
             kwargs["base_url"] = self.base_url
+        if self.api_key:
+            kwargs["api_key"] = self.api_key
 
         module_path, class_name = class_path.rsplit(".", 1)
         cls = getattr(import_module(module_path), class_name)

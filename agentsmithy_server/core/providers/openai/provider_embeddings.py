@@ -27,6 +27,11 @@ class OpenAIEmbeddingsProvider:
             kwargs["base_url"] = settings.openai_base_url
         # Provider-wide options from providers.openai.options
         prov = settings.get_provider_config("openai")
+        # Prefer explicit API key in kwargs to avoid env reliance
+        if isinstance(prov, dict) and prov.get("api_key"):
+            kwargs["api_key"] = str(prov.get("api_key"))
+        elif settings.openai_api_key:
+            kwargs["api_key"] = str(settings.openai_api_key)
         extra = prov.get("options") if isinstance(prov, dict) else None
         if isinstance(extra, dict) and extra:
             kwargs.update(extra)
