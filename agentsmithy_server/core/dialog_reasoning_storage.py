@@ -230,4 +230,3 @@ class DialogReasoningStorage:
                 reasoning_id=reasoning_id,
             )
             return False
-

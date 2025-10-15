@@ -95,7 +95,9 @@ class ChatService:
                         message_index = -1
                         try:
                             if hasattr(project_obj, "get_dialog_history"):
-                                history = project_obj.get_dialog_history(target_dialog_id)
+                                history = project_obj.get_dialog_history(
+                                    target_dialog_id
+                                )
                                 messages = history.get_messages()
                                 # Link to the last message (or next message index)
                                 message_index = len(messages)

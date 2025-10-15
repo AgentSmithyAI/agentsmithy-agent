@@ -2,7 +2,6 @@
 
 import sys
 from pathlib import Path
-from unittest.mock import Mock
 
 import pytest
 
@@ -13,15 +12,14 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 @pytest.mark.asyncio
 async def test_reasoning_accumulation():
     """Test that reasoning content is accumulated in buffer."""
-    from agentsmithy_server.utils.logger import api_logger
 
     reasoning_buffer = []
-    
+
     # Simulate reasoning chunks
     chunks = ["Analyzing ", "the problem...", " Found solution."]
     for chunk in chunks:
         reasoning_buffer.append(chunk)
-    
+
     content = "".join(reasoning_buffer)
     assert content == "Analyzing the problem... Found solution."
     assert len(reasoning_buffer) == 3
@@ -31,11 +29,11 @@ async def test_reasoning_accumulation():
 async def test_reasoning_buffer_cleared_after_flush():
     """Test that reasoning buffer is cleared after successful flush."""
     reasoning_buffer = ["Test ", "reasoning"]
-    
+
     # Simulate flush
     content = "".join(reasoning_buffer)
     assert content == "Test reasoning"
-    
+
     reasoning_buffer.clear()
     assert len(reasoning_buffer) == 0
 
@@ -45,17 +43,17 @@ async def test_multiple_reasoning_blocks():
     """Test multiple reasoning blocks in a stream."""
     # Simulate multiple reasoning blocks
     blocks = []
-    
+
     # First block
     buffer1 = ["First ", "reasoning"]
     blocks.append("".join(buffer1))
     buffer1.clear()
-    
+
     # Second block
     buffer2 = ["Second ", "reasoning"]
     blocks.append("".join(buffer2))
     buffer2.clear()
-    
+
     assert len(blocks) == 2
     assert blocks[0] == "First reasoning"
     assert blocks[1] == "Second reasoning"
@@ -63,4 +61,3 @@ async def test_multiple_reasoning_blocks():
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
-

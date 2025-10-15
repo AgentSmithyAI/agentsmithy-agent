@@ -102,7 +102,7 @@ class DialogUsageEventORM(BaseORM):
 
 class DialogReasoningORM(BaseORM):
     """Stores reasoning/thinking traces from LLM responses.
-    
+
     Each reasoning block can be linked to a specific message in the dialog history
     via message_index, allowing reconstruction of the model's thinking process.
     """
