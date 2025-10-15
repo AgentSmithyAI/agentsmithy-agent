@@ -12,6 +12,7 @@ from typing import Any
 
 from agentsmithy_server.api.sse_protocol import EventFactory as SSEEventFactory
 from agentsmithy_server.core.agent_graph import AgentOrchestrator
+from agentsmithy_server.core.dialog_reasoning_storage import DialogReasoningStorage
 from agentsmithy_server.core.dialog_summary_storage import DialogSummaryStorage
 from agentsmithy_server.core.summarization.strategy import KEEP_LAST_MESSAGES
 from agentsmithy_server.utils.logger import api_logger, stream_log
@@ -32,8 +33,16 @@ class ChatService:
         project_dialog: tuple[Any, str] | None,
         dialog_id: str | None,
         assistant_buffer: list[str],
+        clear_buffer: bool = False,
     ) -> None:
-        """Persist accumulated assistant text to dialog history (best-effort)."""
+        """Persist accumulated assistant text to dialog history (best-effort).
+
+        Args:
+            project_dialog: Tuple of (project, dialog_id) for history access
+            dialog_id: Target dialog ID
+            assistant_buffer: Buffer containing accumulated assistant text
+            clear_buffer: If True, clear the buffer after flushing (for incremental saves)
+        """
         try:
             if assistant_buffer and project_dialog:
                 project_obj, pdialog_id = project_dialog
@@ -43,12 +52,79 @@ class ChatService:
                     content = "".join(assistant_buffer)
                     if content:
                         history.add_ai_message(content)
+                        if clear_buffer:
+                            assistant_buffer.clear()
+                            api_logger.debug(
+                                "Incrementally saved assistant chunk",
+                                dialog_id=target_dialog_id,
+                                length=len(content),
+                            )
         except Exception as e:
             api_logger.error(
                 "Failed to append assistant message (stream)",
                 exc_info=True,
                 error=str(e),
             )
+
+    def _flush_reasoning_buffer(
+        self,
+        project_dialog: tuple[Any, str] | None,
+        dialog_id: str | None,
+        reasoning_buffer: list[str],
+        clear_buffer: bool = False,
+    ) -> int | None:
+        """Persist accumulated reasoning text to separate storage (best-effort).
+
+        Args:
+            project_dialog: Tuple of (project, dialog_id) for storage access
+            dialog_id: Target dialog ID
+            reasoning_buffer: Buffer containing accumulated reasoning text
+            clear_buffer: If True, clear the buffer after flushing
+
+        Returns:
+            ID of saved reasoning block, or None on error
+        """
+        try:
+            if reasoning_buffer and project_dialog:
+                project_obj, pdialog_id = project_dialog
+                target_dialog_id = dialog_id or pdialog_id
+                if target_dialog_id:
+                    content = "".join(reasoning_buffer)
+                    if content.strip():
+                        # Get current message count to link reasoning to next message
+                        message_index = -1
+                        try:
+                            if hasattr(project_obj, "get_dialog_history"):
+                                history = project_obj.get_dialog_history(target_dialog_id)
+                                messages = history.get_messages()
+                                # Link to the last message (or next message index)
+                                message_index = len(messages)
+                        except Exception:
+                            pass
+
+                        with DialogReasoningStorage(
+                            project_obj, target_dialog_id
+                        ) as storage:
+                            reasoning_id = storage.save(
+                                content=content, message_index=message_index
+                            )
+                            if reasoning_id and clear_buffer:
+                                reasoning_buffer.clear()
+                                api_logger.debug(
+                                    "Saved reasoning block",
+                                    dialog_id=target_dialog_id,
+                                    reasoning_id=reasoning_id,
+                                    length=len(content),
+                                    message_index=message_index,
+                                )
+                            return reasoning_id
+        except Exception as e:
+            api_logger.error(
+                "Failed to save reasoning block (stream)",
+                exc_info=True,
+                error=str(e),
+            )
+        return None
 
     def _get_orchestrator(self) -> AgentOrchestrator:
         if self._orchestrator is None:
@@ -80,6 +156,8 @@ class ChatService:
         chunk: Any,
         dialog_id: str | None,
         assistant_buffer: list[str],
+        project_dialog: tuple[Any, str] | None = None,
+        reasoning_buffer: list[str] | None = None,
     ) -> AsyncIterator[dict[str, str]]:
         if isinstance(chunk, dict) and chunk.get("type") in {
             "file_edit",
@@ -104,16 +182,28 @@ class ChatService:
             elif chunk["type"] == "reasoning":
                 content = chunk.get("content", "")
                 if content:
+                    # Accumulate reasoning in buffer for separate storage
+                    if reasoning_buffer is not None:
+                        reasoning_buffer.append(content)
                     yield SSEEventFactory.reasoning(
                         content=content, dialog_id=dialog_id
                     ).to_sse()
             elif chunk["type"] == "chat_start":
                 yield SSEEventFactory.chat_start(dialog_id=dialog_id).to_sse()
             elif chunk["type"] == "chat_end":
+                # Incrementally save buffer after each LLM response chunk to minimize data loss on disconnect
+                self._flush_assistant_buffer(
+                    project_dialog, dialog_id, assistant_buffer, clear_buffer=True
+                )
                 yield SSEEventFactory.chat_end(dialog_id=dialog_id).to_sse()
             elif chunk["type"] == "reasoning_start":
                 yield SSEEventFactory.reasoning_start(dialog_id=dialog_id).to_sse()
             elif chunk["type"] == "reasoning_end":
+                # Save accumulated reasoning to separate storage after reasoning block ends
+                if reasoning_buffer is not None:
+                    self._flush_reasoning_buffer(
+                        project_dialog, dialog_id, reasoning_buffer, clear_buffer=True
+                    )
                 yield SSEEventFactory.reasoning_end(dialog_id=dialog_id).to_sse()
             elif chunk["type"] == "summary_start":
                 yield SSEEventFactory.summary_start(dialog_id=dialog_id).to_sse()
@@ -282,6 +372,7 @@ class ChatService:
 
             event_count = 0
             assistant_buffer: list[str] = []
+            reasoning_buffer: list[str] = []
 
             async for state in graph_execution:
                 # Check for shutdown signal
@@ -313,7 +404,11 @@ class ChatService:
                             chunk_count += 1
                             try:
                                 async for sse_event in self._process_structured_chunk(
-                                    chunk, dialog_id, assistant_buffer
+                                    chunk,
+                                    dialog_id,
+                                    assistant_buffer,
+                                    project_dialog,
+                                    reasoning_buffer,
                                 ):
                                     yield sse_event
                                 stream_log(
@@ -334,7 +429,11 @@ class ChatService:
                     else:
                         try:
                             async for sse_event in self._process_structured_chunk(
-                                state["response"], dialog_id, assistant_buffer
+                                state["response"],
+                                dialog_id,
+                                assistant_buffer,
+                                project_dialog,
+                                reasoning_buffer,
                             ):
                                 yield sse_event
                         except StreamAbortError:
@@ -359,7 +458,11 @@ class ChatService:
                                         async for (
                                             sse_event
                                         ) in self._process_structured_chunk(
-                                            chunk, dialog_id, assistant_buffer
+                                            chunk,
+                                            dialog_id,
+                                            assistant_buffer,
+                                            project_dialog,
+                                            reasoning_buffer,
                                         ):
                                             yield sse_event
                                     except StreamAbortError:
@@ -384,7 +487,11 @@ class ChatService:
                                             async for (
                                                 sse_event
                                             ) in self._process_structured_chunk(
-                                                chunk, dialog_id, assistant_buffer
+                                                chunk,
+                                                dialog_id,
+                                                assistant_buffer,
+                                                project_dialog,
+                                                reasoning_buffer,
                                             ):
                                                 yield sse_event
                                         except StreamAbortError:
@@ -400,7 +507,11 @@ class ChatService:
                                         async for (
                                             sse_event
                                         ) in self._process_structured_chunk(
-                                            actual_response, dialog_id, assistant_buffer
+                                            actual_response,
+                                            dialog_id,
+                                            assistant_buffer,
+                                            project_dialog,
+                                            reasoning_buffer,
                                         ):
                                             yield sse_event
                                     except StreamAbortError:

@@ -98,3 +98,27 @@ class DialogUsageEventORM(BaseORM):
     __table_args__ = (
         Index("ix_usage_events_dialog_created", "dialog_id", "created_at"),
     )
+
+
+class DialogReasoningORM(BaseORM):
+    """Stores reasoning/thinking traces from LLM responses.
+    
+    Each reasoning block can be linked to a specific message in the dialog history
+    via message_index, allowing reconstruction of the model's thinking process.
+    """
+
+    __tablename__ = "dialog_reasoning"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    dialog_id: Mapped[str] = mapped_column(String, index=True)
+    content: Mapped[str] = mapped_column(CompressedText)
+    created_at: Mapped[str] = mapped_column(String)
+    # Index of the message in dialog history this reasoning relates to (-1 if not yet linked)
+    message_index: Mapped[int] = mapped_column(Integer, default=-1)
+    # Optional: model that generated this reasoning
+    model_name: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    __table_args__ = (
+        Index("ix_reasoning_dialog_created", "dialog_id", "created_at"),
+        Index("ix_reasoning_dialog_msg_idx", "dialog_id", "message_index"),
+    )
