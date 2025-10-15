@@ -109,15 +109,52 @@ class Settings:
         opts = prov.get("options") if isinstance(prov, dict) else None
         return opts if isinstance(opts, dict) else {}
 
+    # Llama Configuration (local models via llama.cpp)
+    @property
+    def llama_model_path(self) -> str | None:
+        """Path to local .gguf model file."""
+        prov = self.get_provider_config("llama")
+        path = prov.get("model_path") if isinstance(prov, dict) else None
+        if path:
+            return str(path)
+        # Fallback to environment variable
+        return self._get("LLAMA_MODEL_PATH", None, "LLAMA_MODEL_PATH")
+
+    @property
+    def llama_n_ctx(self) -> int:
+        """Context window size for Llama."""
+        prov = self.get_provider_config("llama")
+        ctx = prov.get("n_ctx") if isinstance(prov, dict) else None
+        return int(ctx) if ctx is not None else 8192
+
+    @property
+    def llama_n_threads(self) -> int:
+        """Number of CPU threads for Llama."""
+        prov = self.get_provider_config("llama")
+        threads = prov.get("n_threads") if isinstance(prov, dict) else None
+        return int(threads) if threads is not None else 8
+
+    @property
+    def llama_verbose(self) -> bool:
+        """Verbose logging for Llama."""
+        prov = self.get_provider_config("llama")
+        verbose = prov.get("verbose") if isinstance(prov, dict) else None
+        return bool(verbose) if verbose is not None else False
+
     # Generic provider config helpers
     def get_provider_config(self, provider: str) -> dict:
         """Return merged provider config: providers.<name> over openai/<legacy>.
 
         Backward compatibility: for provider=="openai", merge with `openai` section.
+        For provider=="llama", merge with `llama` section.
         """
         merged: dict = {}
         if provider == "openai":
             cfg = self._get("openai", None)
+            if isinstance(cfg, dict):
+                merged.update(cfg)
+        elif provider == "llama":
+            cfg = self._get("llama", None)
             if isinstance(cfg, dict):
                 merged.update(cfg)
         prov = self._get(f"providers.{provider}", None)

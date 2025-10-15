@@ -10,6 +10,7 @@ API_KEY_ENV_BY_VENDOR: Final[dict[Vendor, str]] = {
     Vendor.ANTHROPIC: "ANTHROPIC_API_KEY",
     Vendor.XAI: "XAI_API_KEY",
     Vendor.DEEPSEEK: "DEEPSEEK_API_KEY",
+    # Llama is local, no API key needed
     # For unknown/other vendors we intentionally do not set any variable.
 }
 

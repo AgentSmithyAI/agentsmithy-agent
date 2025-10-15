@@ -39,9 +39,13 @@ class AgentOrchestrator:
                 llm_provider, "__class__", type(llm_provider)
             ).__name__
         else:
-            # Fallback to default provider if none injected
-            self.llm_provider = OpenAIProvider()
-            provider_label = "OpenAIProvider"
+            # Fallback to default provider from configuration
+            from agentsmithy_server.core.provider_factory import create_provider
+            
+            self.llm_provider = create_provider(agent_name="universal")
+            provider_label = getattr(
+                self.llm_provider, "__class__", type(self.llm_provider)
+            ).__name__
 
         agent_logger.info(
             "Creating AgentOrchestrator",

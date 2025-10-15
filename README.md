@@ -13,8 +13,9 @@ A local AI server similar to Cursor, built using LangGraph for orchestration, RA
 - 📚 **RAG (Retrieval-Augmented Generation)** for context handling
 - 🔄 **Streaming responses** via Server-Sent Events (SSE)
 - 🧰 **Tool-aware workflow** with structured SSE events (chat/reasoning/tool_call/file_edit)
-- 🔌 **Flexible LLM provider interface** (OpenAI supported out of the box)
+- 🔌 **Flexible LLM provider interface** (OpenAI and local Llama models supported)
 - 🗄️ **ChromaDB** vector store for context persistence
+- 🏠 **Local model support** via llama.cpp for offline operation
 
 ## Architecture
 
@@ -59,7 +60,11 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-4. Create a `.env` file with required model and API key (minimum):
+4. Configure the server:
+
+**Option A: Using OpenAI (cloud-based)**
+
+Create a `.env` file with required model and API key:
 ```env
 OPENAI_API_KEY=your_openai_api_key_here
 DEFAULT_MODEL=gpt-5  # required
@@ -74,6 +79,24 @@ DEFAULT_MODEL=gpt-5  # required
 # SERVER_PORT=11434             # base port; actual port may auto-increment
 # LOG_FORMAT=pretty             # or json
 # SERVER_RELOAD=false           # enable hot-reload in dev with true
+```
+
+**Option B: Using Local Llama Models (offline)**
+
+Install llama-cpp-python:
+```bash
+pip install llama-cpp-python
+```
+
+Configure in `.agentsmithy/config.json`:
+```json
+{
+  "providers": {
+    "llama": {
+      "model_path": "./models/your-model.gguf"
+    }
+  }
+}
 ```
 
 ## Usage
@@ -271,23 +294,19 @@ make test
 
 ## Extending Functionality
 
-### Adding a New LLM Provider
+### Using Different LLM Providers
 
-1. Create a new provider class in `agentsmithy_server/core/llm_provider.py`:
-```python
-class YourLLMProvider(LLMProvider):
-    async def agenerate(self, messages, stream=False):
-        ...
-    def get_model_name(self) -> str:
-        ...
-    def bind_tools(self, tools: List[BaseTool]):
-        ...
-```
+AgentSmithy supports multiple LLM providers:
 
-2. Instantiate your provider directly where needed:
-```python
-provider = YourLLMProvider(...)
-```
+1. **OpenAI** (default) - Cloud-based API
+2. **Llama** - Local models via llama.cpp
+
+The provider is automatically selected based on configuration. To add a custom provider:
+
+1. Create a new provider in `agentsmithy_server/core/providers/<provider_name>/`
+2. Implement the provider interface (see `OpenAIProvider` or `LlamaProvider` as examples)
+3. Register the adapter factory in `agentsmithy_server/core/providers/__init__.py`
+4. Update `provider_factory.py` for auto-detection logic (optional)
 
 ### Adding a New Agent
 

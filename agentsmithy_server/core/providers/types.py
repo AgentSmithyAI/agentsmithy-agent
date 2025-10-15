@@ -8,4 +8,5 @@ class Vendor(str, Enum):
     ANTHROPIC = "anthropic"
     XAI = "xai"
     DEEPSEEK = "deepseek"
+    LLAMA = "llama"
     OTHER = "other"

@@ -14,6 +14,14 @@ def get_default_config() -> dict[str, Any]:
                 "base_url": None,
                 # Provider-wide extension options; mapped appropriately per model family
                 "options": {},
+            },
+            "llama": {
+                "model_path": None,
+                "n_ctx": 8192,
+                "n_threads": 8,
+                "temperature": 0.1,
+                "max_tokens": 4000,
+                "verbose": False,
             }
         },
         # Note: legacy flat keys (openai_api_key, openai_base_url) are not in defaults.

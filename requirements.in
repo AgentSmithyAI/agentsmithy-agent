@@ -10,6 +10,7 @@ langchain
 langchain-openai
 langchain-community
 langchain-core
+llama-cpp-python
 langgraph
 langchain-text-splitters
 SQLAlchemy

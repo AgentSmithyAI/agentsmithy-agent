@@ -358,7 +358,27 @@ class ToolExecutor:
                     dialog_id=self._dialog_id,
                 )
             tool_calls = getattr(response, "tool_calls", [])
-            agent_logger.info("LLM response", has_tool_calls=bool(tool_calls))
+            response_content = getattr(response, "content", "")
+            agent_logger.info(
+                "LLM response", 
+                has_tool_calls=bool(tool_calls),
+                content_length=len(response_content) if response_content else 0,
+                content_full=response_content  # Show FULL content for debugging
+            )
+            
+            # Debug: show what was sent to LLM
+            if messages:
+                agent_logger.debug(f"Messages sent to LLM (total {len(messages)}):")
+                for i, msg in enumerate(messages):
+                    msg_type = type(msg).__name__
+                    msg_content = getattr(msg, "content", "")
+                    preview = msg_content[:300] if msg_content else "(empty)"
+                    agent_logger.debug(f"  [{i}] {msg_type}: {preview}...")
+                    
+                    # Show tool_call_id for ToolMessage
+                    if msg_type == "ToolMessage":
+                        tool_call_id = getattr(msg, "tool_call_id", None)
+                        agent_logger.debug(f"      tool_call_id={tool_call_id}")
 
             if not tool_calls:
                 # Completed text answer. If tools were used, return structured tool_response

@@ -143,7 +143,7 @@ if __name__ == "__main__":
             from agentsmithy_server.agents.project_inspector_agent import (
                 ProjectInspectorAgent,
             )
-            from agentsmithy_server.core import OpenAIProvider
+            # from agentsmithy_server.core import OpenAIProvider  # Replaced with provider_factory
             from agentsmithy_server.core.project import get_current_project
 
             project = get_current_project()
@@ -258,11 +258,10 @@ if __name__ == "__main__":
 
                         set_scan_status(project, status="scanning", progress=0)
 
+                        from agentsmithy_server.core.provider_factory import create_provider
+                        
                         inspector = ProjectInspectorAgent(
-                            OpenAIProvider(
-                                model=inspector_model,
-                                agent_name="project_inspector",
-                            ),
+                            create_provider(agent_name="project_inspector"),
                             None,
                         )
                         await inspector.inspect_and_save(project)
