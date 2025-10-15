@@ -57,3 +57,48 @@ class ToolResultResponse(BaseModel):
     result: dict[str, Any]
     timestamp: str
     metadata: dict[str, Any] = {}
+
+
+class HistoryMessage(BaseModel):
+    """A single message in dialog history."""
+
+    type: str  # human, ai, system, tool
+    content: str
+    index: int  # Position in history
+    timestamp: str | None = None
+    # For AI messages with tool calls
+    tool_calls: list[dict[str, Any]] | None = None
+
+
+class ReasoningBlock(BaseModel):
+    """A reasoning/thinking block from LLM."""
+
+    id: int
+    content: str
+    message_index: int  # Link to message
+    model_name: str | None = None
+    created_at: str
+
+
+class ToolCallInfo(BaseModel):
+    """Information about a tool call execution."""
+
+    tool_call_id: str
+    tool_name: str
+    args: dict[str, Any]
+    result_preview: str  # Short preview of result
+    has_full_result: bool  # Whether full result is stored
+    timestamp: str
+    message_index: int  # Link to message that triggered it
+
+
+class DialogHistoryResponse(BaseModel):
+    """Complete dialog history with messages, reasoning, and tool calls."""
+
+    dialog_id: str
+    messages: list[HistoryMessage]
+    reasoning_blocks: list[ReasoningBlock]
+    tool_calls: list[ToolCallInfo]
+    total_messages: int
+    total_reasoning: int
+    total_tool_calls: int
