@@ -73,11 +73,9 @@ def test_get_history_with_messages_only(client, test_project):
     assert len(data["messages"]) == 2
     assert data["messages"][0]["type"] == "human"
     assert data["messages"][0]["content"] == "Hello"
-    assert data["messages"][0]["index"] == 0
 
     assert data["messages"][1]["type"] == "ai"
     assert data["messages"][1]["content"] == "Hi there!"
-    assert data["messages"][1]["index"] == 1
 
 
 def test_get_history_with_reasoning(client, test_project):
@@ -111,8 +109,6 @@ def test_get_history_with_reasoning(client, test_project):
     reasoning = reasoning_msgs[0]
     assert reasoning["content"] == "First, I need to understand the context..."
     assert reasoning["model_name"] == "gpt-4o"
-    assert "timestamp" in reasoning
-    assert reasoning["reasoning_id"] == 1
 
 
 def test_get_history_with_tool_calls(client, test_project):

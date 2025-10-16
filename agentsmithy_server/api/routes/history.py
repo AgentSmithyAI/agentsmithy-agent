@@ -29,14 +29,6 @@ async def _build_history_response(
         messages = history.get_messages()
 
         for idx, msg in enumerate(messages):
-            # Extract timestamp if available
-            timestamp = None
-            try:
-                if hasattr(msg, "additional_kwargs"):
-                    timestamp = msg.additional_kwargs.get("timestamp")
-            except Exception:
-                pass
-
             # Extract tool_calls if present
             tool_calls = None
             try:
@@ -74,8 +66,6 @@ async def _build_history_response(
                             if isinstance(msg.content, str)
                             else str(msg.content)
                         ),
-                        index=idx,
-                        timestamp=timestamp,
                         tool_calls=tool_calls,
                     ),
                 )
@@ -99,9 +89,6 @@ async def _build_history_response(
                         HistoryMessage(
                             type="reasoning",
                             content=block.content,
-                            index=-1,  # Will be reindexed
-                            timestamp=block.created_at,
-                            reasoning_id=block.id,
                             model_name=block.model_name,
                         ),
                     )
@@ -120,20 +107,8 @@ async def _build_history_response(
     all_messages = base_messages + reasoning_messages
     all_messages.sort(key=lambda x: (x[0], 0 if x[1].type == "reasoning" else 1))
 
-    # Reindex sequentially
-    messages_data: list[HistoryMessage] = []
-    for new_idx, (_, hist_msg) in enumerate(all_messages):
-        # Create new instance with updated index to avoid mutation
-        updated_msg = HistoryMessage(
-            type=hist_msg.type,
-            content=hist_msg.content,
-            index=new_idx,
-            timestamp=hist_msg.timestamp,
-            tool_calls=hist_msg.tool_calls,
-            reasoning_id=hist_msg.reasoning_id,
-            model_name=hist_msg.model_name,
-        )
-        messages_data.append(updated_msg)
+    # Extract messages in sorted order (already sorted by message_index)
+    messages_data: list[HistoryMessage] = [msg for _, msg in all_messages]
 
     # Get tool calls
     tool_calls_data: list[ToolCallInfo] = []
@@ -199,24 +174,20 @@ async def get_dialog_history(
                 {
                     "type": "human",
                     "content": "read file.txt",
-                    "index": 0,
-                    "timestamp": null
+                    "tool_calls": null,
+                    "model_name": null
                 },
                 {
                     "type": "reasoning",
                     "content": "I need to read the file first...",
-                    "index": 1,
-                    "timestamp": "2025-10-15T20:00:01Z",
-                    "reasoning_id": 1,
-                    "model_name": "gpt-4o",
-                    "tool_calls": null
+                    "tool_calls": null,
+                    "model_name": null
                 },
                 {
                     "type": "ai",
                     "content": "I'll read the file...",
-                    "index": 2,
-                    "timestamp": null,
-                    "tool_calls": [{"id": "call_123", "name": "read_file", "args": {...}}]
+                    "tool_calls": [{"id": "call_123", "name": "read_file", "args": {...}}],
+                    "model_name": null
                 }
             ],
             "tool_calls": [

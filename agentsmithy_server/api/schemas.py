@@ -64,12 +64,9 @@ class HistoryMessage(BaseModel):
 
     type: str  # human, ai, system, tool, reasoning
     content: str
-    index: int  # Position in history
-    timestamp: str | None = None
     # For AI messages with tool calls
     tool_calls: list[dict[str, Any]] | None = None
     # For reasoning messages
-    reasoning_id: int | None = None
     model_name: str | None = None
 
 
