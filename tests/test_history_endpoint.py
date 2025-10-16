@@ -1,14 +1,11 @@
 """Tests for dialog history endpoint."""
 
-import asyncio
-
 import pytest
 from fastapi.testclient import TestClient
 
 from agentsmithy_server.api.app import create_app
 from agentsmithy_server.core.dialog_reasoning_storage import DialogReasoningStorage
 from agentsmithy_server.core.project import Project
-from agentsmithy_server.core.tool_results_storage import ToolResultsStorage
 
 
 @pytest.fixture
@@ -70,12 +67,13 @@ def test_get_history_with_messages_only(client, test_project):
     assert data["total_tool_calls"] == 0
 
     # Check messages
-    assert len(data["messages"]) == 2
-    assert data["messages"][0]["type"] == "human"
-    assert data["messages"][0]["content"] == "Hello"
+    msgs = data["messages"]
+    assert len(msgs) == 2
+    assert msgs[0]["type"] == "human"
+    assert msgs[0]["content"] == "Hello"
 
-    assert data["messages"][1]["type"] == "ai"
-    assert data["messages"][1]["content"] == "Hi there!"
+    assert msgs[1]["type"] == "ai"
+    assert msgs[1]["content"] == "Hi there!"
 
 
 def test_get_history_with_reasoning(client, test_project):
@@ -112,51 +110,58 @@ def test_get_history_with_reasoning(client, test_project):
 
 
 def test_get_history_with_tool_calls(client, test_project):
-    """Test getting history with tool calls."""
+    """Test getting history with tool calls as events."""
+    from langchain_core.messages import AIMessage
+
     # Create dialog with messages
     dialog_id = test_project.create_dialog(title="test", set_current=True)
     history = test_project.get_dialog_history(dialog_id)
     history.add_user_message("Read file.txt")
-    history.add_ai_message("I'll read it")
 
-    # Add tool call result using async API
-    async def add_tool_result():
-        with ToolResultsStorage(test_project, dialog_id) as storage:
-            await storage.store_result(
-                tool_call_id="call_123",
-                tool_name="read_file",
-                args={"path": "file.txt"},
-                result={"content": "File content here"},
-            )
-
-    asyncio.run(add_tool_result())
+    # Add AI message with tool call
+    ai_msg = AIMessage(
+        content="I'll read it",
+        tool_calls=[
+            {"id": "call_123", "name": "read_file", "args": {"path": "file.txt"}}
+        ],
+    )
+    history.add_message(ai_msg)
 
     # Get history
     response = client.get(f"/api/dialogs/{dialog_id}/history")
     assert response.status_code == 200
 
     data = response.json()
-    assert data["total_messages"] == 2
+    # 2 messages + 1 tool_call event
+    assert data["total_messages"] == 3
     assert data["total_tool_calls"] == 1
 
-    # Check tool call
-    tool_call = data["tool_calls"][0]
-    assert tool_call["tool_call_id"] == "call_123"
-    assert tool_call["tool_name"] == "read_file"
-    # args are not included in metadata list (would need separate query)
-    assert "result_preview" in tool_call
-    assert tool_call["has_full_result"] is True
+    # Check tool call event
+    tool_events = [m for m in data["messages"] if m["type"] == "tool_call"]
+    assert len(tool_events) == 1
+    assert tool_events[0]["tool_name"] == "read_file"
+    assert tool_events[0]["args"] == {"path": "file.txt"}
 
 
 def test_get_history_complete(client, test_project):
     """Test getting complete history with messages, reasoning, and tool calls."""
+    from langchain_core.messages import AIMessage
+
     # Create dialog
     dialog_id = test_project.create_dialog(title="test", set_current=True)
     history = test_project.get_dialog_history(dialog_id)
 
     # Add messages
     history.add_user_message("Do something")
-    history.add_ai_message("I'll do it")
+
+    # Add AI with tool call
+    ai_msg = AIMessage(
+        content="I'll do it",
+        tool_calls=[
+            {"id": "call_1", "name": "write_file", "args": {"path": "output.txt"}}
+        ],
+    )
+    history.add_message(ai_msg)
 
     # Add reasoning
     with DialogReasoningStorage(test_project, dialog_id) as storage:
@@ -166,64 +171,56 @@ def test_get_history_complete(client, test_project):
             model_name="gpt-4o",
         )
 
-    # Add tool call using async API
-    async def add_tool_result():
-        with ToolResultsStorage(test_project, dialog_id) as storage:
-            await storage.store_result(
-                tool_call_id="call_456",
-                tool_name="write_file",
-                args={"path": "output.txt", "content": "result"},
-                result={"success": True},
-            )
-
-    asyncio.run(add_tool_result())
-
     # Get history
     response = client.get(f"/api/dialogs/{dialog_id}/history")
     assert response.status_code == 200
 
     data = response.json()
     assert data["dialog_id"] == dialog_id
-    assert data["total_messages"] == 3  # 2 regular + 1 reasoning
+    # 2 regular + 1 reasoning + 1 tool_call = 4
+    assert data["total_messages"] == 4
     assert data["total_reasoning"] == 1
     assert data["total_tool_calls"] == 1
 
-    # Verify all components are present
-    assert len(data["messages"]) == 3  # Includes reasoning inline
-    reasoning_msgs = [m for m in data["messages"] if m["type"] == "reasoning"]
-    assert len(reasoning_msgs) == 1
-    assert len(data["tool_calls"]) == 1
+    # Verify all event types are present
+    msgs = data["messages"]
+    assert len(msgs) == 4
+    assert sum(1 for m in msgs if m["type"] == "reasoning") == 1
+    assert sum(1 for m in msgs if m["type"] == "tool_call") == 1
 
 
-def test_get_history_with_long_result_preview(client, test_project):
-    """Test that long tool results are truncated in preview."""
+def test_get_history_with_tool_calls_ordering(client, test_project):
+    """Test that tool calls appear in correct order in event stream."""
+    from langchain_core.messages import AIMessage
+
     dialog_id = test_project.create_dialog(title="test", set_current=True)
+    history = test_project.get_dialog_history(dialog_id)
 
-    # Add tool call with long result using async API
-    long_content = "x" * 1000
+    history.add_user_message("Do two things")
 
-    async def add_tool_result():
-        with ToolResultsStorage(test_project, dialog_id) as storage:
-            await storage.store_result(
-                tool_call_id="call_789",
-                tool_name="test_tool",
-                args={},
-                result={"data": long_content},
-            )
-
-    asyncio.run(add_tool_result())
+    ai_msg = AIMessage(
+        content="I'll do both",
+        tool_calls=[
+            {"id": "call_1", "name": "read_file", "args": {"path": "a.txt"}},
+            {"id": "call_2", "name": "write_file", "args": {"path": "b.txt"}},
+        ],
+    )
+    history.add_message(ai_msg)
 
     # Get history
     response = client.get(f"/api/dialogs/{dialog_id}/history")
     assert response.status_code == 200
 
     data = response.json()
-    tool_call = data["tool_calls"][0]
+    msgs = data["messages"]
 
-    # Preview should exist (may be "No preview available" if no summary was generated)
-    assert "result_preview" in tool_call
-    # If there's actual content, it should be truncated to reasonable length
-    assert len(tool_call["result_preview"]) <= 250  # Reasonable limit
+    # Should have: user + ai + 2 tool_calls
+    assert data["total_tool_calls"] == 2
+
+    tool_events = [m for m in msgs if m["type"] == "tool_call"]
+    assert len(tool_events) == 2
+    assert tool_events[0]["tool_name"] == "read_file"
+    assert tool_events[1]["tool_name"] == "write_file"
 
 
 def test_get_history_empty_dialog(client, test_project):
@@ -239,7 +236,6 @@ def test_get_history_empty_dialog(client, test_project):
     assert data["total_reasoning"] == 0
     assert data["total_tool_calls"] == 0
     assert len(data["messages"]) == 0
-    assert len(data["tool_calls"]) == 0
 
 
 if __name__ == "__main__":

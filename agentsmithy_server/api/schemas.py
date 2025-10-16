@@ -60,34 +60,23 @@ class ToolResultResponse(BaseModel):
 
 
 class HistoryMessage(BaseModel):
-    """A single message in dialog history."""
+    """A single event in dialog history (message, reasoning, or tool_call)."""
 
-    type: str  # human, ai, system, tool, reasoning
-    content: str
-    # For AI messages with tool calls
-    tool_calls: list[dict[str, Any]] | None = None
-    # For reasoning messages
+    type: str  # human, ai, reasoning, tool_call
+    content: str | None = None  # For human/ai/reasoning
+    # For reasoning
     model_name: str | None = None
-
-
-class ToolCallInfo(BaseModel):
-    """Information about a tool call execution."""
-
-    tool_call_id: str
-    tool_name: str
-    args: dict[str, Any]
-    result_preview: str  # Short preview of result
-    has_full_result: bool  # Whether full result is stored
-    timestamp: str
-    message_index: int  # Link to message that triggered it
+    # For tool_call
+    tool_name: str | None = None
+    args: dict[str, Any] | None = None
+    result_preview: str | None = None
 
 
 class DialogHistoryResponse(BaseModel):
-    """Complete dialog history with messages (including reasoning inline) and tool calls."""
+    """Complete dialog history as event stream."""
 
     dialog_id: str
-    messages: list[HistoryMessage]  # Includes reasoning as type="reasoning"
-    tool_calls: list[ToolCallInfo]
-    total_messages: int  # Total including reasoning
+    messages: list[HistoryMessage]  # All events in chronological order
+    total_messages: int
     total_reasoning: int
     total_tool_calls: int

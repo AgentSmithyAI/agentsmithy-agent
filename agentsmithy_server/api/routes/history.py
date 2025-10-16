@@ -8,11 +8,9 @@ from agentsmithy_server.api.deps import get_project
 from agentsmithy_server.api.schemas import (
     DialogHistoryResponse,
     HistoryMessage,
-    ToolCallInfo,
 )
 from agentsmithy_server.core.dialog_reasoning_storage import DialogReasoningStorage
 from agentsmithy_server.core.project import Project
-from agentsmithy_server.core.tool_results_storage import ToolResultsStorage
 from agentsmithy_server.utils.logger import api_logger
 
 router = APIRouter()
@@ -21,7 +19,7 @@ router = APIRouter()
 async def _build_history_response(
     project: Project, dialog_id: str
 ) -> DialogHistoryResponse:
-    """Build complete history response from all sources."""
+    """Build complete history response as event stream."""
     # Get messages from history
     base_messages: list[tuple[int, HistoryMessage]] = []
     try:
@@ -29,33 +27,7 @@ async def _build_history_response(
         messages = history.get_messages()
 
         for idx, msg in enumerate(messages):
-            # Extract tool_calls if present
-            tool_calls = None
-            try:
-                if hasattr(msg, "tool_calls") and msg.tool_calls:
-                    tool_calls = [
-                        {
-                            "id": (
-                                tc.get("id")
-                                if isinstance(tc, dict)
-                                else getattr(tc, "id", "")
-                            ),
-                            "name": (
-                                tc.get("name")
-                                if isinstance(tc, dict)
-                                else getattr(tc, "name", "")
-                            ),
-                            "args": (
-                                tc.get("args")
-                                if isinstance(tc, dict)
-                                else getattr(tc, "args", {})
-                            ),
-                        }
-                        for tc in msg.tool_calls
-                    ]
-            except Exception:
-                pass
-
+            # Add regular message
             base_messages.append(
                 (
                     idx,
@@ -66,10 +38,36 @@ async def _build_history_response(
                             if isinstance(msg.content, str)
                             else str(msg.content)
                         ),
-                        tool_calls=tool_calls,
                     ),
                 )
             )
+
+            # Extract tool_calls and add as separate events
+            try:
+                if hasattr(msg, "tool_calls") and msg.tool_calls:
+                    for tc in msg.tool_calls:
+                        tc_name = (
+                            tc.get("name")
+                            if isinstance(tc, dict)
+                            else getattr(tc, "name", "")
+                        )
+                        tc_args = (
+                            tc.get("args")
+                            if isinstance(tc, dict)
+                            else getattr(tc, "args", {})
+                        )
+                        base_messages.append(
+                            (
+                                idx,  # Same position as AI message
+                                HistoryMessage(
+                                    type="tool_call",
+                                    tool_name=tc_name,
+                                    args=tc_args,
+                                ),
+                            )
+                        )
+            except Exception:
+                pass
     except Exception as e:
         api_logger.error(
             "Failed to load messages", exc_info=True, error=str(e), dialog_id=dialog_id
@@ -110,98 +108,42 @@ async def _build_history_response(
     # Extract messages in sorted order (already sorted by message_index)
     messages_data: list[HistoryMessage] = [msg for _, msg in all_messages]
 
-    # Get tool calls
-    tool_calls_data: list[ToolCallInfo] = []
-    try:
-        with ToolResultsStorage(project, dialog_id) as storage:
-            tool_results = await storage.list_results()
-            for tr in tool_results:
-                # Use summary as preview or create from error
-                result_preview = tr.summary or tr.error or "No preview available"
-                if len(result_preview) > 200:
-                    result_preview = result_preview[:200] + "..."
-
-                # Try to link to message index
-                # For now use -1, could be enhanced to track this better
-                message_index = -1
-
-                tool_calls_data.append(
-                    ToolCallInfo(
-                        tool_call_id=tr.tool_call_id,
-                        tool_name=tr.tool_name,
-                        args={},  # Not available in metadata, would need separate query
-                        result_preview=result_preview,
-                        has_full_result=True,
-                        timestamp=tr.timestamp,
-                        message_index=message_index,
-                    )
-                )
-    except Exception as e:
-        api_logger.error(
-            "Failed to load tool calls",
-            exc_info=True,
-            error=str(e),
-            dialog_id=dialog_id,
-        )
+    # Count tool calls from messages
+    tool_calls_count = sum(1 for msg in messages_data if msg.type == "tool_call")
 
     return DialogHistoryResponse(
         dialog_id=dialog_id,
         messages=messages_data,
-        tool_calls=tool_calls_data,
         total_messages=len(messages_data),
         total_reasoning=reasoning_count,
-        total_tool_calls=len(tool_calls_data),
+        total_tool_calls=tool_calls_count,
     )
 
 
-@router.get("/api/dialogs/{dialog_id}/history")
+@router.get("/api/dialogs/{dialog_id}/history", response_model_exclude_none=True)
 async def get_dialog_history(
     dialog_id: str,
     project: Project = Depends(get_project),  # noqa: B008
 ) -> DialogHistoryResponse:
-    """Get complete history for a dialog including messages, reasoning, and tool calls.
+    """Get complete history for a dialog as event stream.
 
     Args:
         dialog_id: Dialog identifier
 
     Returns:
-        Complete dialog history with all associated data
+        Complete dialog history as chronological event stream
 
     Example response:
         {
             "dialog_id": "01J...",
             "messages": [
-                {
-                    "type": "human",
-                    "content": "read file.txt",
-                    "tool_calls": null,
-                    "model_name": null
-                },
-                {
-                    "type": "reasoning",
-                    "content": "I need to read the file first...",
-                    "tool_calls": null,
-                    "model_name": null
-                },
-                {
-                    "type": "ai",
-                    "content": "I'll read the file...",
-                    "tool_calls": [{"id": "call_123", "name": "read_file", "args": {...}}],
-                    "model_name": null
-                }
+                {"type": "human", "content": "read file.txt"},
+                {"type": "reasoning", "content": "I need to read...", "model_name": null},
+                {"type": "ai", "content": "I'll read the file..."},
+                {"type": "tool_call", "tool_name": "read_file", "args": {"path": "file.txt"}},
+                {"type": "ai", "content": "File contains..."}
             ],
-            "tool_calls": [
-                {
-                    "tool_call_id": "call_123",
-                    "tool_name": "read_file",
-                    "args": {},
-                    "result_preview": "file content...",
-                    "has_full_result": true,
-                    "timestamp": "2025-10-15T20:00:02Z",
-                    "message_index": -1
-                }
-            ],
-            "total_messages": 3,
+            "total_messages": 5,
             "total_reasoning": 1,
             "total_tool_calls": 1
         }
@@ -225,7 +167,7 @@ async def get_dialog_history(
         api_logger.info(
             "Dialog history retrieved",
             dialog_id=dialog_id,
-            messages=response.total_messages,
+            total_events=response.total_messages,
             reasoning=response.total_reasoning,
             tool_calls=response.total_tool_calls,
         )
