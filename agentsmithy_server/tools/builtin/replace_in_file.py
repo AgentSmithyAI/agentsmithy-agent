@@ -10,6 +10,7 @@ from typing import Any, Literal, TypedDict
 
 from pydantic import BaseModel, Field
 
+from agentsmithy_server.domain.events import EventType
 from agentsmithy_server.services.versioning import VersioningTracker
 from agentsmithy_server.tools.core.types import ToolError, parse_tool_result
 from agentsmithy_server.tools.registry import register_summary_for
@@ -152,8 +153,6 @@ class ReplaceInFileTool(BaseTool):
                 has_callback=self._sse_callback is not None,
                 diff_len=len(diff_str),
             )
-            from agentsmithy_server.domain.events import EventType
-
             await self.emit_event(
                 {
                     "type": EventType.FILE_EDIT.value,
