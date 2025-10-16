@@ -193,9 +193,16 @@ async def _build_history_response(
     events_data: list[HistoryEvent] = [evt for _, evt in paginated_events]
 
     # Determine pagination metadata
-    first_idx = events_data[0].idx if events_data else 0
-    last_idx = events_data[-1].idx if events_data else 0
-    has_more = first_idx > 0
+    if events_data:
+        first_idx: int = (
+            events_data[0].idx or 0
+        )  # idx is always set above, but need type hint
+        last_idx: int = events_data[-1].idx or 0
+        has_more = first_idx > 0
+    else:
+        first_idx = 0
+        last_idx = 0
+        has_more = False
 
     return DialogHistoryResponse(
         dialog_id=dialog_id,
