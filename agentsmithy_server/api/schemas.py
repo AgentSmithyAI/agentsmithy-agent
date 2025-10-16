@@ -59,24 +59,26 @@ class ToolResultResponse(BaseModel):
     metadata: dict[str, Any] = {}
 
 
-class HistoryMessage(BaseModel):
-    """A single event in dialog history (message, reasoning, or tool_call)."""
+class HistoryEvent(BaseModel):
+    """A single event in dialog history (same as SSE events)."""
 
-    type: str  # human, ai, reasoning, tool_call
-    content: str | None = None  # For human/ai/reasoning
+    type: str  # user, chat, reasoning, tool_call, file_edit
+    # For user/chat/reasoning
+    content: str | None = None
     # For reasoning
     model_name: str | None = None
     # For tool_call
-    tool_name: str | None = None
+    id: str | None = None  # tool_call_id
+    name: str | None = None
     args: dict[str, Any] | None = None
-    result_preview: str | None = None
+    # For file_edit
+    file: str | None = None
+    diff: str | None = None
+    checkpoint: str | None = None
 
 
 class DialogHistoryResponse(BaseModel):
-    """Complete dialog history as event stream."""
+    """Complete dialog history as event stream (SSE replay)."""
 
     dialog_id: str
-    messages: list[HistoryMessage]  # All events in chronological order
-    total_messages: int
-    total_reasoning: int
-    total_tool_calls: int
+    events: list[HistoryEvent]  # Chronological event stream

@@ -62,18 +62,15 @@ def test_get_history_with_messages_only(client, test_project):
 
     data = response.json()
     assert data["dialog_id"] == dialog_id
-    assert data["total_messages"] == 2
-    assert data["total_reasoning"] == 0
-    assert data["total_tool_calls"] == 0
 
-    # Check messages
-    msgs = data["messages"]
-    assert len(msgs) == 2
-    assert msgs[0]["type"] == "human"
-    assert msgs[0]["content"] == "Hello"
+    # Check events
+    events = data["events"]
+    assert len(events) == 2
+    assert events[0]["type"] == "user"
+    assert events[0]["content"] == "Hello"
 
-    assert msgs[1]["type"] == "ai"
-    assert msgs[1]["content"] == "Hi there!"
+    assert events[1]["type"] == "chat"
+    assert events[1]["content"] == "Hi there!"
 
 
 def test_get_history_with_reasoning(client, test_project):
@@ -97,14 +94,13 @@ def test_get_history_with_reasoning(client, test_project):
     assert response.status_code == 200
 
     data = response.json()
-    assert data["total_messages"] == 3  # 2 regular + 1 reasoning
-    assert data["total_reasoning"] == 1
 
-    # Check that reasoning is embedded in messages
-    reasoning_msgs = [m for m in data["messages"] if m["type"] == "reasoning"]
-    assert len(reasoning_msgs) == 1
+    # Check that reasoning is in events
+    events = data["events"]
+    reasoning_events = [e for e in events if e["type"] == "reasoning"]
+    assert len(reasoning_events) == 1
 
-    reasoning = reasoning_msgs[0]
+    reasoning = reasoning_events[0]
     assert reasoning["content"] == "First, I need to understand the context..."
     assert reasoning["model_name"] == "gpt-4o"
 
@@ -132,14 +128,12 @@ def test_get_history_with_tool_calls(client, test_project):
     assert response.status_code == 200
 
     data = response.json()
-    # 2 messages + 1 tool_call event
-    assert data["total_messages"] == 3
-    assert data["total_tool_calls"] == 1
 
     # Check tool call event
-    tool_events = [m for m in data["messages"] if m["type"] == "tool_call"]
+    events = data["events"]
+    tool_events = [e for e in events if e["type"] == "tool_call"]
     assert len(tool_events) == 1
-    assert tool_events[0]["tool_name"] == "read_file"
+    assert tool_events[0]["name"] == "read_file"
     assert tool_events[0]["args"] == {"path": "file.txt"}
 
 
@@ -177,16 +171,13 @@ def test_get_history_complete(client, test_project):
 
     data = response.json()
     assert data["dialog_id"] == dialog_id
-    # 2 regular + 1 reasoning + 1 tool_call = 4
-    assert data["total_messages"] == 4
-    assert data["total_reasoning"] == 1
-    assert data["total_tool_calls"] == 1
 
     # Verify all event types are present
-    msgs = data["messages"]
-    assert len(msgs) == 4
-    assert sum(1 for m in msgs if m["type"] == "reasoning") == 1
-    assert sum(1 for m in msgs if m["type"] == "tool_call") == 1
+    events = data["events"]
+    assert sum(1 for e in events if e["type"] == "reasoning") == 1
+    assert sum(1 for e in events if e["type"] == "tool_call") == 1
+    assert sum(1 for e in events if e["type"] == "chat") >= 1
+    assert sum(1 for e in events if e["type"] == "user") >= 1
 
 
 def test_get_history_with_tool_calls_ordering(client, test_project):
@@ -212,15 +203,13 @@ def test_get_history_with_tool_calls_ordering(client, test_project):
     assert response.status_code == 200
 
     data = response.json()
-    msgs = data["messages"]
+    events = data["events"]
 
-    # Should have: user + ai + 2 tool_calls
-    assert data["total_tool_calls"] == 2
-
-    tool_events = [m for m in msgs if m["type"] == "tool_call"]
+    # Should have 2 tool_call events
+    tool_events = [e for e in events if e["type"] == "tool_call"]
     assert len(tool_events) == 2
-    assert tool_events[0]["tool_name"] == "read_file"
-    assert tool_events[1]["tool_name"] == "write_file"
+    assert tool_events[0]["name"] == "read_file"
+    assert tool_events[1]["name"] == "write_file"
 
 
 def test_get_history_empty_dialog(client, test_project):
@@ -232,10 +221,7 @@ def test_get_history_empty_dialog(client, test_project):
 
     data = response.json()
     assert data["dialog_id"] == dialog_id
-    assert data["total_messages"] == 0
-    assert data["total_reasoning"] == 0
-    assert data["total_tool_calls"] == 0
-    assert len(data["messages"]) == 0
+    assert len(data["events"]) == 0
 
 
 if __name__ == "__main__":

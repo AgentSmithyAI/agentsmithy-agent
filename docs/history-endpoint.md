@@ -6,7 +6,7 @@
 GET /api/dialogs/{dialog_id}/history
 ```
 
-Returns complete dialog history as chronological event stream (similar to SSE protocol).
+Returns complete dialog history as SSE event stream (same format as `POST /api/chat` streaming).
 
 ### Parameters
 
@@ -17,56 +17,64 @@ Returns complete dialog history as chronological event stream (similar to SSE pr
 ```json
 {
   "dialog_id": "01J...",
-  "messages": [...],
-  "total_messages": 5,
-  "total_reasoning": 2,
-  "total_tool_calls": 1
+  "events": [...]
 }
 ```
 
-## Schema
+## Event Types
 
-### HistoryMessage (Event)
+Same as SSE protocol. See `docs/sse-protocol.md` for details.
 
-Messages is an array of events in chronological order. Each event has different fields based on `type`:
+### user
 
-**Human/AI message:**
+User message:
 ```json
-{
-  "type": "human" | "ai",
-  "content": "..."
-}
+{"type": "user", "content": "read file.txt"}
 ```
 
-**Reasoning:**
+### chat
+
+Assistant message:
+```json
+{"type": "chat", "content": "I'll read the file..."}
+```
+
+### reasoning
+
+Model thinking:
 ```json
 {
   "type": "reasoning",
-  "content": "**Providing installation instructions**\n\nI'm thinking about setup steps. First, `pip install -r requirements.txt`...",
-  "model_name": "gpt-4o"  // May be absent if null
+  "content": "**Analyzing request**\n\nI need to read the file first. Then analyze its contents...",
+  "model_name": "gpt-4o"
 }
 ```
 
-**Tool call:**
+Note: `model_name` may be absent if not captured.
+
+### tool_call
+
+Tool invocation:
 ```json
 {
   "type": "tool_call",
-  "tool_name": "read_file",
+  "id": "call_abc123",
+  "name": "read_file",
   "args": {"path": "file.txt"}
 }
 ```
 
-### Fields by Type
+### file_edit
 
-| Field | human/ai | reasoning | tool_call |
-|-------|----------|-----------|-----------|
-| `type` | ✓ | ✓ | ✓ |
-| `content` | ✓ | ✓ | - |
-| `model_name` | - | ✓ (optional) | - |
-| `tool_name` | - | - | ✓ |
-| `args` | - | - | ✓ |
-
-**Note:** Fields that are `null` are excluded from JSON response.
+File modification:
+```json
+{
+  "type": "file_edit",
+  "file": "/path/to/file.py",
+  "diff": "--- a/...\n+++ b/...",
+  "checkpoint": "abc123"
+}
+```
 
 ## Response Examples
 
@@ -75,13 +83,10 @@ Messages is an array of events in chronological order. Each event has different 
 ```json
 {
   "dialog_id": "abc",
-  "messages": [
-    {"type": "human", "content": "Hello"},
-    {"type": "ai", "content": "Hi!"}
-  ],
-  "total_messages": 2,
-  "total_reasoning": 0,
-  "total_tool_calls": 0
+  "events": [
+    {"type": "user", "content": "Hello"},
+    {"type": "chat", "content": "Hi!"}
+  ]
 }
 ```
 
@@ -90,50 +95,38 @@ Messages is an array of events in chronological order. Each event has different 
 ```json
 {
   "dialog_id": "abc",
-  "messages": [
-    {"type": "human", "content": "Analyze code"},
-    {"type": "reasoning", "content": "First, I need to understand...", "model_name": "gpt-4o"},
-    {"type": "ai", "content": "I'll analyze..."}
-  ],
-  "total_messages": 3,
-  "total_reasoning": 1,
-  "total_tool_calls": 0
+  "events": [
+    {"type": "user", "content": "Analyze code"},
+    {"type": "reasoning", "content": "First, understand architecture..."},
+    {"type": "chat", "content": "I'll analyze..."}
+  ]
 }
 ```
 
-### Complete (with tool calls)
+### With Tool Calls
 
 ```json
 {
   "dialog_id": "abc",
-  "messages": [
-    {"type": "human", "content": "Read file.py"},
-    {"type": "reasoning", "content": "I should read the file first..."},
-    {"type": "ai", "content": "I'll read it"},
-    {"type": "tool_call", "tool_name": "read_file", "args": {"path": "file.py"}},
-    {"type": "ai", "content": "File contains..."}
-  ],
-  "total_messages": 5,
-  "total_reasoning": 1,
-  "total_tool_calls": 1
+  "events": [
+    {"type": "user", "content": "Read file.py"},
+    {"type": "reasoning", "content": "I should read it first..."},
+    {"type": "chat", "content": "I'll read it"},
+    {"type": "tool_call", "id": "call_1", "name": "read_file", "args": {"path": "file.py"}},
+    {"type": "chat", "content": "File contains..."}
+  ]
 }
 ```
 
 ## Event Ordering
 
-Events are ordered chronologically:
-1. **Reasoning** appears before related AI message
-2. **Tool calls** appear after AI message that triggered them
-3. **AI responses** appear after tool execution
+Events are returned in chronological order (same as they appeared in SSE stream):
 
-Example flow:
-```
-[0] human: "do task"
-[1] reasoning: "I need to..."
-[2] ai: "I'll do it"
-[3] tool_call: read_file(...)
-[4] ai: "Task done"
-```
+1. User message (`type: "user"`)
+2. Reasoning (`type: "reasoning"`) - if model had thinking
+3. Assistant response (`type: "chat"`)
+4. Tool calls (`type: "tool_call"`) - if any
+5. Next assistant response after tool execution
 
 ## Errors
 
@@ -150,12 +143,12 @@ Example flow:
 ## Usage
 
 ```bash
-curl http://localhost:8000/api/dialogs/{dialog_id}/history | jq
+curl http://localhost:8000/api/dialogs/{dialog_id}/history | jq '.events'
 ```
 
 ## Notes
 
-- Events ordered chronologically (no need for index field)
-- Reasoning `content` may be long (100-500+ words) with markdown/newlines
-- Tool call args are included (unlike SSE where they're in separate events)
-- No separate `tool_calls` array - everything is in `messages` stream
+- Events match SSE protocol format (see `docs/sse-protocol.md`)
+- Null fields are excluded from JSON
+- Tool results (`ToolMessage` in LangChain) are not included - only tool invocations
+- Use this to replay/render chat UI the same way as during streaming
