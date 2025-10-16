@@ -152,7 +152,7 @@ class ReplaceInFileTool(BaseTool):
                 has_callback=self._sse_callback is not None,
                 diff_len=len(diff_str),
             )
-            from agentsmithy_server.core.events import EventType
+            from agentsmithy_server.domain.events import EventType
 
             await self.emit_event(
                 {

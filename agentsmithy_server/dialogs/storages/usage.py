@@ -8,9 +8,9 @@ from typing import TYPE_CHECKING
 from sqlalchemy import select
 from sqlalchemy.engine import Engine
 
-from agentsmithy_server.core.dialog_history import DialogHistory
 from agentsmithy_server.db import BaseORM, DialogUsageEventORM
 from agentsmithy_server.db.base import get_engine, get_session
+from agentsmithy_server.dialogs.history import DialogHistory
 from agentsmithy_server.utils.logger import agent_logger
 
 if TYPE_CHECKING:

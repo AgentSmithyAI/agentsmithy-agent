@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any, Literal, TypedDict
 
 from pydantic import BaseModel, Field
 
-from agentsmithy_server.core.tool_results_storage import ToolResultsStorage
+from agentsmithy_server.storage.tool_results import ToolResultsStorage
 from agentsmithy_server.tools.core import result as result_factory
 from agentsmithy_server.tools.core.types import ToolError, parse_tool_result
 from agentsmithy_server.tools.registry import register_summary_for

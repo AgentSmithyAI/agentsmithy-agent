@@ -143,8 +143,8 @@ if __name__ == "__main__":
             from agentsmithy_server.agents.project_inspector_agent import (
                 ProjectInspectorAgent,
             )
-            from agentsmithy_server.core import OpenAIProvider
             from agentsmithy_server.core.project import get_current_project
+            from agentsmithy_server.llm.providers.openai.provider import OpenAIProvider
 
             project = get_current_project()
             project.root.mkdir(parents=True, exist_ok=True)

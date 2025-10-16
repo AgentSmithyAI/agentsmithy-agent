@@ -9,10 +9,10 @@ from agentsmithy_server.api.schemas import (
     DialogHistoryResponse,
     HistoryEvent,
 )
-from agentsmithy_server.core.dialog_file_edit_storage import DialogFileEditStorage
-from agentsmithy_server.core.dialog_reasoning_storage import DialogReasoningStorage
-from agentsmithy_server.core.events import EventType, MessageType
 from agentsmithy_server.core.project import Project
+from agentsmithy_server.dialogs.storages.file_edits import DialogFileEditStorage
+from agentsmithy_server.dialogs.storages.reasoning import DialogReasoningStorage
+from agentsmithy_server.domain.events import EventType, MessageType
 from agentsmithy_server.utils.logger import api_logger
 
 router = APIRouter()

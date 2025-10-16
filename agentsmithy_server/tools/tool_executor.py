@@ -7,10 +7,10 @@ from typing import TYPE_CHECKING, Any
 
 from langchain_core.messages import BaseMessage, ToolMessage
 
-from agentsmithy_server.core.dialog_usage_storage import DialogUsageStorage
-from agentsmithy_server.core.events import EventType
-from agentsmithy_server.core.llm_provider import LLMProvider
-from agentsmithy_server.core.tool_results_storage import ToolResultsStorage
+from agentsmithy_server.dialogs.storages.usage import DialogUsageStorage
+from agentsmithy_server.domain.events import EventType
+from agentsmithy_server.llm.provider import LLMProvider
+from agentsmithy_server.storage.tool_results import ToolResultsStorage
 from agentsmithy_server.utils.logger import agent_logger
 
 from .integration.langchain_adapter import as_langchain_tools

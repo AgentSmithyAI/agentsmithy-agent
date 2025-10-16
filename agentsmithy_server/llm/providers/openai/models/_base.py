@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from agentsmithy_server.core.providers.model_spec import IModelSpec
-from agentsmithy_server.core.providers.types import Vendor
+from agentsmithy_server.llm.providers.model_spec import IModelSpec
+from agentsmithy_server.llm.providers.types import Vendor
 
 
 class OpenAIModelSpec(IModelSpec):

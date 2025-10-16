@@ -8,7 +8,7 @@ from typing import Any, Literal, TypedDict
 
 from pydantic import BaseModel, Field
 
-from agentsmithy_server.core.events import EventType
+from agentsmithy_server.domain.events import EventType
 from agentsmithy_server.services.versioning import VersioningTracker
 from agentsmithy_server.tools.core.types import ToolError, parse_tool_result
 from agentsmithy_server.tools.registry import register_summary_for

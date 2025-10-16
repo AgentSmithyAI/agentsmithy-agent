@@ -10,7 +10,7 @@ from langchain_core.messages import (
     ToolMessage,
 )
 
-from agentsmithy_server.core import LLMProvider
+from agentsmithy_server.llm.provider import LLMProvider
 from agentsmithy_server.rag import ContextBuilder
 from agentsmithy_server.utils.logger import agent_logger
 
@@ -142,7 +142,7 @@ class BaseAgent(ABC):
         # Check if project is a Project object (not a dict from context formatting)
         if project and dialog_id and hasattr(project, "dialogs_dir"):
             # Ensure dialog DB path and directories exist (side-effect) without creating unused ToolResultsStorage
-            from agentsmithy_server.core.dialog_history import DialogHistory
+            from agentsmithy_server.dialogs.history import DialogHistory
 
             _ = DialogHistory(project, dialog_id).db_path
 

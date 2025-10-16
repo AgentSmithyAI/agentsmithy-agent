@@ -4,8 +4,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from agentsmithy_server.api.app import create_app
-from agentsmithy_server.core.dialog_reasoning_storage import DialogReasoningStorage
 from agentsmithy_server.core.project import Project
+from agentsmithy_server.dialogs.storages.reasoning import DialogReasoningStorage
 
 
 @pytest.fixture

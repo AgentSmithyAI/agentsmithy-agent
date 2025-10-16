@@ -8,10 +8,10 @@ from langgraph.graph import END, StateGraph
 from langgraph.graph.message import add_messages
 
 from agentsmithy_server.agents.universal_agent import UniversalAgent
-from agentsmithy_server.core import OpenAIProvider
-from agentsmithy_server.core.context_compactor import maybe_compact_dialog
-from agentsmithy_server.core.dialog_summary_storage import DialogSummaryStorage
-from agentsmithy_server.core.summarization.strategy import KEEP_LAST_MESSAGES
+from agentsmithy_server.dialogs.storages.summaries import DialogSummaryStorage
+from agentsmithy_server.dialogs.summarization.strategy import KEEP_LAST_MESSAGES
+from agentsmithy_server.llm.context_compactor import maybe_compact_dialog
+from agentsmithy_server.llm.providers.openai.provider import OpenAIProvider
 from agentsmithy_server.rag import ContextBuilder
 from agentsmithy_server.utils.logger import agent_logger
 

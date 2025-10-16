@@ -11,12 +11,12 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from agentsmithy_server.api.sse_protocol import EventFactory as SSEEventFactory
-from agentsmithy_server.core.agent_graph import AgentOrchestrator
-from agentsmithy_server.core.dialog_file_edit_storage import DialogFileEditStorage
-from agentsmithy_server.core.dialog_reasoning_storage import DialogReasoningStorage
-from agentsmithy_server.core.dialog_summary_storage import DialogSummaryStorage
-from agentsmithy_server.core.events import EventType
-from agentsmithy_server.core.summarization.strategy import KEEP_LAST_MESSAGES
+from agentsmithy_server.dialogs.storages.file_edits import DialogFileEditStorage
+from agentsmithy_server.dialogs.storages.reasoning import DialogReasoningStorage
+from agentsmithy_server.dialogs.storages.summaries import DialogSummaryStorage
+from agentsmithy_server.dialogs.summarization.strategy import KEEP_LAST_MESSAGES
+from agentsmithy_server.domain.events import EventType
+from agentsmithy_server.llm.orchestration.agent_graph import AgentOrchestrator
 from agentsmithy_server.utils.logger import api_logger, stream_log
 
 
