@@ -1,3 +1,10 @@
+# [1.4.0](https://github.com/AgentSmithyAI/agentsmithy-agent/compare/v1.3.0...v1.4.0) (2025-10-16)
+
+
+### Features
+
+* History endpoint ([#26](https://github.com/AgentSmithyAI/agentsmithy-agent/issues/26)) ([19296f2](https://github.com/AgentSmithyAI/agentsmithy-agent/commit/19296f2880d9b83caafe6643311d18280b484472))
+
 # [1.3.0](https://github.com/AgentSmithyAI/agentsmithy-agent/compare/v1.2.1...v1.3.0) (2025-10-06)
 
 
