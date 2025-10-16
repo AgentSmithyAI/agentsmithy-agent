@@ -193,10 +193,8 @@ class ChatService:
             elif chunk["type"] == "chat_start":
                 yield SSEEventFactory.chat_start(dialog_id=dialog_id).to_sse()
             elif chunk["type"] == "chat_end":
-                # Incrementally save buffer after each LLM response chunk to minimize data loss on disconnect
-                self._flush_assistant_buffer(
-                    project_dialog, dialog_id, assistant_buffer, clear_buffer=True
-                )
+                # Don't flush here - tool_executor will save complete message with tool_calls
+                # If no tool_calls, will be saved by final flush at end of stream
                 yield SSEEventFactory.chat_end(dialog_id=dialog_id).to_sse()
             elif chunk["type"] == "reasoning_start":
                 yield SSEEventFactory.reasoning_start(dialog_id=dialog_id).to_sse()
