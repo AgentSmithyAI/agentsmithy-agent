@@ -62,15 +62,21 @@ def test_get_history_with_messages_only(client, test_project):
 
     data = response.json()
     assert data["dialog_id"] == dialog_id
+    assert data["total_events"] == 2
+    assert data["has_more"] is False
+    assert data["first_idx"] == 0
+    assert data["last_idx"] == 1
 
     # Check events
     events = data["events"]
     assert len(events) == 2
     assert events[0]["type"] == "user"
     assert events[0]["content"] == "Hello"
+    assert events[0]["idx"] == 0
 
     assert events[1]["type"] == "chat"
     assert events[1]["content"] == "Hi there!"
+    assert events[1]["idx"] == 1
 
 
 def test_get_history_with_reasoning(client, test_project):
@@ -222,6 +228,126 @@ def test_get_history_empty_dialog(client, test_project):
     data = response.json()
     assert data["dialog_id"] == dialog_id
     assert len(data["events"]) == 0
+    assert data["total_events"] == 0
+    assert data["has_more"] is False
+
+
+def test_get_history_pagination_default(client, test_project):
+    """Test default pagination - returns last 20 events."""
+    dialog_id = test_project.create_dialog(title="test", set_current=True)
+    history = test_project.get_dialog_history(dialog_id)
+
+    # Add 30 messages (15 pairs of user/AI)
+    for i in range(15):
+        history.add_user_message(f"User message {i}")
+        history.add_ai_message(f"AI response {i}")
+
+    # Get history without pagination params (should return last 20)
+    response = client.get(f"/api/dialogs/{dialog_id}/history")
+    assert response.status_code == 200
+
+    data = response.json()
+    assert data["total_events"] == 30
+    assert len(data["events"]) == 20
+    assert data["has_more"] is True  # There are 10 more events before
+    assert data["first_idx"] == 10  # Starting from index 10
+    assert data["last_idx"] == 29  # Ending at index 29
+
+    # Check that we got the last 20 events in chronological order
+    events = data["events"]
+    assert events[0]["idx"] == 10
+    assert events[-1]["idx"] == 29
+
+
+def test_get_history_pagination_custom_limit(client, test_project):
+    """Test custom limit."""
+    dialog_id = test_project.create_dialog(title="test", set_current=True)
+    history = test_project.get_dialog_history(dialog_id)
+
+    # Add 50 messages
+    for i in range(50):
+        history.add_user_message(f"Message {i}")
+
+    # Get last 10 events
+    response = client.get(f"/api/dialogs/{dialog_id}/history?limit=10")
+    assert response.status_code == 200
+
+    data = response.json()
+    assert data["total_events"] == 50
+    assert len(data["events"]) == 10
+    assert data["has_more"] is True
+    assert data["first_idx"] == 40
+    assert data["last_idx"] == 49
+
+
+def test_get_history_pagination_with_before_cursor(client, test_project):
+    """Test cursor-based pagination with before (scrolling up)."""
+    dialog_id = test_project.create_dialog(title="test", set_current=True)
+    history = test_project.get_dialog_history(dialog_id)
+
+    # Add 50 messages
+    for i in range(50):
+        history.add_user_message(f"Message {i}")
+
+    # First request: get last 20 (indices 30-49)
+    response = client.get(f"/api/dialogs/{dialog_id}/history?limit=20")
+    data = response.json()
+    assert data["first_idx"] == 30
+    assert data["last_idx"] == 49
+
+    # Second request: get 20 events before cursor (indices 10-29)
+    cursor = data["first_idx"]
+    response = client.get(f"/api/dialogs/{dialog_id}/history?limit=20&before={cursor}")
+    assert response.status_code == 200
+
+    data = response.json()
+    assert data["total_events"] == 50
+    assert len(data["events"]) == 20
+    assert data["has_more"] is True
+    assert data["first_idx"] == 10
+    assert data["last_idx"] == 29
+
+    # Third request: get remaining events (indices 0-9)
+    cursor = data["first_idx"]
+    response = client.get(f"/api/dialogs/{dialog_id}/history?limit=20&before={cursor}")
+    assert response.status_code == 200
+
+    data = response.json()
+    assert data["total_events"] == 50
+    assert len(data["events"]) == 10  # Only 10 left
+    assert data["has_more"] is False  # No more events before
+    assert data["first_idx"] == 0
+    assert data["last_idx"] == 9
+
+
+def test_get_history_pagination_chronological_order(client, test_project):
+    """Test that paginated events are always in chronological order."""
+    dialog_id = test_project.create_dialog(title="test", set_current=True)
+    history = test_project.get_dialog_history(dialog_id)
+
+    # Add 30 messages
+    for i in range(30):
+        history.add_user_message(f"Message {i}")
+
+    # Get last 10
+    response = client.get(f"/api/dialogs/{dialog_id}/history?limit=10")
+    data = response.json()
+    events = data["events"]
+
+    # Check chronological order
+    for i in range(len(events) - 1):
+        assert events[i]["idx"] < events[i + 1]["idx"]
+
+    # Get previous 10
+    response = client.get(
+        f"/api/dialogs/{dialog_id}/history?limit=10&before={data['first_idx']}"
+    )
+    data = response.json()
+    events = data["events"]
+
+    # Check chronological order again
+    for i in range(len(events) - 1):
+        assert events[i]["idx"] < events[i + 1]["idx"]
 
 
 if __name__ == "__main__":

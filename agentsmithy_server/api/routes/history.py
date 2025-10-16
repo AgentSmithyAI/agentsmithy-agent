@@ -19,9 +19,17 @@ router = APIRouter()
 
 
 async def _build_history_response(
-    project: Project, dialog_id: str
+    project: Project, dialog_id: str, limit: int = 20, before: int | None = None
 ) -> DialogHistoryResponse:
-    """Build complete history response as SSE event stream."""
+    """Build complete history response as SSE event stream with cursor-based pagination.
+
+    Args:
+        project: Project instance
+        dialog_id: Dialog identifier
+        limit: Maximum number of events to return (default: 20)
+        before: Return events before this cursor/index (exclusive).
+                If None, return last `limit` events.
+    """
     # Get messages from history and convert to SSE events
     base_events: list[tuple[int, HistoryEvent]] = []
     try:
@@ -163,41 +171,91 @@ async def _build_history_response(
         key=lambda x: (x[0], 0 if x[1].type == EventType.REASONING.value else 1)
     )
 
-    # Extract events in sorted order
-    events_data: list[HistoryEvent] = [evt for _, evt in all_events]
+    # Assign global indices to all events in chronological order
+    for idx, (_, evt) in enumerate(all_events):
+        evt.idx = idx
+
+    # Total count of events
+    total_count = len(all_events)
+
+    # Apply cursor-based pagination
+    if before is not None:
+        # Get `limit` events before cursor
+        end_pos = before
+        start_pos = max(0, end_pos - limit)
+        paginated_events = all_events[start_pos:end_pos]
+    else:
+        # Get last `limit` events (default behavior)
+        start_pos = max(0, total_count - limit)
+        paginated_events = all_events[start_pos:]
+
+    # Extract events in sorted order (already chronological)
+    events_data: list[HistoryEvent] = [evt for _, evt in paginated_events]
+
+    # Determine pagination metadata
+    first_idx = events_data[0].idx if events_data else 0
+    last_idx = events_data[-1].idx if events_data else 0
+    has_more = first_idx > 0
 
     return DialogHistoryResponse(
         dialog_id=dialog_id,
         events=events_data,
+        total_events=total_count,
+        has_more=has_more,
+        first_idx=first_idx,
+        last_idx=last_idx,
     )
 
 
 @router.get("/api/dialogs/{dialog_id}/history", response_model_exclude_none=True)
 async def get_dialog_history(
     dialog_id: str,
+    limit: int = 20,
+    before: int | None = None,
     project: Project = Depends(get_project),  # noqa: B008
 ) -> DialogHistoryResponse:
-    """Get complete history for a dialog as SSE event stream.
+    """Get dialog history with cursor-based pagination.
+
+    By default returns the last 20 events in chronological order.
+    Use `before` cursor to load previous pages (e.g., when scrolling up).
 
     Args:
         dialog_id: Dialog identifier
+        limit: Maximum number of events to return (default: 20)
+        before: Cursor - return events before this index (for pagination when scrolling up)
 
     Returns:
-        Dialog history as SSE events (same format as streaming)
+        Dialog history as SSE events (same format as streaming) with pagination metadata
+
+    Example usage:
+        # Get last 20 events
+        GET /api/dialogs/{dialog_id}/history?limit=20
+
+        # Get 20 events before index 80 (scroll up)
+        GET /api/dialogs/{dialog_id}/history?limit=20&before=80
 
     Example response:
         {
             "dialog_id": "01J...",
             "events": [
-                {"type": "user", "content": "read file.txt"},
-                {"type": "reasoning", "content": "I need to read..."},
-                {"type": "chat", "content": "I'll read the file..."},
-                {"type": "tool_call", "name": "read_file", "args": {"path": "file.txt"}},
-                {"type": "chat", "content": "File contains..."}
-            ]
+                {"type": "user", "content": "read file.txt", "idx": 0},
+                {"type": "reasoning", "content": "I need to read...", "idx": 1},
+                {"type": "chat", "content": "I'll read the file...", "idx": 2},
+                {"type": "tool_call", "name": "read_file", "args": {"path": "file.txt"}, "idx": 3},
+                {"type": "chat", "content": "File contains...", "idx": 4}
+            ],
+            "total_events": 100,
+            "has_more": true,
+            "first_idx": 80,
+            "last_idx": 99
         }
     """
-    api_logger.info("Fetching dialog history", dialog_id=dialog_id)
+    api_logger.info(
+        "Fetching dialog history",
+        dialog_id=dialog_id,
+        limit=limit,
+        before=before,
+    )
 
     # Check if dialog exists
     try:
@@ -212,11 +270,13 @@ async def get_dialog_history(
         raise HTTPException(status_code=500, detail=str(e)) from e
 
     try:
-        response = await _build_history_response(project, dialog_id)
+        response = await _build_history_response(project, dialog_id, limit, before)
         api_logger.info(
             "Dialog history retrieved",
             dialog_id=dialog_id,
-            total_events=len(response.events),
+            total_events=response.total_events,
+            returned_events=len(response.events),
+            has_more=response.has_more,
         )
         return response
     except Exception as e:
