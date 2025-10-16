@@ -7,9 +7,10 @@ from typing import TYPE_CHECKING, Any
 
 from langchain_core.messages import BaseMessage, ToolMessage
 
-from agentsmithy_server.core.dialog_usage_storage import DialogUsageStorage
-from agentsmithy_server.core.llm_provider import LLMProvider
-from agentsmithy_server.core.tool_results_storage import ToolResultsStorage
+from agentsmithy_server.dialogs.storages.usage import DialogUsageStorage
+from agentsmithy_server.domain.events import EventType
+from agentsmithy_server.llm.provider import LLMProvider
+from agentsmithy_server.storage.tool_results import ToolResultsStorage
 from agentsmithy_server.utils.logger import agent_logger
 
 from .integration.langchain_adapter import as_langchain_tools
@@ -512,8 +513,11 @@ class ToolExecutor:
                     if reasoning_text:
                         if not reasoning_started:
                             reasoning_started = True
-                            yield {"type": "reasoning_start"}
-                        yield {"type": "reasoning", "content": reasoning_text}
+                            yield {"type": EventType.REASONING_START.value}
+                        yield {
+                            "type": EventType.REASONING.value,
+                            "content": reasoning_text,
+                        }
                 except Exception:
                     pass
 
@@ -526,7 +530,7 @@ class ToolExecutor:
                             chat_started = True
                             yield {"type": "chat_start"}
                         accumulated_content += content
-                        yield {"type": "chat", "content": content}
+                        yield {"type": EventType.CHAT.value, "content": content}
                     elif isinstance(content, list):
                         # LangChain may return content as list of dicts for newer models
                         text_parts = []
@@ -541,7 +545,7 @@ class ToolExecutor:
                                 yield {"type": "chat_start"}
                             text = "".join(text_parts)
                             accumulated_content += text
-                            yield {"type": "chat", "content": text}
+                            yield {"type": EventType.CHAT.value, "content": text}
 
                 # Handle tool call chunks
                 tool_call_chunks = getattr(chunk, "tool_call_chunks", [])
@@ -580,9 +584,9 @@ class ToolExecutor:
 
             # Close boundary markers at the end of this streaming chunk
             if reasoning_started:
-                yield {"type": "reasoning_end"}
+                yield {"type": EventType.REASONING_END.value}
             if chat_started and accumulated_content:
-                yield {"type": "chat_end"}
+                yield {"type": EventType.CHAT_END.value}
 
             # Add the last tool call if exists
             if (
@@ -687,7 +691,11 @@ class ToolExecutor:
                         continue
 
                     # Emit tool_call as a structured chunk
-                    yield {"type": "tool_call", "name": name, "args": args}
+                    yield {
+                        "type": EventType.TOOL_CALL.value,
+                        "name": name,
+                        "args": args,
+                    }
 
                     # Execute tool
                     result = await self.tool_manager.run_tool(name, **args)
@@ -705,7 +713,7 @@ class ToolExecutor:
                         if file_path:
                             # Yield file_edit directly in the chunk stream for immediate delivery
                             yield {
-                                "type": "file_edit",
+                                "type": EventType.FILE_EDIT.value,
                                 "file": file_path,
                                 "diff": diff,
                                 "checkpoint": checkpoint,

@@ -57,3 +57,33 @@ class ToolResultResponse(BaseModel):
     result: dict[str, Any]
     timestamp: str
     metadata: dict[str, Any] = {}
+
+
+class HistoryEvent(BaseModel):
+    """A single event in dialog history (same as SSE events)."""
+
+    type: str  # user, chat, reasoning, tool_call, file_edit
+    idx: int | None = None  # Event index in the full history
+    # For user/chat/reasoning
+    content: str | None = None
+    # For reasoning
+    model_name: str | None = None
+    # For tool_call
+    id: str | None = None  # tool_call_id
+    name: str | None = None
+    args: dict[str, Any] | None = None
+    # For file_edit
+    file: str | None = None
+    diff: str | None = None
+    checkpoint: str | None = None
+
+
+class DialogHistoryResponse(BaseModel):
+    """Complete dialog history as event stream (SSE replay)."""
+
+    dialog_id: str
+    events: list[HistoryEvent]  # Chronological event stream
+    total_events: int  # Total number of events in the full history
+    has_more: bool  # Whether there are more events before the returned ones
+    first_idx: int  # Index of the first event in the returned list
+    last_idx: int  # Index of the last event in the returned list

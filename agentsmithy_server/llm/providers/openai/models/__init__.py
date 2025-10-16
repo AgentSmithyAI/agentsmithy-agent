@@ -4,7 +4,7 @@ import importlib
 import pkgutil
 from collections.abc import Callable
 
-from agentsmithy_server.core.providers.model_spec import IModelSpec
+from agentsmithy_server.llm.providers.model_spec import IModelSpec
 
 from ._base import OpenAIModelSpec  # re-export for typing
 

@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from agentsmithy_server.core.dialog_history import DialogHistory
+from agentsmithy_server.dialogs.history import DialogHistory
 from agentsmithy_server.utils.logger import get_logger
 
 logger = get_logger("project")

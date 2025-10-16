@@ -5,8 +5,8 @@ from typing import Any
 
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 
-from agentsmithy_server.core.dialog_usage_storage import DialogUsageStorage
-from agentsmithy_server.core.summarization.strategy import TokenStrategy
+from agentsmithy_server.dialogs.storages.usage import DialogUsageStorage
+from agentsmithy_server.dialogs.summarization.strategy import TokenStrategy
 from agentsmithy_server.utils.logger import agent_logger
 
 # Fixed policies kept in code for simplicity

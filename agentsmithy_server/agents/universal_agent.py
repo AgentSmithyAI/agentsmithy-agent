@@ -7,7 +7,7 @@ from typing import Any
 from langchain_core.messages import BaseMessage
 
 from agentsmithy_server.agents.base_agent import BaseAgent
-from agentsmithy_server.core.dialog_usage_storage import DialogUsageStorage
+from agentsmithy_server.dialogs.storages.usage import DialogUsageStorage
 from agentsmithy_server.prompts import UNIVERSAL_SYSTEM
 from agentsmithy_server.tools import ToolExecutor
 from agentsmithy_server.tools.build_registry import build_registry

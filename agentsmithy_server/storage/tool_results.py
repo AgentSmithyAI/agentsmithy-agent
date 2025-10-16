@@ -17,9 +17,9 @@ from typing import TYPE_CHECKING, Any
 from sqlalchemy import select
 from sqlalchemy.engine import Engine
 
-from agentsmithy_server.core.dialog_history import DialogHistory
 from agentsmithy_server.db import BaseORM, ToolResultORM
 from agentsmithy_server.db.base import get_engine, get_session
+from agentsmithy_server.dialogs.history import DialogHistory
 
 # Use central registry for tool summary generators so tools can register
 # summaries without importing core storage. The registry supports plain

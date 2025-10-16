@@ -12,7 +12,19 @@ from enum import Enum
 from typing import Any, Literal
 
 
+class MessageType(str, Enum):
+    """LangChain message types."""
+
+    HUMAN = "human"
+    AI = "ai"
+    TOOL = "tool"
+    SYSTEM = "system"
+
+
 class EventType(str, Enum):
+    """SSE event types for streaming protocol."""
+
+    USER = "user"
     CHAT = "chat"
     REASONING = "reasoning"
     CHAT_START = "chat_start"

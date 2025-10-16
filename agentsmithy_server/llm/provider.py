@@ -36,7 +36,7 @@ class OpenAIProvider(LLMProvider):
     """
 
     def __init__(self, *args, **kwargs):  # pragma: no cover - thin wrapper
-        from agentsmithy_server.core.providers.openai.provider import (
+        from agentsmithy_server.llm.providers.openai.provider import (
             OpenAIProvider as _P,
         )
 

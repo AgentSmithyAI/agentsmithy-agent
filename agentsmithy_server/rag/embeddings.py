@@ -3,7 +3,7 @@
 from langchain_core.embeddings import Embeddings
 
 from agentsmithy_server.config import settings
-from agentsmithy_server.core.providers.openai.provider_embeddings import (
+from agentsmithy_server.llm.providers.openai.provider_embeddings import (
     OpenAIEmbeddingsProvider,
 )
 
@@ -19,7 +19,7 @@ except Exception:
     # If the plugin isn't present, runtime will fail on usage; this keeps dev envs lenient.
     pass
 
-from agentsmithy_server.core.providers.types import Vendor
+from agentsmithy_server.llm.providers.types import Vendor
 
 
 class EmbeddingsManager:

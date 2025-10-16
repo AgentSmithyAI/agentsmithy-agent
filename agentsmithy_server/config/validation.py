@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from collections.abc import Iterable
 
-from agentsmithy_server.core.providers.openai.models import (
+from agentsmithy_server.llm.providers.openai.models import (
     SUPPORTED_OPENAI_CHAT_MODELS,
     SUPPORTED_OPENAI_EMBEDDING_MODELS,
 )

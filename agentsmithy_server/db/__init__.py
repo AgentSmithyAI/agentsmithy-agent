@@ -3,6 +3,8 @@
 from .base import get_engine, get_session
 from .models import (
     BaseORM,
+    DialogFileEditORM,
+    DialogReasoningORM,
     DialogSummaryORM,
     DialogUsageEventORM,
     ToolResultORM,
@@ -15,4 +17,6 @@ __all__ = [
     "ToolResultORM",
     "DialogSummaryORM",
     "DialogUsageEventORM",
+    "DialogReasoningORM",
+    "DialogFileEditORM",
 ]

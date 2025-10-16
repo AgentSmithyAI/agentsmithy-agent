@@ -14,9 +14,10 @@ from langchain_core.messages import BaseMessage
 from langchain_core.tools import BaseTool
 
 from agentsmithy_server.config import settings
-from agentsmithy_server.core.providers import register_builtin_adapters
-from agentsmithy_server.core.providers.openai.models import get_model_spec
-from agentsmithy_server.core.providers.registry import get_adapter
+from agentsmithy_server.domain.events import EventType
+from agentsmithy_server.llm.providers import register_builtin_adapters
+from agentsmithy_server.llm.providers.openai.models import get_model_spec
+from agentsmithy_server.llm.providers.registry import get_adapter
 from agentsmithy_server.utils.logger import agent_logger
 
 
@@ -155,7 +156,7 @@ class OpenAIProvider:
         async for chunk in self.llm.astream(messages, **kwargs):
             content = getattr(chunk, "content", None)
             if isinstance(content, str) and content:
-                yield {"type": "chat", "content": content}
+                yield {"type": EventType.CHAT.value, "content": content}
 
             # Track usage information from chunks, tolerant of provider differences
             try:

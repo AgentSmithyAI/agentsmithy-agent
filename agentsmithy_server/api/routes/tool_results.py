@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from agentsmithy_server.api.deps import get_project
 from agentsmithy_server.api.schemas import ToolResultResponse
 from agentsmithy_server.core.project import Project
-from agentsmithy_server.core.tool_results_storage import ToolResultsStorage
+from agentsmithy_server.storage.tool_results import ToolResultsStorage
 from agentsmithy_server.utils.logger import api_logger
 
 router = APIRouter()

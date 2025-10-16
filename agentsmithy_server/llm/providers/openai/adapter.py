@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from agentsmithy_server.core.providers.base_adapter import IProviderChatAdapter
-from agentsmithy_server.core.providers.model_spec import IModelSpec
-from agentsmithy_server.core.providers.openai.models import (
+from agentsmithy_server.llm.providers.base_adapter import IProviderChatAdapter
+from agentsmithy_server.llm.providers.model_spec import IModelSpec
+from agentsmithy_server.llm.providers.openai.models import (
     get_model_spec as get_openai_model_spec,
 )
-from agentsmithy_server.core.providers.types import Vendor
+from agentsmithy_server.llm.providers.types import Vendor
 
 
 class OpenAIChatAdapter(IProviderChatAdapter):

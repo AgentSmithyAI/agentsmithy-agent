@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from agentsmithy_server.api.routes.chat import router as chat_router
 from agentsmithy_server.api.routes.dialogs import router as dialogs_router
 from agentsmithy_server.api.routes.health import router as health_router
+from agentsmithy_server.api.routes.history import router as history_router
 from agentsmithy_server.api.routes.meta import router as meta_router
 from agentsmithy_server.api.routes.tool_results import router as tool_results_router
 from agentsmithy_server.core.project import get_current_project
@@ -99,6 +100,7 @@ def create_app() -> FastAPI:
     app.include_router(chat_router)
     app.include_router(health_router)
     app.include_router(dialogs_router)
+    app.include_router(history_router)
     app.include_router(meta_router)
     app.include_router(tool_results_router)
 

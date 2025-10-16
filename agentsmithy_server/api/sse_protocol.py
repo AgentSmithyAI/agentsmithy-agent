@@ -4,7 +4,7 @@ This module re-exports event classes defined in `agentsmithy_server.core.events`
 to keep backward compatibility with existing imports.
 """
 
-from agentsmithy_server.core.events import (
+from agentsmithy_server.domain.events import (
     BaseEvent,
     ChatEndEvent,
     ChatEvent,

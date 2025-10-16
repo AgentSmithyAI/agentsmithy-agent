@@ -1,7 +1,5 @@
-"""Core module for AgentSmithy server."""
+"""Core business logic - project management and runtime."""
 
-from .llm_provider import LLMProvider
-from .providers.openai.provider import OpenAIProvider
-from .providers.types import Vendor
+from .project import Project
 
-__all__ = ["LLMProvider", "OpenAIProvider", "Vendor"]
+__all__ = ["Project"]
