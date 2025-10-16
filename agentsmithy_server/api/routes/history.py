@@ -17,6 +17,29 @@ from agentsmithy_server.utils.logger import api_logger
 
 router = APIRouter()
 
+# Event sorting priorities for same message index
+# Reasoning events should appear before other events (chat, tool_call, file_edit)
+SORT_PRIORITY_REASONING = 0
+SORT_PRIORITY_OTHER = 1
+
+
+def _event_sort_key(item: tuple[int, HistoryEvent]) -> tuple[int, int]:
+    """Generate sort key for events: (message_index, priority).
+
+    Args:
+        item: Tuple of (message_index, event)
+
+    Returns:
+        Tuple of (message_index, priority) for sorting
+    """
+    message_index, event = item
+    priority = (
+        SORT_PRIORITY_REASONING
+        if event.type == EventType.REASONING.value
+        else SORT_PRIORITY_OTHER
+    )
+    return (message_index, priority)
+
 
 async def _build_history_response(
     project: Project, dialog_id: str, limit: int = 20, before: int | None = None
@@ -164,12 +187,10 @@ async def _build_history_response(
             dialog_id=dialog_id,
         )
 
-    # Merge all events and sort
-    # For same index: reasoning (type=0) comes before other events (type=1)
+    # Merge all events and sort by (message_index, priority)
+    # For same index: reasoning comes before other events
     all_events = base_events + reasoning_events + file_edit_events
-    all_events.sort(
-        key=lambda x: (x[0], 0 if x[1].type == EventType.REASONING.value else 1)
-    )
+    all_events.sort(key=_event_sort_key)
 
     # Assign global indices to all events in chronological order
     for idx, (_, evt) in enumerate(all_events):
