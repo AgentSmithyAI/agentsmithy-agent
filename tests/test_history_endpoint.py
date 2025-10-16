@@ -101,15 +101,18 @@ def test_get_history_with_reasoning(client, test_project):
     assert response.status_code == 200
 
     data = response.json()
-    assert data["total_messages"] == 2
+    assert data["total_messages"] == 3  # 2 regular + 1 reasoning
     assert data["total_reasoning"] == 1
 
-    # Check reasoning
-    reasoning = data["reasoning_blocks"][0]
+    # Check that reasoning is embedded in messages
+    reasoning_msgs = [m for m in data["messages"] if m["type"] == "reasoning"]
+    assert len(reasoning_msgs) == 1
+
+    reasoning = reasoning_msgs[0]
     assert reasoning["content"] == "First, I need to understand the context..."
-    assert reasoning["message_index"] == 1
     assert reasoning["model_name"] == "gpt-4o"
-    assert "created_at" in reasoning
+    assert "timestamp" in reasoning
+    assert reasoning["reasoning_id"] == 1
 
 
 def test_get_history_with_tool_calls(client, test_project):
@@ -185,13 +188,14 @@ def test_get_history_complete(client, test_project):
 
     data = response.json()
     assert data["dialog_id"] == dialog_id
-    assert data["total_messages"] == 2
+    assert data["total_messages"] == 3  # 2 regular + 1 reasoning
     assert data["total_reasoning"] == 1
     assert data["total_tool_calls"] == 1
 
     # Verify all components are present
-    assert len(data["messages"]) == 2
-    assert len(data["reasoning_blocks"]) == 1
+    assert len(data["messages"]) == 3  # Includes reasoning inline
+    reasoning_msgs = [m for m in data["messages"] if m["type"] == "reasoning"]
+    assert len(reasoning_msgs) == 1
     assert len(data["tool_calls"]) == 1
 
 
@@ -239,7 +243,6 @@ def test_get_history_empty_dialog(client, test_project):
     assert data["total_reasoning"] == 0
     assert data["total_tool_calls"] == 0
     assert len(data["messages"]) == 0
-    assert len(data["reasoning_blocks"]) == 0
     assert len(data["tool_calls"]) == 0
 
 

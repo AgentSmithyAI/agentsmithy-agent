@@ -8,7 +8,6 @@ from agentsmithy_server.api.deps import get_project
 from agentsmithy_server.api.schemas import (
     DialogHistoryResponse,
     HistoryMessage,
-    ReasoningBlock,
     ToolCallInfo,
 )
 from agentsmithy_server.core.dialog_reasoning_storage import DialogReasoningStorage
@@ -24,7 +23,7 @@ async def _build_history_response(
 ) -> DialogHistoryResponse:
     """Build complete history response from all sources."""
     # Get messages from history
-    messages_data: list[HistoryMessage] = []
+    base_messages: list[tuple[int, HistoryMessage]] = []
     try:
         history = project.get_dialog_history(dialog_id)
         messages = history.get_messages()
@@ -65,17 +64,20 @@ async def _build_history_response(
             except Exception:
                 pass
 
-            messages_data.append(
-                HistoryMessage(
-                    type=msg.type,
-                    content=(
-                        msg.content
-                        if isinstance(msg.content, str)
-                        else str(msg.content)
+            base_messages.append(
+                (
+                    idx,
+                    HistoryMessage(
+                        type=msg.type,
+                        content=(
+                            msg.content
+                            if isinstance(msg.content, str)
+                            else str(msg.content)
+                        ),
+                        index=idx,
+                        timestamp=timestamp,
+                        tool_calls=tool_calls,
                     ),
-                    index=idx,
-                    timestamp=timestamp,
-                    tool_calls=tool_calls,
                 )
             )
     except Exception as e:
@@ -83,21 +85,28 @@ async def _build_history_response(
             "Failed to load messages", exc_info=True, error=str(e), dialog_id=dialog_id
         )
 
-    # Get reasoning blocks
-    reasoning_data: list[ReasoningBlock] = []
+    # Get reasoning blocks and merge into messages
+    reasoning_count = 0
+    reasoning_messages: list[tuple[int, HistoryMessage]] = []
     try:
         with DialogReasoningStorage(project, dialog_id) as storage:
             blocks = storage.get_all()
-            reasoning_data = [
-                ReasoningBlock(
-                    id=block.id,
-                    content=block.content,
-                    message_index=block.message_index,
-                    model_name=block.model_name,
-                    created_at=block.created_at,
+            for block in blocks:
+                # Create reasoning message to insert before related message
+                reasoning_messages.append(
+                    (
+                        block.message_index,  # Sort key - insert before this message
+                        HistoryMessage(
+                            type="reasoning",
+                            content=block.content,
+                            index=-1,  # Will be reindexed
+                            timestamp=block.created_at,
+                            reasoning_id=block.id,
+                            model_name=block.model_name,
+                        ),
+                    )
                 )
-                for block in blocks
-            ]
+                reasoning_count += 1
     except Exception as e:
         api_logger.error(
             "Failed to load reasoning",
@@ -105,6 +114,26 @@ async def _build_history_response(
             error=str(e),
             dialog_id=dialog_id,
         )
+
+    # Merge base messages and reasoning, sort by message_index
+    # For same index: reasoning (type=0) comes before regular message (type=1)
+    all_messages = base_messages + reasoning_messages
+    all_messages.sort(key=lambda x: (x[0], 0 if x[1].type == "reasoning" else 1))
+
+    # Reindex sequentially
+    messages_data: list[HistoryMessage] = []
+    for new_idx, (_, hist_msg) in enumerate(all_messages):
+        # Create new instance with updated index to avoid mutation
+        updated_msg = HistoryMessage(
+            type=hist_msg.type,
+            content=hist_msg.content,
+            index=new_idx,
+            timestamp=hist_msg.timestamp,
+            tool_calls=hist_msg.tool_calls,
+            reasoning_id=hist_msg.reasoning_id,
+            model_name=hist_msg.model_name,
+        )
+        messages_data.append(updated_msg)
 
     # Get tool calls
     tool_calls_data: list[ToolCallInfo] = []
@@ -143,10 +172,9 @@ async def _build_history_response(
     return DialogHistoryResponse(
         dialog_id=dialog_id,
         messages=messages_data,
-        reasoning_blocks=reasoning_data,
         tool_calls=tool_calls_data,
         total_messages=len(messages_data),
-        total_reasoning=len(reasoning_data),
+        total_reasoning=reasoning_count,
         total_tool_calls=len(tool_calls_data),
     )
 
@@ -172,36 +200,37 @@ async def get_dialog_history(
                     "type": "human",
                     "content": "read file.txt",
                     "index": 0,
-                    "timestamp": "2025-10-15T20:00:00Z"
+                    "timestamp": null
+                },
+                {
+                    "type": "reasoning",
+                    "content": "I need to read the file first...",
+                    "index": 1,
+                    "timestamp": "2025-10-15T20:00:01Z",
+                    "reasoning_id": 1,
+                    "model_name": "gpt-4o",
+                    "tool_calls": null
                 },
                 {
                     "type": "ai",
                     "content": "I'll read the file...",
-                    "index": 1,
+                    "index": 2,
+                    "timestamp": null,
                     "tool_calls": [{"id": "call_123", "name": "read_file", "args": {...}}]
-                }
-            ],
-            "reasoning_blocks": [
-                {
-                    "id": 1,
-                    "content": "I need to read the file first...",
-                    "message_index": 1,
-                    "model_name": "gpt-4o",
-                    "created_at": "2025-10-15T20:00:01Z"
                 }
             ],
             "tool_calls": [
                 {
                     "tool_call_id": "call_123",
                     "tool_name": "read_file",
-                    "args": {"path": "file.txt"},
+                    "args": {},
                     "result_preview": "file content...",
                     "has_full_result": true,
                     "timestamp": "2025-10-15T20:00:02Z",
-                    "message_index": 1
+                    "message_index": -1
                 }
             ],
-            "total_messages": 2,
+            "total_messages": 3,
             "total_reasoning": 1,
             "total_tool_calls": 1
         }

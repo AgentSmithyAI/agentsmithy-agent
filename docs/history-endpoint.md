@@ -3,9 +3,8 @@
 ## Overview
 
 The `GET /api/dialogs/{dialog_id}/history` endpoint returns complete dialog history including:
-- 💬 **Messages** - user and assistant messages
-- 💭 **Reasoning blocks** - model's thinking process
-- 🔧 **Tool calls** - tool invocations with results
+- 💬 **Messages** - user, assistant, and reasoning messages (inline)
+- 🔧 **Tool calls** - tool invocations with results metadata
 
 ## Endpoint
 
@@ -22,11 +21,10 @@ GET /api/dialogs/{dialog_id}/history
 ```json
 {
   "dialog_id": "01J...",
-  "messages": [...],
-  "reasoning_blocks": [...],
+  "messages": [...],  // Includes reasoning inline with type="reasoning"
   "tool_calls": [...],
-  "total_messages": 5,
-  "total_reasoning": 2,
+  "total_messages": 7,      // Total including reasoning messages
+  "total_reasoning": 2,     // Count of reasoning messages
   "total_tool_calls": 3
 }
 ```
@@ -52,30 +50,31 @@ GET /api/dialogs/{dialog_id}/history
 ```
 
 **Fields:**
-- `type` - message type (human/ai/system/tool)
+- `type` - message type: `human`, `ai`, `system`, `tool`, `reasoning`
 - `content` - message text
 - `index` - sequential position in history (0, 1, 2, ...)
 - `timestamp` - creation time (optional)
 - `tool_calls` - tool invocations for AI messages (optional)
+- `reasoning_id` - unique ID for reasoning messages (optional)
+- `model_name` - model name for reasoning messages (optional)
 
-### ReasoningBlock
+### Reasoning Message (embedded in messages array)
+
+Reasoning is embedded directly in the `messages` array with `type="reasoning"`:
 
 ```json
 {
-  "id": 1,
+  "type": "reasoning",
   "content": "I need to analyze the file structure first...",
-  "message_index": 3,
+  "index": 2,
+  "timestamp": "2025-10-15T20:00:01Z",
+  "reasoning_id": 1,
   "model_name": "gpt-4o",
-  "created_at": "2025-10-15T20:00:01Z"
+  "tool_calls": null
 }
 ```
 
-**Fields:**
-- `id` - unique reasoning block ID
-- `content` - full reasoning text
-- `message_index` - index of related message in history
-- `model_name` - model that generated this reasoning
-- `created_at` - creation timestamp
+Reasoning messages are inserted **before** the related AI message in the timeline.
 
 ### ToolCallInfo
 
@@ -126,14 +125,13 @@ if response.status_code == 200:
     print(f"Dialog has {data['total_reasoning']} reasoning blocks")
     print(f"Dialog has {data['total_tool_calls']} tool calls")
     
-    # Show messages with reasoning
+    # Show all messages (including reasoning inline)
     for msg in data['messages']:
-        print(f"\n[{msg['index']}] {msg['type']}: {msg['content'][:100]}...")
-        
-        # Find reasoning for this message
-        reasoning = [r for r in data['reasoning_blocks'] if r['message_index'] == msg['index']]
-        if reasoning:
-            print(f"  💭 Thinking: {reasoning[0]['content'][:80]}...")
+        if msg['type'] == 'reasoning':
+            print(f"\n[{msg['index']}] 💭 THINKING ({msg.get('model_name', 'unknown')}):")
+            print(f"    {msg['content'][:80]}...")
+        else:
+            print(f"\n[{msg['index']}] {msg['type']}: {msg['content'][:100]}...")
 ```
 
 ### JavaScript/TypeScript
@@ -157,24 +155,20 @@ const history = await getDialogHistory("01J4X2K3M4N5P6Q7R8");
 
 // Display timeline
 for (const msg of history.messages) {
-  console.log(`[${msg.index}] ${msg.type}: ${msg.content}`);
-  
-  // Show reasoning that led to this message
-  const reasoning = history.reasoning_blocks.filter(
-    r => r.message_index === msg.index
-  );
-  
-  if (reasoning.length > 0) {
-    console.log(`  💭 ${reasoning[0].content}`);
-  }
-  
-  // Show tool calls from this message
-  const toolCalls = history.tool_calls.filter(
-    tc => tc.message_index === msg.index
-  );
-  
-  for (const tc of toolCalls) {
-    console.log(`  🔧 ${tc.tool_name}: ${tc.result_preview}`);
+  if (msg.type === 'reasoning') {
+    console.log(`[${msg.index}] 💭 ${msg.model_name || 'unknown'}: ${msg.content}`);
+  } else {
+    console.log(`[${msg.index}] ${msg.type}: ${msg.content}`);
+    
+    // Show tool calls from this message
+    if (msg.tool_calls) {
+      for (const tcRef of msg.tool_calls) {
+        const tc = history.tool_calls.find(t => t.tool_call_id === tcRef.id);
+        if (tc) {
+          console.log(`  🔧 ${tc.tool_name}: ${tc.result_preview}`);
+        }
+      }
+    }
   }
 }
 ```
@@ -202,7 +196,6 @@ for (const msg of history.messages) {
       "tool_calls": null
     }
   ],
-  "reasoning_blocks": [],
   "tool_calls": [],
   "total_messages": 2,
   "total_reasoning": 0,
@@ -222,22 +215,22 @@ for (const msg of history.messages) {
       "index": 0
     },
     {
+      "type": "reasoning",
+      "content": "First, I need to understand the architecture. Looking at the imports and class structure...",
+      "index": 1,
+      "timestamp": "2025-10-15T20:00:01.123Z",
+      "reasoning_id": 1,
+      "model_name": "gpt-4o",
+      "tool_calls": null
+    },
+    {
       "type": "ai",
       "content": "I'll analyze the code structure...",
-      "index": 1
-    }
-  ],
-  "reasoning_blocks": [
-    {
-      "id": 1,
-      "content": "First, I need to understand the architecture. Looking at the imports and class structure...",
-      "message_index": 1,
-      "model_name": "gpt-4o",
-      "created_at": "2025-10-15T20:00:01.123Z"
+      "index": 2
     }
   ],
   "tool_calls": [],
-  "total_messages": 2,
+  "total_messages": 3,
   "total_reasoning": 1,
   "total_tool_calls": 0
 }
@@ -255,9 +248,18 @@ for (const msg of history.messages) {
       "index": 0
     },
     {
+      "type": "reasoning",
+      "content": "I should read the file first to understand its contents before analyzing...",
+      "index": 1,
+      "timestamp": "2025-10-15T20:00:01Z",
+      "reasoning_id": 1,
+      "model_name": "gpt-4o",
+      "tool_calls": null
+    },
+    {
       "type": "ai",
       "content": "I'll read and analyze the file for you.",
-      "index": 1,
+      "index": 2,
       "tool_calls": [
         {
           "id": "call_read_123",
@@ -267,25 +269,18 @@ for (const msg of history.messages) {
       ]
     },
     {
-      "type": "ai",
-      "content": "The file contains a Flask application with 3 routes...",
-      "index": 2
-    }
-  ],
-  "reasoning_blocks": [
-    {
-      "id": 1,
-      "content": "I should read the file first to understand its contents before analyzing...",
-      "message_index": 1,
+      "type": "reasoning",
+      "content": "Now that I've read the file, I can see it's a Flask app. I should analyze the routes and their functions...",
+      "index": 3,
+      "timestamp": "2025-10-15T20:00:03Z",
+      "reasoning_id": 2,
       "model_name": "gpt-4o",
-      "created_at": "2025-10-15T20:00:01Z"
+      "tool_calls": null
     },
     {
-      "id": 2,
-      "content": "Now that I've read the file, I can see it's a Flask app. I should analyze the routes and their functions...",
-      "message_index": 2,
-      "model_name": "gpt-4o",
-      "created_at": "2025-10-15T20:00:03Z"
+      "type": "ai",
+      "content": "The file contains a Flask application with 3 routes...",
+      "index": 4
     }
   ],
   "tool_calls": [
@@ -299,7 +294,7 @@ for (const msg of history.messages) {
       "message_index": -1
     }
   ],
-  "total_messages": 3,
+  "total_messages": 5,
   "total_reasoning": 2,
   "total_tool_calls": 1
 }
@@ -331,37 +326,24 @@ For internal errors (database issues, etc.).
 
 ### 1. Timeline View
 
-Build complete conversation timeline with reasoning and tool calls:
+Messages already form a complete timeline with reasoning embedded:
 
 ```python
 history = get_dialog_history(dialog_id)
 
-# Build timeline
-timeline = []
+# Display timeline (reasoning is already inline)
 for msg in history.messages:
-    # Add reasoning before message
-    for r in history.reasoning_blocks:
-        if r.message_index == msg.index:
-            timeline.append(("reasoning", r))
-    
-    # Add message
-    timeline.append(("message", msg))
-    
-    # Add tool calls from message
-    if msg.tool_calls:
-        for tc_ref in msg.tool_calls:
-            tc = next((t for t in history.tool_calls if t.tool_call_id == tc_ref['id']), None)
-            if tc:
-                timeline.append(("tool_call", tc))
-
-# Display
-for item_type, item in timeline:
-    if item_type == "reasoning":
-        print(f"💭 {item.content[:80]}...")
-    elif item_type == "message":
-        print(f"💬 {item.type}: {item.content[:80]}...")
-    elif item_type == "tool_call":
-        print(f"🔧 {item.tool_name}: {item.result_preview[:50]}...")
+    if msg.type == "reasoning":
+        print(f"[{msg.index}] 💭 {msg.model_name}: {msg.content[:80]}...")
+    elif msg.type in ("human", "ai"):
+        print(f"[{msg.index}] 💬 {msg.type}: {msg.content[:80]}...")
+        
+        # Show tool calls if any
+        if msg.tool_calls:
+            for tc_ref in msg.tool_calls:
+                tc = next((t for t in history.tool_calls if t.tool_call_id == tc_ref['id']), None)
+                if tc:
+                    print(f"  🔧 {tc.tool_name}: {tc.result_preview[:50]}...")
 ```
 
 ### 2. Export to Markdown
@@ -373,40 +355,44 @@ with open("dialog_export.md", "w") as f:
     f.write(f"# Dialog {dialog_id}\n\n")
     
     for msg in history.messages:
-        # Write reasoning
-        for r in history.reasoning_blocks:
-            if r.message_index == msg.index:
-                f.write(f"**💭 Model thinking ({r.model_name}):**\n\n")
-                f.write(f"```\n{r.content}\n```\n\n")
-        
-        # Write message
-        f.write(f"**{msg.type}:** {msg.content}\n\n")
-        
-        # Write tool calls
-        if msg.tool_calls:
-            for tc_ref in msg.tool_calls:
-                tc = next((t for t in history.tool_calls if t.tool_call_id == tc_ref['id']), None)
-                if tc:
-                    f.write(f"*Tool: {tc.tool_name}* - {tc.result_preview}\n\n")
+        if msg.type == "reasoning":
+            # Write reasoning
+            f.write(f"**💭 Model thinking ({msg.model_name}):**\n\n")
+            f.write(f"```\n{msg.content}\n```\n\n")
+        else:
+            # Write regular message
+            f.write(f"**{msg.type}:** {msg.content}\n\n")
+            
+            # Write tool calls if present
+            if msg.tool_calls:
+                for tc_ref in msg.tool_calls:
+                    tc = next((t for t in history.tool_calls if t.tool_call_id == tc_ref['id']), None)
+                    if tc:
+                        f.write(f"*Tool: {tc.tool_name}* - {tc.result_preview}\n\n")
 ```
 
 ### 3. Debugging Model Decisions
 
 ```python
-# Find what model was thinking before specific message
+# Find reasoning that precedes specific message
 history = get_dialog_history(dialog_id)
 
-message_index = 5  # Analyze message #5
-msg = history.messages[message_index]
+target_index = 5  # Analyze message #5
+msg = history.messages[target_index]
 
-# Get reasoning for this message
-reasoning = [r for r in history.reasoning_blocks if r.message_index == message_index]
+# Find reasoning message that came just before (will have lower index)
+print(f"Message #{target_index}: {msg.content}")
 
-print(f"Message #{message_index}: {msg.content}")
-if reasoning:
-    print(f"\nModel was thinking:")
-    for r in reasoning:
-        print(f"  {r.content}")
+# Look backwards for reasoning
+for i in range(target_index - 1, -1, -1):
+    prev_msg = history.messages[i]
+    if prev_msg.type == "reasoning":
+        print(f"\nModel was thinking:")
+        print(f"  {prev_msg.content}")
+        break
+    elif prev_msg.type in ("human", "ai"):
+        # Stop at previous non-reasoning message
+        break
 ```
 
 ### 4. Analytics Dashboard
@@ -416,14 +402,15 @@ if reasoning:
 history = get_dialog_history(dialog_id)
 
 print(f"Total messages: {history.total_messages}")
-print(f"Total reasoning blocks: {history.total_reasoning}")
+print(f"Total reasoning: {history.total_reasoning}")
 print(f"Total tool calls: {history.total_tool_calls}")
 
 # Reasoning usage by model
 models = {}
-for r in history.reasoning_blocks:
-    model = r.model_name or "unknown"
-    models[model] = models.get(model, 0) + 1
+for msg in history.messages:
+    if msg.type == "reasoning":
+        model = msg.model_name or "unknown"
+        models[model] = models.get(model, 0) + 1
 
 print("\nReasoning by model:")
 for model, count in models.items():
@@ -439,16 +426,18 @@ for tool, count in tools.items():
     print(f"  {tool}: {count} calls")
 ```
 
-## Linking Data
+## Message Ordering
 
-### Message Index
+### Timeline Structure
 
-All components are linked via `message_index`:
+Reasoning messages are inserted **before** their related AI messages:
 
 ```
 messages[0] = User: "read file"
-messages[1] = AI: "I'll read it"         ← reasoning[0].message_index = 1
-messages[2] = AI: "File contains..."     ← reasoning[1].message_index = 2
+messages[1] = Reasoning: "I need to read the file..."  (type="reasoning")
+messages[2] = AI: "I'll read it"                      (type="ai")
+messages[3] = Reasoning: "Now analyzing..."           (type="reasoning")
+messages[4] = AI: "File contains..."                  (type="ai")
 ```
 
 ### Finding Related Data
@@ -457,10 +446,17 @@ messages[2] = AI: "File contains..."     ← reasoning[1].message_index = 2
 # Get message #3 with all related data
 msg = history.messages[3]
 
-# Find reasoning for this message
-reasoning = [r for r in history.reasoning_blocks if r.message_index == 3]
+if msg.type == "ai":
+    # Look backwards for preceding reasoning
+    for i in range(msg.index - 1, -1, -1):
+        prev = history.messages[i]
+        if prev.type == "reasoning":
+            print(f"Model was thinking: {prev.content}")
+            break
+        elif prev.type in ("human", "ai"):
+            break
 
-# Find tool calls referenced in this message
+# Find tool calls referenced in AI message
 if msg.tool_calls:
     for tc_ref in msg.tool_calls:
         full_tc = next(
