@@ -42,20 +42,28 @@ async def _build_history_response(
                 # system, etc - keep as is
                 event_type = msg_type
 
-            # Add message as chat/user event
-            base_events.append(
-                (
-                    idx,
-                    HistoryEvent(
-                        type=event_type,
-                        content=(
-                            msg.content
-                            if isinstance(msg.content, str)
-                            else str(msg.content)
-                        ),
-                    ),
-                )
+            # Get content as string
+            content_str = (
+                msg.content if isinstance(msg.content, str) else str(msg.content)
             )
+
+            # Skip empty AI messages (usually they only have tool_calls)
+            # LLM sometimes generates AIMessage with content="" when it only wants to call tools
+            # without producing text. These create empty "chat" events which aren't useful in history.
+            # The tool_calls from these messages will still be added as separate "tool_call" events below.
+            if msg_type == "ai" and not content_str.strip():
+                pass
+            else:
+                # Add message as chat/user event
+                base_events.append(
+                    (
+                        idx,
+                        HistoryEvent(
+                            type=event_type,
+                            content=content_str,
+                        ),
+                    )
+                )
 
             # Extract tool_calls and add as separate tool_call events
             try:
