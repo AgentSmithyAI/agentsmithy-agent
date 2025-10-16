@@ -9,6 +9,7 @@ from agentsmithy_server.api.schemas import (
     DialogHistoryResponse,
     HistoryEvent,
 )
+from agentsmithy_server.core.dialog_file_edit_storage import DialogFileEditStorage
 from agentsmithy_server.core.dialog_reasoning_storage import DialogReasoningStorage
 from agentsmithy_server.core.project import Project
 from agentsmithy_server.utils.logger import api_logger
@@ -129,9 +130,34 @@ async def _build_history_response(
             dialog_id=dialog_id,
         )
 
+    # Get file edit events
+    file_edit_events: list[tuple[int, HistoryEvent]] = []
+    try:
+        with DialogFileEditStorage(project, dialog_id) as storage:
+            edits = storage.get_all()
+            for edit in edits:
+                file_edit_events.append(
+                    (
+                        edit.message_index,
+                        HistoryEvent(
+                            type="file_edit",
+                            file=edit.file,
+                            diff=edit.diff,
+                            checkpoint=edit.checkpoint,
+                        ),
+                    )
+                )
+    except Exception as e:
+        api_logger.error(
+            "Failed to load file edits",
+            exc_info=True,
+            error=str(e),
+            dialog_id=dialog_id,
+        )
+
     # Merge all events and sort
     # For same index: reasoning (type=0) comes before other events (type=1)
-    all_events = base_events + reasoning_events
+    all_events = base_events + reasoning_events + file_edit_events
     all_events.sort(key=lambda x: (x[0], 0 if x[1].type == "reasoning" else 1))
 
     # Extract events in sorted order

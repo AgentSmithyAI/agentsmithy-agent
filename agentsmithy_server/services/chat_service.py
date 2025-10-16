@@ -12,6 +12,7 @@ from typing import Any
 
 from agentsmithy_server.api.sse_protocol import EventFactory as SSEEventFactory
 from agentsmithy_server.core.agent_graph import AgentOrchestrator
+from agentsmithy_server.core.dialog_file_edit_storage import DialogFileEditStorage
 from agentsmithy_server.core.dialog_reasoning_storage import DialogReasoningStorage
 from agentsmithy_server.core.dialog_summary_storage import DialogSummaryStorage
 from agentsmithy_server.core.summarization.strategy import KEEP_LAST_MESSAGES
@@ -210,6 +211,37 @@ class ChatService:
             elif chunk["type"] == "summary_end":
                 yield SSEEventFactory.summary_end(dialog_id=dialog_id).to_sse()
             elif chunk["type"] == "file_edit":
+                # Save file edit event to separate storage
+                if project_dialog:
+                    project_obj, pdialog_id = project_dialog
+                    target_dialog_id = dialog_id or pdialog_id
+                    if target_dialog_id:
+                        try:
+                            # Get current message index
+                            message_index = -1
+                            if hasattr(project_obj, "get_dialog_history"):
+                                history = project_obj.get_dialog_history(
+                                    target_dialog_id
+                                )
+                                messages = history.get_messages()
+                                message_index = len(messages)
+
+                            with DialogFileEditStorage(
+                                project_obj, target_dialog_id
+                            ) as storage:
+                                storage.save(
+                                    file=chunk.get("file", ""),
+                                    diff=chunk.get("diff"),
+                                    checkpoint=chunk.get("checkpoint"),
+                                    message_index=message_index,
+                                )
+                        except Exception as e:
+                            api_logger.error(
+                                "Failed to save file edit event",
+                                exc_info=True,
+                                error=str(e),
+                            )
+
                 yield SSEEventFactory.file_edit(
                     file=chunk.get("file", ""),
                     diff=chunk.get("diff"),
