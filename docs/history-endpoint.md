@@ -50,13 +50,13 @@ GET /api/dialogs/{dialog_id}/history
 ```
 
 **Fields:**
-- `type` - message type: `human`, `ai`, `system`, `tool`, `reasoning`
-- `content` - message text
+- `type` - message type: `human`, `ai`, `system`, `tool`, or `reasoning`
+- `content` - message text (can be long-form markdown for reasoning blocks)
 - `index` - sequential position in history (0, 1, 2, ...)
 - `timestamp` - creation time (optional)
 - `tool_calls` - tool invocations for AI messages (optional)
 - `reasoning_id` - unique ID for reasoning messages (optional)
-- `model_name` - model name for reasoning messages (optional)
+- `model_name` - model name for reasoning messages (optional, may be `null`)
 
 ### Reasoning Message (embedded in messages array)
 
@@ -65,16 +65,20 @@ Reasoning is embedded directly in the `messages` array with `type="reasoning"`:
 ```json
 {
   "type": "reasoning",
-  "content": "I need to analyze the file structure first...",
-  "index": 2,
-  "timestamp": "2025-10-15T20:00:01Z",
+  "content": "**Providing installation and setup instructions**\n\nI'm thinking about giving quick run instructions for setting up. First, I'll mention using `pip install -r requirements.txt` to install all dependencies. Then, I should note that running the server involves using `uvicorn agentsmithy_server.api.app:create_app`. Don't forget to configure the `.agentsmithy/config.json`, including the `providers.openai.api_key` and models. I'll wrap up by summarizing the main API endpoints: `/chat`, `/dialogs`, `/history`, `/tool-results`, `/health`, and `/meta`, along with the agents like `universal_agent` and `project_inspector_agent`.",
+  "index": 6,
+  "timestamp": "2025-10-15T21:57:14.377724+00:00",
+  "tool_calls": null,
   "reasoning_id": 1,
-  "model_name": "gpt-4o",
-  "tool_calls": null
+  "model_name": null
 }
 ```
 
-Reasoning messages are inserted **before** the related AI message in the timeline.
+**Note:** 
+- Reasoning messages are inserted before the related AI message in the timeline
+- `content` can be long (100-500+ words) and may contain markdown formatting
+- `model_name` can be `null` if not captured during streaming
+- `timestamp` uses full ISO 8601 format with timezone
 
 ### ToolCallInfo
 
