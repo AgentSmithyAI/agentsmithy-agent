@@ -77,9 +77,11 @@ class DeleteFileTool(BaseTool):
             checkpoint = tracker.create_checkpoint(f"delete_file: {str(file_path)}")
 
         if self._sse_callback is not None:
+            from agentsmithy_server.core.events import EventType
+
             await self.emit_event(
                 {
-                    "type": "file_edit",
+                    "type": EventType.FILE_EDIT.value,
                     "file": str(file_path),
                     "checkpoint": getattr(checkpoint, "commit_id", None),
                 }

@@ -152,9 +152,11 @@ class ReplaceInFileTool(BaseTool):
                 has_callback=self._sse_callback is not None,
                 diff_len=len(diff_str),
             )
+            from agentsmithy_server.core.events import EventType
+
             await self.emit_event(
                 {
-                    "type": "file_edit",
+                    "type": EventType.FILE_EDIT.value,
                     "file": str(file_path),
                     "diff": diff_str,
                     "checkpoint": getattr(checkpoint, "commit_id", None),

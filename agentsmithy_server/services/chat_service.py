@@ -15,6 +15,7 @@ from agentsmithy_server.core.agent_graph import AgentOrchestrator
 from agentsmithy_server.core.dialog_file_edit_storage import DialogFileEditStorage
 from agentsmithy_server.core.dialog_reasoning_storage import DialogReasoningStorage
 from agentsmithy_server.core.dialog_summary_storage import DialogSummaryStorage
+from agentsmithy_server.core.events import EventType
 from agentsmithy_server.core.summarization.strategy import KEEP_LAST_MESSAGES
 from agentsmithy_server.utils.logger import api_logger, stream_log
 
@@ -163,26 +164,26 @@ class ChatService:
         reasoning_buffer: list[str] | None = None,
     ) -> AsyncIterator[dict[str, str]]:
         if isinstance(chunk, dict) and chunk.get("type") in {
-            "file_edit",
-            "tool_call",
-            "error",
-            "chat",
-            "reasoning",
-            "chat_start",
-            "chat_end",
-            "reasoning_start",
-            "reasoning_end",
-            "summary_start",
-            "summary_end",
+            EventType.FILE_EDIT.value,
+            EventType.TOOL_CALL.value,
+            EventType.ERROR.value,
+            EventType.CHAT.value,
+            EventType.REASONING.value,
+            EventType.CHAT_START.value,
+            EventType.CHAT_END.value,
+            EventType.REASONING_START.value,
+            EventType.REASONING_END.value,
+            EventType.SUMMARY_START.value,
+            EventType.SUMMARY_END.value,
         }:
-            if chunk["type"] == "chat":
+            if chunk["type"] == EventType.CHAT.value:
                 content = chunk.get("content", "")
                 if content:
                     assistant_buffer.append(content)
                     yield SSEEventFactory.chat(
                         content=content, dialog_id=dialog_id
                     ).to_sse()
-            elif chunk["type"] == "reasoning":
+            elif chunk["type"] == EventType.REASONING.value:
                 content = chunk.get("content", "")
                 if content:
                     # Accumulate reasoning in buffer for separate storage
@@ -191,26 +192,26 @@ class ChatService:
                     yield SSEEventFactory.reasoning(
                         content=content, dialog_id=dialog_id
                     ).to_sse()
-            elif chunk["type"] == "chat_start":
+            elif chunk["type"] == EventType.CHAT_START.value:
                 yield SSEEventFactory.chat_start(dialog_id=dialog_id).to_sse()
-            elif chunk["type"] == "chat_end":
+            elif chunk["type"] == EventType.CHAT_END.value:
                 # Don't flush here - tool_executor will save complete message with tool_calls
                 # If no tool_calls, will be saved by final flush at end of stream
                 yield SSEEventFactory.chat_end(dialog_id=dialog_id).to_sse()
-            elif chunk["type"] == "reasoning_start":
+            elif chunk["type"] == EventType.REASONING_START.value:
                 yield SSEEventFactory.reasoning_start(dialog_id=dialog_id).to_sse()
-            elif chunk["type"] == "reasoning_end":
+            elif chunk["type"] == EventType.REASONING_END.value:
                 # Save accumulated reasoning to separate storage after reasoning block ends
                 if reasoning_buffer is not None:
                     self._flush_reasoning_buffer(
                         project_dialog, dialog_id, reasoning_buffer, clear_buffer=True
                     )
                 yield SSEEventFactory.reasoning_end(dialog_id=dialog_id).to_sse()
-            elif chunk["type"] == "summary_start":
+            elif chunk["type"] == EventType.SUMMARY_START.value:
                 yield SSEEventFactory.summary_start(dialog_id=dialog_id).to_sse()
-            elif chunk["type"] == "summary_end":
+            elif chunk["type"] == EventType.SUMMARY_END.value:
                 yield SSEEventFactory.summary_end(dialog_id=dialog_id).to_sse()
-            elif chunk["type"] == "file_edit":
+            elif chunk["type"] == EventType.FILE_EDIT.value:
                 # Save file edit event to separate storage
                 if project_dialog:
                     project_obj, pdialog_id = project_dialog
@@ -248,7 +249,7 @@ class ChatService:
                     checkpoint=chunk.get("checkpoint"),
                     dialog_id=dialog_id,
                 ).to_sse()
-            elif chunk["type"] == "tool_call":
+            elif chunk["type"] == EventType.TOOL_CALL.value:
                 yield SSEEventFactory.tool_call(
                     name=chunk.get("name", ""),
                     args=chunk.get("args", {}),
@@ -284,13 +285,13 @@ class ChatService:
                 break
             else:
                 # Process the event only if we successfully got one
-                if tool_event.get("type") == "tool_call":
+                if tool_event.get("type") == EventType.TOOL_CALL.value:
                     sse = SSEEventFactory.tool_call(
                         name=tool_event.get("name", ""),
                         args=tool_event.get("args", {}),
                         dialog_id=dialog_id,
                     ).to_sse()
-                elif tool_event.get("type") == "file_edit":
+                elif tool_event.get("type") == EventType.FILE_EDIT.value:
                     sse = SSEEventFactory.file_edit(
                         file=tool_event.get("file", ""),
                         diff=tool_event.get("diff"),

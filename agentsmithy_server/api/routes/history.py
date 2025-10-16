@@ -11,6 +11,7 @@ from agentsmithy_server.api.schemas import (
 )
 from agentsmithy_server.core.dialog_file_edit_storage import DialogFileEditStorage
 from agentsmithy_server.core.dialog_reasoning_storage import DialogReasoningStorage
+from agentsmithy_server.core.events import EventType, MessageType
 from agentsmithy_server.core.project import Project
 from agentsmithy_server.utils.logger import api_logger
 
@@ -31,14 +32,14 @@ async def _build_history_response(
             msg_type = msg.type
 
             # Skip ToolMessage - those are results, not events
-            if msg_type == "tool":
+            if msg_type == MessageType.TOOL.value:
                 continue
 
             # Convert LangChain types to SSE types
-            if msg_type == "human":
-                event_type = "user"
-            elif msg_type == "ai":
-                event_type = "chat"
+            if msg_type == MessageType.HUMAN.value:
+                event_type = EventType.USER.value
+            elif msg_type == MessageType.AI.value:
+                event_type = EventType.CHAT.value
             else:
                 # system, etc - keep as is
                 event_type = msg_type
@@ -52,7 +53,7 @@ async def _build_history_response(
             # LLM sometimes generates AIMessage with content="" when it only wants to call tools
             # without producing text. These create empty "chat" events which aren't useful in history.
             # The tool_calls from these messages will still be added as separate "tool_call" events below.
-            if msg_type == "ai" and not content_str.strip():
+            if msg_type == MessageType.AI.value and not content_str.strip():
                 pass
             else:
                 # Add message as chat/user event
@@ -89,7 +90,7 @@ async def _build_history_response(
                             (
                                 idx,  # Same position as AI message
                                 HistoryEvent(
-                                    type="tool_call",
+                                    type=EventType.TOOL_CALL.value,
                                     id=tc_id,
                                     name=tc_name,
                                     args=tc_args,
@@ -115,7 +116,7 @@ async def _build_history_response(
                     (
                         block.message_index,  # Sort key - insert before this message
                         HistoryEvent(
-                            type="reasoning",
+                            type=EventType.REASONING.value,
                             content=block.content,
                             model_name=block.model_name,
                         ),
@@ -140,7 +141,7 @@ async def _build_history_response(
                     (
                         edit.message_index,
                         HistoryEvent(
-                            type="file_edit",
+                            type=EventType.FILE_EDIT.value,
                             file=edit.file,
                             diff=edit.diff,
                             checkpoint=edit.checkpoint,
@@ -158,7 +159,9 @@ async def _build_history_response(
     # Merge all events and sort
     # For same index: reasoning (type=0) comes before other events (type=1)
     all_events = base_events + reasoning_events + file_edit_events
-    all_events.sort(key=lambda x: (x[0], 0 if x[1].type == "reasoning" else 1))
+    all_events.sort(
+        key=lambda x: (x[0], 0 if x[1].type == EventType.REASONING.value else 1)
+    )
 
     # Extract events in sorted order
     events_data: list[HistoryEvent] = [evt for _, evt in all_events]
