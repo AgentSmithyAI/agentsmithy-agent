@@ -301,18 +301,26 @@ def _build_events_stream(
             else:
                 event_type = msg.type
 
-            # Calculate client-facing sequential index
-            client_idx = messages_data.start_pos + non_empty_count
-            non_empty_count += 1
-
             content_str = (
                 msg.content if isinstance(msg.content, str) else str(msg.content)
             )
-            message_event = HistoryEvent(
-                type=event_type,
-                content=content_str,
-                idx=client_idx,
-            )
+
+            # Only user and chat messages get idx (for pagination)
+            if event_type in (EventType.USER.value, EventType.CHAT.value):
+                client_idx = messages_data.start_pos + non_empty_count
+                non_empty_count += 1
+                message_event = HistoryEvent(
+                    type=event_type,
+                    content=content_str,
+                    idx=client_idx,
+                )
+            else:
+                # Other message types (system, tool) don't get idx
+                message_event = HistoryEvent(
+                    type=event_type,
+                    content=content_str,
+                )
+
             sort_key = EventSortKey(db_index=db_idx, priority=EventPriority.MESSAGE)
             all_events_with_sort.append((sort_key, message_event))
 

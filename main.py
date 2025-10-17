@@ -80,7 +80,7 @@ if __name__ == "__main__":
             config_dir, defaults=get_default_config()
         )
 
-        # Run async initialization (watch will start in lifespan to use correct event loop)
+        # Run async initialization (watch will start later in manual startup to use correct event loop)
         async def init_config():
             await config_manager.initialize()
 
@@ -186,14 +186,14 @@ if __name__ == "__main__":
         reload_enabled = reload_enabled_env in {"1", "true", "yes", "on"}
 
         # Create custom server to pass shutdown event
-        # Force lifespan ON to ensure startup/shutdown hooks run in all environments
+        # Disable ASGI lifespan to avoid starlette lifespan CancelledError on shutdown
+        # Manual startup/shutdown hooks are used instead (see below)
         config = uvicorn.Config(
             "agentsmithy_server.api.server:app",
             host=settings.server_host,
             port=chosen_port,
             reload=reload_enabled,
             log_config=LOGGING_CONFIG,
-            # Disable ASGI lifespan to avoid starlette lifespan CancelledError on shutdown
             lifespan="off",
             timeout_graceful_shutdown=5,
         )

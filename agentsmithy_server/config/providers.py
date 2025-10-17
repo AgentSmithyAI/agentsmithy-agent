@@ -205,7 +205,7 @@ class LocalFileConfigProvider(ConfigProvider):
             try:
                 # Run blocking operations in executor to avoid blocking event loop
                 # Use asyncio.wait_for to add timeout protection
-                loop = asyncio.get_event_loop()
+                loop = asyncio.get_running_loop()
                 await asyncio.wait_for(
                     loop.run_in_executor(None, self._observer.stop), timeout=2.0
                 )
