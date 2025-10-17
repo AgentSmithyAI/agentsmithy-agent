@@ -17,7 +17,7 @@ Each provider is defined in the `providers` section with a complete configuratio
       "type": "openai",
       "model": "gpt-oss:20b",
       "api_key": "dummy-key-for-local-server",
-      "base_url": "http://localhost:11434/v1",
+      "base_url": "http://localhost:11434/v1",  // Ollama default port
       "options": {}
     },
     "gpt5": {
@@ -72,7 +72,9 @@ In the `models` section, reference providers by name:
 
 ## Examples
 
-### Local OpenAI-compatible Server
+### Local OpenAI-compatible Server (Ollama)
+
+**Note:** Port 11434 is Ollama's default port, not AgentSmithy's server port (which is 8765).
 
 ```json
 {
@@ -81,7 +83,7 @@ In the `models` section, reference providers by name:
       "type": "openai",
       "model": "gpt-oss:20b",
       "api_key": "not-needed",
-      "base_url": "http://localhost:11434/v1",
+      "base_url": "http://localhost:11434/v1",  // Ollama server
       "options": {}
     }
   },
