@@ -1,4 +1,4 @@
-"""Test that pagination cursor (before) refers to event position, not message_index."""
+"""Test that pagination cursor (before) works correctly with new logic."""
 
 import pytest
 from fastapi.testclient import TestClient
@@ -42,20 +42,20 @@ def client(test_project, monkeypatch):
     return TestClient(app)
 
 
-def test_before_cursor_uses_event_position_not_message_index(client, test_project):
-    """Test that 'before' parameter uses position in final events array, not message_index.
+def test_before_cursor_uses_message_index(client, test_project):
+    """Test that 'before' parameter uses sequential message indices.
 
-    This reproduces the bug where cursor pagination was using message_index instead of
-    the actual position in the final events array after merging reasoning/tool_calls.
+    New logic: before refers to the idx value (sequential index of non-empty messages),
+    not position in events array.
     """
     # Create dialog with specific structure
     dialog_id = test_project.create_dialog(title="test", set_current=True)
     history = test_project.get_dialog_history(dialog_id)
 
-    # Message 0: user
+    # Message 0: user (idx=0)
     history.add_user_message("task 1")
 
-    # Message 1: AI with tool_call
+    # Message 1: AI with tool_call (idx=1)
     ai_msg1 = AIMessage(
         content="doing task 1",
         tool_calls=[{"id": "call_1", "name": "tool1", "args": {}}],
@@ -66,50 +66,42 @@ def test_before_cursor_uses_event_position_not_message_index(client, test_projec
     with DialogReasoningStorage(test_project, dialog_id) as storage:
         storage.save(content="thinking about task 1", message_index=1)
 
-    # Message 2: user
+    # Message 2: user (idx=2)
     history.add_user_message("task 2")
 
-    # Message 3: AI
+    # Message 3: AI (idx=3)
     history.add_ai_message("doing task 2")
-
-    # Expected final events array:
-    # [0] user: "task 1"
-    # [1] reasoning: "thinking about task 1"  (for msg 1)
-    # [2] chat: "doing task 1"  (msg 1)
-    # [3] tool_call: tool1  (from msg 1)
-    # [4] user: "task 2"  (msg 2)
-    # [5] chat: "doing task 2"  (msg 3)
 
     # Get full history to verify structure
     full = client.get(f"/api/dialogs/{dialog_id}/history?limit=100")
     assert full.status_code == 200
     full_events = full.json()["events"]
 
-    # Verify expected structure
-    assert len(full_events) == 6
-    assert full_events[0]["type"] == "user"
-    assert full_events[1]["type"] == "reasoning"
-    assert full_events[2]["type"] == "chat"
-    assert full_events[3]["type"] == "tool_call"
-    assert full_events[4]["type"] == "user"
-    assert full_events[5]["type"] == "chat"
+    # Verify events with idx
+    message_events = [e for e in full_events if e.get("idx") is not None]
+    assert len(message_events) == 4  # 4 messages with idx
+    assert [e["idx"] for e in message_events] == [0, 1, 2, 3]
 
-    # Now test pagination with before=4
-    # Should return events [0,1,2,3] (before position 4 in events array)
-    response = client.get(f"/api/dialogs/{dialog_id}/history?limit=10&before=4")
+    # Now test pagination with before=2
+    # Should return messages with idx < 2, i.e., idx=[0,1]
+    response = client.get(f"/api/dialogs/{dialog_id}/history?limit=10&before=2")
     assert response.status_code == 200
 
     data = response.json()
     events = data["events"]
 
-    # Should get events at positions [0,1,2,3]
-    assert len(events) == 4
-    assert events[0]["type"] == "user"
-    assert events[1]["type"] == "reasoning"
-    assert events[2]["type"] == "chat"
-    assert events[3]["type"] == "tool_call"
+    # Should get messages with idx 0 and 1 (+ their reasoning/tool_calls)
+    message_events = [e for e in events if e.get("idx") is not None]
+    indices = [e["idx"] for e in message_events]
+    assert indices == [0, 1], f"Expected [0,1] before idx=2, got {indices}"
 
-    # NOT event[4] (user: "task 2") - that's after cursor
+    # Should include reasoning for message 1
+    reasoning_events = [e for e in events if e["type"] == "reasoning"]
+    assert len(reasoning_events) == 1
+
+    # Should include tool_call for message 1
+    tool_call_events = [e for e in events if e["type"] == "tool_call"]
+    assert len(tool_call_events) == 1
 
 
 def test_cursor_pagination_with_multiple_reasoning_blocks(client, test_project):
@@ -117,34 +109,37 @@ def test_cursor_pagination_with_multiple_reasoning_blocks(client, test_project):
     dialog_id = test_project.create_dialog(title="test", set_current=True)
     history = test_project.get_dialog_history(dialog_id)
 
-    # Create structure:
-    # msg[0]: user
-    # msg[1]: AI with 2 reasoning blocks before it
-
+    # Message 0: user (idx=0)
     history.add_user_message("complex task")
 
-    # Add 2 reasoning blocks for same message
+    # Add 2 reasoning blocks for message 1
     with DialogReasoningStorage(test_project, dialog_id) as storage:
         storage.save(content="first thought", message_index=1)
         storage.save(content="second thought", message_index=1)
 
+    # Message 1: AI (idx=1)
     history.add_ai_message("i'll do it")
 
-    # Expected events:
-    # [0] user
-    # [1] reasoning: "first thought"
-    # [2] reasoning: "second thought"
-    # [3] chat: "i'll do it"
+    # Get full history
+    full = client.get(f"/api/dialogs/{dialog_id}/history")
+    full_events = full.json()["events"]
 
-    # Get with before=3 should return [0,1,2]
-    response = client.get(f"/api/dialogs/{dialog_id}/history?limit=10&before=3")
+    # Should have: user(idx=0), reasoning, reasoning, chat(idx=1)
+    assert len(full_events) == 4
+    message_events = [e for e in full_events if e.get("idx") is not None]
+    assert len(message_events) == 2  # 2 messages with idx
+
+    # Get with before=1 should return only message with idx=0 and its events
+    response = client.get(f"/api/dialogs/{dialog_id}/history?limit=10&before=1")
     assert response.status_code == 200
 
     events = response.json()["events"]
-    assert len(events) == 3
-    assert events[0]["type"] == "user"
-    assert events[1]["type"] == "reasoning"
-    assert events[2]["type"] == "reasoning"
+
+    # Should have only message with idx=0 (no reasoning since reasoning is for idx=1)
+    message_events = [e for e in events if e.get("idx") is not None]
+    assert len(message_events) == 1
+    assert message_events[0]["idx"] == 0
+    assert message_events[0]["type"] == "user"
 
 
 if __name__ == "__main__":
