@@ -158,16 +158,16 @@ class DialogReasoningStorage:
 
     def get_for_indices(self, message_indices: set[int]) -> list[ReasoningBlock]:
         """Get reasoning blocks for specific message indices (optimized SQL query).
-        
+
         Args:
             message_indices: Set of message indices to load reasoning for
-            
+
         Returns:
             List of reasoning blocks for the specified indices
         """
         if not message_indices:
             return []
-        
+
         self._ensure_db()
         try:
             engine = self._get_engine()

@@ -38,19 +38,23 @@ async def _build_history_response(
     try:
         history = project.get_dialog_history(dialog_id)
         total_visible = history.get_messages_count()  # SQL COUNT without ToolMessages
-        
+
         # Calculate slice range for visible messages
         if before is not None:
             # before is a position in the visible message list (sequential index)
             end_pos = before
             start_pos = max(0, end_pos - limit)
-            messages, original_indices, message_db_ids = history.get_messages_slice(start_pos, end_pos)
+            messages, original_indices, message_db_ids = history.get_messages_slice(
+                start_pos, end_pos
+            )
         else:
             # Get last `limit` visible messages
             end_pos = total_visible
             start_pos = max(0, end_pos - limit)
-            messages, original_indices, message_db_ids = history.get_messages_slice(start_pos, end_pos)
-        
+            messages, original_indices, message_db_ids = history.get_messages_slice(
+                start_pos, end_pos
+            )
+
         message_indices = set(original_indices)
         has_more = start_pos > 0
         total_messages = total_visible
@@ -82,7 +86,7 @@ async def _build_history_response(
                         model_name=block.model_name,
                     )
                 )
-            
+
             # Load orphan reasoning (message_index=-1) when loading the END of history
             # Orphans are current active events that haven't been linked yet
             # Show them only when we're loading the most recent messages (before=None)
@@ -131,19 +135,21 @@ async def _build_history_response(
 
     # Build event stream: collect all events with timestamps, then sort chronologically
     # Need to gather timestamps for proper ordering
-    
+
     # First, build a map of DB index -> timestamp (message id from DB)
-    message_timestamps = dict(zip(original_indices, message_db_ids))
-    
+    message_timestamps = dict(zip(original_indices, message_db_ids, strict=False))
+
     # Collect all events with (sort_key, event)
     all_events_with_sort: list[tuple[tuple[int, str, int], HistoryEvent]] = []
     # sort_key = (db_idx, timestamp_str, priority) for stable sorting
-    
+
     # Track sequential index for non-empty messages only
     non_empty_count = 0
-    
+
     # Process messages: use sequential idx for client, but original DB indices for linking data
-    for msg, db_idx, msg_db_id in zip(messages, original_indices, message_db_ids):
+    for msg, db_idx, msg_db_id in zip(
+        messages, original_indices, message_db_ids, strict=False
+    ):
         msg_type = msg.type
 
         # Skip ToolMessage - already filtered by SQL
@@ -153,9 +159,9 @@ async def _build_history_response(
         # Check if this is empty AI
         content_str = msg.content if isinstance(msg.content, str) else str(msg.content)
         is_empty_ai = msg_type == MessageType.AI.value and not content_str.strip()
-        
+
         # Collect all events for this message
-        
+
         # 1. Reasoning blocks (have created_at timestamps)
         if db_idx in reasoning_by_msg_idx:
             for reasoning_event in reasoning_by_msg_idx[db_idx]:
@@ -177,25 +183,33 @@ async def _build_history_response(
 
             client_idx = start_pos + non_empty_count
             non_empty_count += 1
-            
+
             message_event = HistoryEvent(
                 type=event_type,
                 content=content_str,
                 idx=client_idx,
             )
             # Priority 1 for message
-            all_events_with_sort.append(
-                ((db_idx, "1_message", 1), message_event)
-            )
+            all_events_with_sort.append(((db_idx, "1_message", 1), message_event))
 
         # 3. Tool calls (no timestamp, use message timestamp)
         try:
             if hasattr(msg, "tool_calls") and msg.tool_calls:
                 for tc_idx, tc in enumerate(msg.tool_calls):
-                    tc_id = tc.get("id") if isinstance(tc, dict) else getattr(tc, "id", "")
-                    tc_name = tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", "")
-                    tc_args = tc.get("args") if isinstance(tc, dict) else getattr(tc, "args", {})
-                    
+                    tc_id = (
+                        tc.get("id") if isinstance(tc, dict) else getattr(tc, "id", "")
+                    )
+                    tc_name = (
+                        tc.get("name")
+                        if isinstance(tc, dict)
+                        else getattr(tc, "name", "")
+                    )
+                    tc_args = (
+                        tc.get("args")
+                        if isinstance(tc, dict)
+                        else getattr(tc, "args", {})
+                    )
+
                     tool_call_event = HistoryEvent(
                         type=EventType.TOOL_CALL.value,
                         id=tc_id,
@@ -213,20 +227,16 @@ async def _build_history_response(
         if db_idx in file_edits_by_msg_idx:
             for edit_event in file_edits_by_msg_idx[db_idx]:
                 # Priority 3 for file_edits
-                all_events_with_sort.append(
-                    ((db_idx, "3_file_edit", 3), edit_event)
-                )
+                all_events_with_sort.append(((db_idx, "3_file_edit", 3), edit_event))
 
     # 5. Orphan reasoning at the end (highest db_idx + 1)
     orphan_db_idx = max(original_indices) + 1 if original_indices else 0
     for orphan_event in orphan_reasoning:
-        all_events_with_sort.append(
-            ((orphan_db_idx, "4_orphan", 4), orphan_event)
-        )
-    
+        all_events_with_sort.append(((orphan_db_idx, "4_orphan", 4), orphan_event))
+
     # Sort by (db_idx, priority_string, priority_int) to maintain chronological order
     all_events_with_sort.sort(key=lambda x: x[0])
-    
+
     # Extract events in sorted order
     events_data = [event for _, event in all_events_with_sort]
 

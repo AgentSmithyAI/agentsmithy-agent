@@ -10,16 +10,14 @@ even for per-dialog databases, for compatibility and future-proofing.
 
 from __future__ import annotations
 
+import json
+import sqlite3
 from collections.abc import Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import json
-import sqlite3
-
 from langchain_community.chat_message_histories import SQLChatMessageHistory
-from langchain_core.messages import BaseMessage
-from langchain_core.messages import messages_from_dict
+from langchain_core.messages import BaseMessage, messages_from_dict
 
 if TYPE_CHECKING:
     from agentsmithy_server.core.project import Project
@@ -120,7 +118,7 @@ class DialogHistory:
 
     def get_messages_count(self) -> int:
         """Get total count of non-empty visible messages via direct SQL.
-        
+
         Only counts messages that will have idx (non-ToolMessage, non-empty AI).
         """
         try:
@@ -135,7 +133,7 @@ class DialogHistory:
                       AND TRIM(COALESCE(json_extract(message, '$.data.content'), '')) = ''
                   )
                 """,
-                (self.dialog_id,)
+                (self.dialog_id,),
             )
             count = cursor.fetchone()[0]
             conn.close()
@@ -148,7 +146,11 @@ class DialogHistory:
                 if msg.type == "tool":
                     continue
                 if msg.type == "ai":
-                    content = msg.content if isinstance(msg.content, str) else str(msg.content)
+                    content = (
+                        msg.content
+                        if isinstance(msg.content, str)
+                        else str(msg.content)
+                    )
                     if not content.strip():
                         continue
                 count += 1
@@ -174,10 +176,10 @@ class DialogHistory:
         """
         if start_index is None:
             start_index = 0
-        
+
         try:
             conn = sqlite3.connect(str(self.db_path))
-            
+
             # Calculate LIMIT and OFFSET for visible messages
             if end_index is None:
                 sql_limit = -1  # No limit in SQLite
@@ -185,10 +187,10 @@ class DialogHistory:
             else:
                 sql_limit = end_index - start_index
                 sql_offset = start_index
-            
+
             # Strategy: Load non-empty messages by indices, then add ALL nearby messages
             # (including empty AI) to get their tool_calls
-            
+
             # First, get the slice of non-empty messages
             cursor1 = conn.execute(
                 """
@@ -209,19 +211,19 @@ class DialogHistory:
                 ORDER BY row_num
                 LIMIT ? OFFSET ?
                 """,
-                (self.dialog_id, sql_limit, sql_offset)
+                (self.dialog_id, sql_limit, sql_offset),
             )
-            
+
             non_empty_indices = cursor1.fetchall()
-            
+
             if not non_empty_indices:
                 conn.close()
                 return [], [], []
-            
+
             # Get range of DB row_nums to load (with padding for empty AI)
             min_row_num = non_empty_indices[0][0]
             max_row_num = non_empty_indices[-1][0]
-            
+
             # Now load ALL visible messages in that range (to capture empty AI with tool_calls)
             cursor2 = conn.execute(
                 """
@@ -239,12 +241,12 @@ class DialogHistory:
                 WHERE msg_type != 'tool' AND row_num >= ? AND row_num <= ?
                 ORDER BY row_num
                 """,
-                (self.dialog_id, min_row_num, max_row_num)
+                (self.dialog_id, min_row_num, max_row_num),
             )
-            
+
             rows = cursor2.fetchall()
             conn.close()
-            
+
             # Deserialize messages from JSON
             messages = []
             indices = []
@@ -257,7 +259,7 @@ class DialogHistory:
                     messages.append(msg_list[0])
                     indices.append(row_num)
                     db_ids.append(db_id)
-            
+
             return messages, indices, db_ids
         except Exception:
             # Fallback to loading all and slicing
@@ -274,9 +276,9 @@ class DialogHistory:
                 visible_indices.append(idx)
                 visible_db_ids.append(idx)  # In fallback, use idx as db_id
             return (
-                visible[start_index:end_index], 
+                visible[start_index:end_index],
                 visible_indices[start_index:end_index],
-                visible_db_ids[start_index:end_index]
+                visible_db_ids[start_index:end_index],
             )
 
     def clear(self) -> None:

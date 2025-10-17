@@ -187,7 +187,7 @@ def test_get_history_complete(client, test_project):
     assert sum(1 for e in events if e["type"] == "tool_call") == 1
     assert sum(1 for e in events if e["type"] == "chat") >= 1
     assert sum(1 for e in events if e["type"] == "user") >= 1
-    
+
     # Only messages should have idx
     for event in events:
         if event["type"] in ["user", "chat"]:
@@ -288,7 +288,7 @@ def test_get_history_pagination_custom_limit(client, test_project):
     assert data["has_more"] is True
     assert data["first_idx"] == 40  # First message index
     assert data["last_idx"] == 49  # Last message index
-    
+
     events = data["events"]
     message_events = [e for e in events if e["type"] == "user"]
     assert len(message_events) == 10
@@ -319,7 +319,7 @@ def test_get_history_pagination_with_before_cursor(client, test_project):
     assert data["has_more"] is True
     assert data["first_idx"] == 10
     assert data["last_idx"] == 29
-    
+
     events = data["events"]
     message_events = [e for e in events if e["type"] == "user"]
     assert len(message_events) == 20
@@ -334,7 +334,7 @@ def test_get_history_pagination_with_before_cursor(client, test_project):
     assert data["has_more"] is False  # No more messages before
     assert data["first_idx"] == 0
     assert data["last_idx"] == 9
-    
+
     events = data["events"]
     message_events = [e for e in events if e["type"] == "user"]
     assert len(message_events) == 10  # Only 10 messages left
@@ -375,54 +375,53 @@ def test_get_history_pagination_chronological_order(client, test_project):
 def test_get_history_sequential_indices(client, test_project):
     """Test that idx values are sequential without gaps, even when DB has ToolMessages."""
     from langchain_core.messages import AIMessage, ToolMessage
-    
+
     dialog_id = test_project.create_dialog(title="test", set_current=True)
     history = test_project.get_dialog_history(dialog_id)
-    
+
     # Add messages with ToolMessages in between
     history.add_user_message("Message 0")  # idx=0
-    history.add_ai_message("Message 1")     # idx=1
-    
+    history.add_ai_message("Message 1")  # idx=1
+
     # Add ToolMessage (should be filtered out)
     tool_msg = ToolMessage(content="tool result", tool_call_id="call_1")
-    history.add_message(tool_msg)           # DB idx=2, but NOT visible
-    
+    history.add_message(tool_msg)  # DB idx=2, but NOT visible
+
     history.add_user_message("Message 2")  # idx=2 (sequential!)
-    
+
     # Add empty AI message (should be filtered out)
     empty_ai = AIMessage(
-        content="",
-        tool_calls=[{"id": "call_2", "name": "test", "args": {}}]
+        content="", tool_calls=[{"id": "call_2", "name": "test", "args": {}}]
     )
-    history.add_message(empty_ai)           # DB idx=4, but NOT visible
-    
-    history.add_ai_message("Message 3")     # idx=3 (sequential!)
-    
+    history.add_message(empty_ai)  # DB idx=4, but NOT visible
+
+    history.add_ai_message("Message 3")  # idx=3 (sequential!)
+
     # Get history
     response = client.get(f"/api/dialogs/{dialog_id}/history")
     assert response.status_code == 200
-    
+
     data = response.json()
     # total_events counts only non-empty messages (those with idx)
     assert data["total_events"] == 4  # 4 non-empty messages
-    
+
     # Check that idx values are sequential 0,1,2,3 (empty AI doesn't get idx)
     events = data["events"]
     message_events = [e for e in events if e.get("idx") is not None]
     assert len(message_events) == 4  # Only non-empty messages have idx
-    
+
     indices = [e["idx"] for e in message_events]
     assert indices == [0, 1, 2, 3], f"Expected sequential [0,1,2,3], got {indices}"
-    
+
     # Verify tool_call from empty AI is present (without idx)
     tool_calls = [e for e in events if e["type"] == "tool_call"]
     assert len(tool_calls) == 1
     assert tool_calls[0]["name"] == "test"
-    
+
     # Test pagination with before
     response = client.get(f"/api/dialogs/{dialog_id}/history?limit=2&before=2")
     data = response.json()
-    
+
     message_events = [e for e in data["events"] if e.get("idx") is not None]
     indices = [e["idx"] for e in message_events]
     assert indices == [0, 1], f"Expected [0,1] before idx=2, got {indices}"
@@ -434,11 +433,11 @@ def test_get_history_with_orphan_reasoning(client, test_project):
     """Test that orphan reasoning (message_index=-1) appears at the end."""
     dialog_id = test_project.create_dialog(title="test", set_current=True)
     history = test_project.get_dialog_history(dialog_id)
-    
+
     # Add messages
     history.add_user_message("Question")
     history.add_ai_message("Answer")
-    
+
     # Add orphan reasoning (message_index=-1, created after messages)
     with DialogReasoningStorage(test_project, dialog_id) as storage:
         storage.save(
@@ -446,37 +445,39 @@ def test_get_history_with_orphan_reasoning(client, test_project):
             message_index=-1,
             model_name="gpt-4o",
         )
-    
+
     # Get history
     response = client.get(f"/api/dialogs/{dialog_id}/history")
     assert response.status_code == 200
-    
+
     data = response.json()
     events = data["events"]
-    
+
     # Orphan reasoning should be at the end
     reasoning_events = [e for e in events if e["type"] == "reasoning"]
     assert len(reasoning_events) == 1
-    
+
     # It should appear after all messages
     last_msg_idx = max(e.get("idx", -1) for e in events)
     reasoning_position = events.index(reasoning_events[0])
     message_positions = [i for i, e in enumerate(events) if e.get("idx") is not None]
     if message_positions:
-        assert reasoning_position > max(message_positions), "Orphan reasoning should be after messages"
+        assert reasoning_position > max(
+            message_positions
+        ), "Orphan reasoning should be after messages"
 
 
 def test_get_history_orphan_reasoning_shows_all(client, test_project):
     """Test that orphan reasoning (message_index=-1) always shows on last page.
-    
+
     Note: We don't filter by timestamp since message_store and dialog_reasoning
     are separate tables. Old orphans should be manually cleaned up or linked.
     """
     import time
-    
+
     dialog_id = test_project.create_dialog(title="test", set_current=True)
     history = test_project.get_dialog_history(dialog_id)
-    
+
     # Add old orphan reasoning BEFORE messages
     with DialogReasoningStorage(test_project, dialog_id) as storage:
         storage.save(
@@ -484,25 +485,25 @@ def test_get_history_orphan_reasoning_shows_all(client, test_project):
             message_index=-1,
             model_name="gpt-4o",
         )
-    
+
     # Small delay to ensure timestamp difference
     time.sleep(0.01)
-    
+
     # Add messages AFTER the orphan reasoning
     history.add_user_message("Question")
     history.add_ai_message("Answer")
-    
+
     # Get history - orphan WILL appear (we don't filter by timestamp)
     response = client.get(f"/api/dialogs/{dialog_id}/history")
     assert response.status_code == 200
-    
+
     data = response.json()
     events = data["events"]
-    
+
     # Orphan reasoning appears (old or new, doesn't matter)
     message_events = [e for e in events if e.get("idx") is not None]
     reasoning_events = [e for e in events if e["type"] == "reasoning"]
-    
+
     assert len(message_events) == 2
     assert len(reasoning_events) == 1  # Orphan is shown
 
@@ -510,16 +511,16 @@ def test_get_history_orphan_reasoning_shows_all(client, test_project):
 def test_get_history_orphan_reasoning_recent_only(client, test_project):
     """Test that only recent orphan reasoning (after last message) is shown."""
     import time
-    
+
     dialog_id = test_project.create_dialog(title="test", set_current=True)
     history = test_project.get_dialog_history(dialog_id)
-    
+
     # Add messages
     history.add_user_message("Question 1")
     history.add_ai_message("Answer 1")
-    
+
     time.sleep(0.01)
-    
+
     # Add new orphan reasoning AFTER messages
     with DialogReasoningStorage(test_project, dialog_id) as storage:
         storage.save(
@@ -527,14 +528,14 @@ def test_get_history_orphan_reasoning_recent_only(client, test_project):
             message_index=-1,
             model_name="gpt-4o",
         )
-    
+
     # Get history - new orphan SHOULD appear
     response = client.get(f"/api/dialogs/{dialog_id}/history")
     assert response.status_code == 200
-    
+
     data = response.json()
     events = data["events"]
-    
+
     reasoning_events = [e for e in events if e["type"] == "reasoning"]
     assert len(reasoning_events) == 1
     assert reasoning_events[0]["content"] == "Fresh thinking..."
@@ -543,16 +544,16 @@ def test_get_history_orphan_reasoning_recent_only(client, test_project):
 def test_get_history_orphan_only_in_last_page(client, test_project):
     """Test that orphan reasoning only appears when loading the last page."""
     import time
-    
+
     dialog_id = test_project.create_dialog(title="test", set_current=True)
     history = test_project.get_dialog_history(dialog_id)
-    
+
     # Add 10 messages
     for i in range(10):
         history.add_user_message(f"Message {i}")
-    
+
     time.sleep(0.01)
-    
+
     # Add orphan reasoning after all messages
     with DialogReasoningStorage(test_project, dialog_id) as storage:
         storage.save(
@@ -560,13 +561,13 @@ def test_get_history_orphan_only_in_last_page(client, test_project):
             message_index=-1,
             model_name="gpt-4o",
         )
-    
+
     # Get first 5 messages - orphan should NOT appear
     response = client.get(f"/api/dialogs/{dialog_id}/history?limit=5&before=5")
     data = response.json()
     reasoning_events = [e for e in data["events"] if e["type"] == "reasoning"]
     assert len(reasoning_events) == 0, "Orphan should not appear in earlier pages"
-    
+
     # Get last 5 messages - orphan SHOULD appear
     response = client.get(f"/api/dialogs/{dialog_id}/history?limit=5")
     data = response.json()
@@ -578,14 +579,15 @@ def test_get_history_orphan_only_in_last_page(client, test_project):
 def test_get_history_events_ordering(client, test_project):
     """Test that events appear in correct order: reasoning -> message -> tool_calls -> file_edits."""
     from langchain_core.messages import AIMessage
+
     from agentsmithy_server.dialogs.storages.file_edits import DialogFileEditStorage
-    
+
     dialog_id = test_project.create_dialog(title="test", set_current=True)
     history = test_project.get_dialog_history(dialog_id)
-    
+
     # Add user message
     history.add_user_message("Do task")
-    
+
     # Add AI message with tool calls
     ai_msg = AIMessage(
         content="I'll do it",
@@ -595,7 +597,7 @@ def test_get_history_events_ordering(client, test_project):
         ],
     )
     history.add_message(ai_msg)
-    
+
     # Add reasoning for AI message (index 1)
     with DialogReasoningStorage(test_project, dialog_id) as storage:
         storage.save(
@@ -608,34 +610,34 @@ def test_get_history_events_ordering(client, test_project):
             message_index=1,
             model_name="gpt-4o",
         )
-    
+
     # Add file edits for AI message
     with DialogFileEditStorage(test_project, dialog_id) as storage:
         storage.save(file="a.txt", message_index=1)
         storage.save(file="b.txt", message_index=1)
-    
+
     # Get history
     response = client.get(f"/api/dialogs/{dialog_id}/history")
     assert response.status_code == 200
-    
+
     data = response.json()
     events = data["events"]
-    
+
     # Find AI message position
     ai_msg_pos = next(i for i, e in enumerate(events) if e.get("idx") == 1)
-    
+
     # Check order: reasoning blocks should come BEFORE message
     reasoning_positions = [i for i, e in enumerate(events) if e["type"] == "reasoning"]
     assert len(reasoning_positions) == 2
     for pos in reasoning_positions:
         assert pos < ai_msg_pos, "Reasoning should come before message"
-    
+
     # Tool calls should come AFTER message
     tool_call_positions = [i for i, e in enumerate(events) if e["type"] == "tool_call"]
     assert len(tool_call_positions) == 2
     for pos in tool_call_positions:
         assert pos > ai_msg_pos, "Tool calls should come after message"
-    
+
     # File edits should come AFTER tool calls
     file_edit_positions = [i for i, e in enumerate(events) if e["type"] == "file_edit"]
     assert len(file_edit_positions) == 2
@@ -647,21 +649,21 @@ def test_get_history_events_ordering(client, test_project):
 def test_get_history_multiple_messages_ordering(client, test_project):
     """Test that events from different messages don't intermix."""
     from langchain_core.messages import AIMessage
-    
+
     dialog_id = test_project.create_dialog(title="test", set_current=True)
     history = test_project.get_dialog_history(dialog_id)
-    
+
     # Message 0
     history.add_user_message("Task 1")
-    
+
     # Message 1 with reasoning
     history.add_ai_message("Response 1")
     with DialogReasoningStorage(test_project, dialog_id) as storage:
         storage.save(content="Thinking 1", message_index=1, model_name="gpt-4o")
-    
-    # Message 2  
+
+    # Message 2
     history.add_user_message("Task 2")
-    
+
     # Message 3 with reasoning and tool call
     ai_msg = AIMessage(
         content="Response 2",
@@ -670,70 +672,82 @@ def test_get_history_multiple_messages_ordering(client, test_project):
     history.add_message(ai_msg)
     with DialogReasoningStorage(test_project, dialog_id) as storage:
         storage.save(content="Thinking 2", message_index=3, model_name="gpt-4o")
-    
+
     # Get history
     response = client.get(f"/api/dialogs/{dialog_id}/history")
     data = response.json()
     events = data["events"]
-    
+
     # Extract event types with their indices
     event_sequence = [(e.get("idx"), e["type"]) for e in events]
-    
+
     # Check that all events for idx=1 come before events for idx=2
     msg1_events = [i for i, (idx, _) in enumerate(event_sequence) if idx == 1]
     msg2_events = [i for i, (idx, _) in enumerate(event_sequence) if idx == 2]
     msg3_events = [i for i, (idx, _) in enumerate(event_sequence) if idx == 3]
-    
+
     # Events for message 1 should come before message 2
-    assert max(msg1_events) < min(msg2_events), "Message 1 events should come before Message 2"
-    
+    assert max(msg1_events) < min(
+        msg2_events
+    ), "Message 1 events should come before Message 2"
+
     # Events for message 2 should come before message 3
-    assert max(msg2_events) < min(msg3_events), "Message 2 events should come before Message 3"
+    assert max(msg2_events) < min(
+        msg3_events
+    ), "Message 2 events should come before Message 3"
 
 
 def test_get_history_with_many_empty_ai_messages(client, test_project):
     """Test pagination when there are many empty AI messages with tool_calls.
-    
+
     Reproduces the issue where limit=4 should return 4 non-empty messages,
     but actually returns only 1 because start_pos calculation is wrong.
     """
     from langchain_core.messages import AIMessage, ToolMessage
-    
+
     dialog_id = test_project.create_dialog(title="test", set_current=True)
     history = test_project.get_dialog_history(dialog_id)
-    
+
     # Simulate real scenario: user asks, agent responds, then does 5 tool calls
     history.add_user_message("Question 1")  # idx=0
-    history.add_ai_message("Answer 1")       # idx=1
-    
+    history.add_ai_message("Answer 1")  # idx=1
+
     # 5 empty AI messages with tool_calls (like in real dialog)
     for i in range(5):
         empty_ai = AIMessage(
             content="",
-            tool_calls=[{"id": f"call_{i}", "name": "read_file", "args": {"path": f"file{i}.txt"}}]
+            tool_calls=[
+                {
+                    "id": f"call_{i}",
+                    "name": "read_file",
+                    "args": {"path": f"file{i}.txt"},
+                }
+            ],
         )
         history.add_message(empty_ai)
         # Add ToolMessage result
         tool_result = ToolMessage(content=f"result {i}", tool_call_id=f"call_{i}")
         history.add_message(tool_result)
-    
+
     history.add_user_message("Question 2")  # idx=2
-    history.add_ai_message("Answer 2")       # idx=3
-    
+    history.add_ai_message("Answer 2")  # idx=3
+
     # Total: 4 non-empty (2 user + 2 ai) + 5 empty AI + 5 ToolMessage
     # Visible (non-ToolMessage): 4 non-empty + 5 empty = 9
-    
+
     # Request last 4 messages - should get 4 NON-EMPTY messages with idx
     response = client.get(f"/api/dialogs/{dialog_id}/history?limit=4")
     data = response.json()
-    
+
     # Should have exactly 4 messages with idx (the 4 non-empty ones)
     message_events = [e for e in data["events"] if e.get("idx") is not None]
-    assert len(message_events) == 4, f"Expected 4 messages with idx, got {len(message_events)}"
-    
+    assert (
+        len(message_events) == 4
+    ), f"Expected 4 messages with idx, got {len(message_events)}"
+
     indices = [e["idx"] for e in message_events]
     assert indices == [0, 1, 2, 3], f"Expected [0,1,2,3], got {indices}"
-    
+
     # But should also have 5 tool_calls from empty AI messages
     tool_calls = [e for e in data["events"] if e["type"] == "tool_call"]
     assert len(tool_calls) == 5, f"Expected 5 tool_calls, got {len(tool_calls)}"
@@ -741,4 +755,3 @@ def test_get_history_with_many_empty_ai_messages(client, test_project):
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
-

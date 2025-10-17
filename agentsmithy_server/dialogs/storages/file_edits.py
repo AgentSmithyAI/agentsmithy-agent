@@ -157,16 +157,16 @@ class DialogFileEditStorage:
 
     def get_for_indices(self, message_indices: set[int]) -> list[FileEditEvent]:
         """Get file edit events for specific message indices (optimized SQL query).
-        
+
         Args:
             message_indices: Set of message indices to load edits for
-            
+
         Returns:
             List of file edit events for the specified indices
         """
         if not message_indices:
             return []
-        
+
         self._ensure_db()
         try:
             engine = self._get_engine()
