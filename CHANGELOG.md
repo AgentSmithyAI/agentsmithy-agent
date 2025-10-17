@@ -1,3 +1,10 @@
+## [1.4.1](https://github.com/AgentSmithyAI/agentsmithy-agent/compare/v1.4.0...v1.4.1) (2025-10-17)
+
+
+### Bug Fixes
+
+* Fix history performance ([#27](https://github.com/AgentSmithyAI/agentsmithy-agent/issues/27)) ([6da1ade](https://github.com/AgentSmithyAI/agentsmithy-agent/commit/6da1ade5a5f4fce2fdf37e3ae68f4a8504c7b4f8))
+
 # [1.4.0](https://github.com/AgentSmithyAI/agentsmithy-agent/compare/v1.3.0...v1.4.0) (2025-10-16)
 
 
