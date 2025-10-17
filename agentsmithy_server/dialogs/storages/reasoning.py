@@ -156,6 +156,29 @@ class DialogReasoningStorage:
             )
             return []
 
+    def count_all(self) -> int:
+        """Count total number of reasoning blocks in the dialog.
+
+        Returns:
+            Total count of reasoning blocks
+        """
+        self._ensure_db()
+        try:
+            engine = self._get_engine()
+            with get_session(engine) as session:
+                from sqlalchemy import func
+
+                stmt = select(func.count(DialogReasoningORM.id)).where(
+                    DialogReasoningORM.dialog_id == self.dialog_id
+                )
+                count = session.execute(stmt).scalar()
+                return count or 0
+        except Exception as e:
+            agent_logger.error(
+                "Failed to count reasoning blocks", exc_info=True, error=str(e)
+            )
+            return 0
+
     def get_for_indices(self, message_indices: set[int]) -> list[ReasoningBlock]:
         """Get reasoning blocks for specific message indices (optimized SQL query).
 

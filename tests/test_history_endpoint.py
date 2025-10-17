@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 from agentsmithy_server.api.app import create_app
 from agentsmithy_server.core.project import Project
+from agentsmithy_server.dialogs.storages.file_edits import DialogFileEditStorage
 from agentsmithy_server.dialogs.storages.reasoning import DialogReasoningStorage
 
 
@@ -179,7 +180,8 @@ def test_get_history_complete(client, test_project):
 
     data = response.json()
     assert data["dialog_id"] == dialog_id
-    assert data["total_events"] == 2  # 2 messages (user + ai)
+    # total_events = 2 messages + 1 reasoning + 1 tool_call = 4
+    assert data["total_events"] == 4
 
     # Verify all event types are present
     events = data["events"]
@@ -402,8 +404,8 @@ def test_get_history_sequential_indices(client, test_project):
     assert response.status_code == 200
 
     data = response.json()
-    # total_events counts only non-empty messages (those with idx)
-    assert data["total_events"] == 4  # 4 non-empty messages
+    # total_events = 4 non-empty messages + 1 tool_call = 5
+    assert data["total_events"] == 5
 
     # Check that idx values are sequential 0,1,2,3 (empty AI doesn't get idx)
     events = data["events"]
@@ -750,6 +752,55 @@ def test_get_history_with_many_empty_ai_messages(client, test_project):
     # But should also have 5 tool_calls from empty AI messages
     tool_calls = [e for e in data["events"] if e["type"] == "tool_call"]
     assert len(tool_calls) == 5, f"Expected 5 tool_calls, got {len(tool_calls)}"
+
+
+def test_get_history_total_events_count(client, test_project):
+    """Test that total_events correctly counts all event types."""
+    from langchain_core.messages import AIMessage
+
+    # Create dialog with all event types
+    dialog_id = test_project.create_dialog(title="test", set_current=True)
+    history = test_project.get_dialog_history(dialog_id)
+
+    # Add 3 user messages and 3 AI messages (6 messages total)
+    for i in range(3):
+        history.add_user_message(f"User message {i}")
+        ai_msg = AIMessage(
+            content=f"AI response {i}",
+            tool_calls=[{"id": f"call_{i}", "name": "tool", "args": {"param": i}}],
+        )
+        history.add_message(ai_msg)
+
+    # Add 2 reasoning blocks
+    with DialogReasoningStorage(test_project, dialog_id) as storage:
+        storage.save(content="Reasoning 1", message_index=1, model_name="gpt-4o")
+        storage.save(content="Reasoning 2", message_index=3, model_name="gpt-4o")
+
+    # Add 2 file edits
+    with DialogFileEditStorage(test_project, dialog_id) as storage:
+        storage.save(file="file1.py", diff="diff1", message_index=1)
+        storage.save(file="file2.py", diff="diff2", message_index=3)
+
+    # Get history
+    response = client.get(f"/api/dialogs/{dialog_id}/history")
+    assert response.status_code == 200
+
+    data = response.json()
+
+    # total_events = 6 messages + 3 tool_calls + 2 reasoning + 2 file_edits = 13
+    assert data["total_events"] == 13, f"Expected 13, got {data['total_events']}"
+
+    # Verify breakdown in returned events
+    events = data["events"]
+    message_count = sum(1 for e in events if e["type"] in ["user", "chat"])
+    reasoning_count = sum(1 for e in events if e["type"] == "reasoning")
+    tool_call_count = sum(1 for e in events if e["type"] == "tool_call")
+    file_edit_count = sum(1 for e in events if e["type"] == "file_edit")
+
+    assert message_count == 6, f"Expected 6 messages, got {message_count}"
+    assert reasoning_count == 2, f"Expected 2 reasoning, got {reasoning_count}"
+    assert tool_call_count == 3, f"Expected 3 tool_calls, got {tool_call_count}"
+    assert file_edit_count == 2, f"Expected 2 file_edits, got {file_edit_count}"
 
 
 if __name__ == "__main__":

@@ -83,7 +83,9 @@ class DialogHistoryResponse(BaseModel):
 
     dialog_id: str
     events: list[HistoryEvent]  # Chronological event stream
-    total_events: int  # Total number of events in the full history
+    total_events: (
+        int  # Total count of ALL events: messages + reasoning + tool_calls + file_edits
+    )
     has_more: bool  # Whether there are more events before the returned ones
     first_idx: int  # Index of the first event in the returned list
     last_idx: int  # Index of the last event in the returned list

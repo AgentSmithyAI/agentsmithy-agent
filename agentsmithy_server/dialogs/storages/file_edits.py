@@ -155,6 +155,29 @@ class DialogFileEditStorage:
             )
             return []
 
+    def count_all(self) -> int:
+        """Count total number of file edit events in the dialog.
+
+        Returns:
+            Total count of file edit events
+        """
+        self._ensure_db()
+        try:
+            engine = self._get_engine()
+            with get_session(engine) as session:
+                from sqlalchemy import func
+
+                stmt = select(func.count(DialogFileEditORM.id)).where(
+                    DialogFileEditORM.dialog_id == self.dialog_id
+                )
+                count = session.execute(stmt).scalar()
+                return count or 0
+        except Exception as e:
+            agent_logger.error(
+                "Failed to count file edit events", exc_info=True, error=str(e)
+            )
+            return 0
+
     def get_for_indices(self, message_indices: set[int]) -> list[FileEditEvent]:
         """Get file edit events for specific message indices (optimized SQL query).
 

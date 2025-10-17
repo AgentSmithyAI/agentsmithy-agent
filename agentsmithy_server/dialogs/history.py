@@ -141,6 +141,28 @@ class DialogHistory:
             # Don't silently fall back - if SQL fails, it's a real problem
             raise
 
+    def count_tool_calls(self) -> int:
+        """Count total number of tool calls across all messages.
+
+        Returns:
+            Total count of tool calls in the dialog
+        """
+        try:
+            with sqlite3.connect(str(self.db_path)) as conn:
+                cursor = conn.execute(
+                    """
+                    SELECT SUM(json_array_length(json_extract(message, '$.data.tool_calls')))
+                    FROM message_store 
+                    WHERE session_id = ? 
+                      AND json_extract(message, '$.data.tool_calls') IS NOT NULL
+                    """,
+                    (self.dialog_id,),
+                )
+                count = cursor.fetchone()[0]
+                return count or 0
+        except Exception:
+            return 0
+
     def get_messages_slice(
         self, start_index: int | None = None, end_index: int | None = None
     ) -> tuple[list[BaseMessage], list[int], list[int]]:

@@ -30,7 +30,7 @@ Returns dialog history as SSE event stream (same format as `POST /api/chat` stre
 **Response fields:**
 - `dialog_id` - Dialog identifier
 - `events` - Array of history events (in chronological order)
-- `total_events` - Total number of events in the full history
+- `total_events` - Total count of **all** events in the dialog (messages + reasoning blocks + tool calls + file edits)
 - `has_more` - `true` if there are more events before the current page (for infinite scroll)
 - `first_idx` - Index of the first event in the returned list
 - `last_idx` - Index of the last event in the returned list

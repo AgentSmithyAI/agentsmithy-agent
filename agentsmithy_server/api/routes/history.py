@@ -379,6 +379,81 @@ def _calculate_pagination_metadata(
     return first_idx, last_idx
 
 
+def _count_total_events(project: Project, dialog_id: str) -> int:
+    """Count total number of all events in the dialog using single DB query.
+
+    This includes:
+    - Messages (user, chat, system, etc.)
+    - Reasoning blocks
+    - Tool calls
+    - File edits
+
+    Args:
+        project: Project instance
+        dialog_id: Dialog identifier
+
+    Returns:
+        Total count of all events
+    """
+    import sqlite3
+
+    try:
+        history = project.get_dialog_history(dialog_id)
+        db_path = history.db_path
+
+        # Single connection, multiple COUNTs in one query
+        with sqlite3.connect(str(db_path)) as conn:
+            cursor = conn.execute(
+                """
+                SELECT 
+                    -- Count non-empty visible messages
+                    (SELECT COUNT(*) FROM message_store 
+                     WHERE session_id = ? 
+                       AND json_extract(message, '$.type') != 'tool'
+                       AND NOT (
+                           json_extract(message, '$.type') = 'ai' 
+                           AND TRIM(COALESCE(json_extract(message, '$.data.content'), '')) = ''
+                       )
+                    ) as messages_count,
+                    
+                    -- Count tool calls
+                    (SELECT COALESCE(SUM(json_array_length(json_extract(message, '$.data.tool_calls'))), 0)
+                     FROM message_store 
+                     WHERE session_id = ? 
+                       AND json_extract(message, '$.data.tool_calls') IS NOT NULL
+                    ) as tool_calls_count,
+                    
+                    -- Count reasoning blocks
+                    (SELECT COUNT(*) FROM dialog_reasoning WHERE dialog_id = ?) as reasoning_count,
+                    
+                    -- Count file edits
+                    (SELECT COUNT(*) FROM dialog_file_edits WHERE dialog_id = ?) as file_edits_count
+                """,
+                (dialog_id, dialog_id, dialog_id, dialog_id),
+            )
+            result = cursor.fetchone()
+            if result:
+                messages_count, tool_calls_count, reasoning_count, file_edits_count = (
+                    result
+                )
+                total = (
+                    messages_count
+                    + tool_calls_count
+                    + reasoning_count
+                    + file_edits_count
+                )
+                return total
+            return 0
+    except Exception as e:
+        api_logger.error(
+            "Failed to count total events",
+            exc_info=True,
+            error=str(e),
+            dialog_id=dialog_id,
+        )
+        return 0
+
+
 async def _build_history_response(
     project: Project, dialog_id: str, limit: int = 20, before: int | None = None
 ) -> DialogHistoryResponse:
@@ -417,10 +492,13 @@ async def _build_history_response(
     # Step 5: Calculate pagination metadata
     first_idx, last_idx = _calculate_pagination_metadata(events)
 
+    # Step 6: Count total events (all event types)
+    total_events = _count_total_events(project, dialog_id)
+
     return DialogHistoryResponse(
         dialog_id=dialog_id,
         events=events,
-        total_events=messages_data.total_visible,
+        total_events=total_events,
         has_more=messages_data.has_more,
         first_idx=first_idx,
         last_idx=last_idx,
