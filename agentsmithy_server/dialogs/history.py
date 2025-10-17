@@ -138,22 +138,8 @@ class DialogHistory:
                 count = cursor.fetchone()[0]
                 return count
         except Exception:
-            # Fallback to loading all and filtering
-            messages = self._get_all_messages()
-            count = 0
-            for msg in messages:
-                if msg.type == "tool":
-                    continue
-                if msg.type == "ai":
-                    content = (
-                        msg.content
-                        if isinstance(msg.content, str)
-                        else str(msg.content)
-                    )
-                    if not content.strip():
-                        continue
-                count += 1
-            return count
+            # Don't silently fall back - if SQL fails, it's a real problem
+            raise
 
     def get_messages_slice(
         self, start_index: int | None = None, end_index: int | None = None
@@ -258,24 +244,8 @@ class DialogHistory:
 
                 return messages, indices, db_ids
         except Exception:
-            # Fallback to loading all and slicing
-            all_msgs = self._get_all_messages()
-            visible = []
-            visible_indices = []
-            visible_db_ids = []
-            for idx, msg in enumerate(all_msgs):
-                # Skip only ToolMessages
-                if msg.type == "tool":
-                    continue
-                # Keep empty AI messages (they may have tool_calls)
-                visible.append(msg)
-                visible_indices.append(idx)
-                visible_db_ids.append(idx)  # In fallback, use idx as db_id
-            return (
-                visible[start_index:end_index],
-                visible_indices[start_index:end_index],
-                visible_db_ids[start_index:end_index],
-            )
+            # Don't silently fall back - if SQL fails, it's a real problem
+            raise
 
     def clear(self) -> None:
         """Clear all messages from the history."""
