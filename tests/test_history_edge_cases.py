@@ -77,8 +77,7 @@ def test_empty_ai_after_pagination_limit(client, test_project):
     # BUG: Should also have tool_call from empty AI at position 10
     # But it's outside the pagination window!
     tool_calls = [e for e in data["events"] if e["type"] == "tool_call"]
-    print(f"Tool calls found: {len(tool_calls)}")
-    print(f"Events: {[e['type'] for e in data['events']]}")
 
     # This SHOULD be 1, but might be 0 if not loaded
-    assert len(tool_calls) == 1, f"Expected 1 tool_call, got {len(tool_calls)}"
+    event_types = [e['type'] for e in data['events']]
+    assert len(tool_calls) == 1, f"Expected 1 tool_call, got {len(tool_calls)}. Events: {event_types}"
