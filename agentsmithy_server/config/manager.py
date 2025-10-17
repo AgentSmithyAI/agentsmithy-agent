@@ -78,15 +78,18 @@ class ConfigManager:
         """Set a configuration value and persist it."""
         # Update in-memory config
         self._config[key] = value
-        
+
         # Update only user config (without defaults)
-        if hasattr(self.provider, '_user_config') and self.provider._user_config is not None:
+        if (
+            hasattr(self.provider, "_user_config")
+            and self.provider._user_config is not None
+        ):
             self.provider._user_config[key] = value
             await self.provider.save(self.provider._user_config)
         else:
             # Fallback for providers without user_config tracking
             await self.provider.save(self._config)
-        
+
         logger.info("Configuration updated", key=key)
         self._notify_callbacks()
 
@@ -94,15 +97,18 @@ class ConfigManager:
         """Update multiple configuration values at once."""
         # Update in-memory config
         self._config.update(updates)
-        
+
         # Update only user config (without defaults)
-        if hasattr(self.provider, '_user_config') and self.provider._user_config is not None:
+        if (
+            hasattr(self.provider, "_user_config")
+            and self.provider._user_config is not None
+        ):
             self.provider._user_config.update(updates)
             await self.provider.save(self.provider._user_config)
         else:
             # Fallback for providers without user_config tracking
             await self.provider.save(self._config)
-        
+
         logger.info("Configuration updated", keys=list(updates.keys()))
         self._notify_callbacks()
 

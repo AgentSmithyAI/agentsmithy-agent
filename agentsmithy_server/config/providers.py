@@ -49,7 +49,9 @@ class LocalFileConfigProvider(ConfigProvider):
         self._callback: Callable[[dict[str, Any]], None] | None = None
         self._last_mtime: float | None = None
         self._last_valid_config: dict[str, Any] | None = None
-        self._user_config: dict[str, Any] | None = None  # Original user config without defaults
+        self._user_config: dict[str, Any] | None = (
+            None  # Original user config without defaults
+        )
         self._loop: asyncio.AbstractEventLoop | None = None
 
     async def load(self) -> dict[str, Any]:

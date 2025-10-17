@@ -167,12 +167,21 @@ class Settings:
     # LLM Configuration
     @property
     def model(self) -> str:
-        # Canonical: from models.agents.universal.model, fallback to env/legacy
+        # Canonical: from models.agents.universal, supporting both old and new structure
         agents = self._get("models.agents", None)
         if isinstance(agents, dict):
             uni = agents.get("universal")
-            if isinstance(uni, dict) and isinstance(uni.get("model"), str):
-                return str(uni.get("model"))
+            if isinstance(uni, dict):
+                # New structure: resolve from provider
+                if "provider" in uni:
+                    provider_name = uni.get("provider")
+                    if provider_name:
+                        provider_def = self._get(f"providers.{provider_name}", None)
+                        if isinstance(provider_def, dict) and "model" in provider_def:
+                            return str(provider_def.get("model"))
+                # Old structure: direct model field
+                if "model" in uni and isinstance(uni.get("model"), str):
+                    return str(uni.get("model"))
         legacy = self._get("model", "gpt-5", "MODEL")
         return str(legacy)
 

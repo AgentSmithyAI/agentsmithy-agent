@@ -80,15 +80,14 @@ class OpenAIProvider:
 
         # Apply explicit parameters with highest priority, then resolved values, then global defaults
         self.model = (
-            model
-            or resolved_model
-            or settings.openai_chat_model
-            or settings.model
+            model or resolved_model or settings.openai_chat_model or settings.model
         )
         self.api_key = api_key or resolved_api_key
         self.base_url = base_url or resolved_base_url
-        self.provider_options = resolved_options if isinstance(resolved_options, dict) else {}
-        
+        self.provider_options = (
+            resolved_options if isinstance(resolved_options, dict) else {}
+        )
+
         # Temperature and max_tokens are not in provider definition; use explicit or settings defaults
         self.temperature = (
             temperature if temperature is not None else settings.openai_chat_temperature

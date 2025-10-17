@@ -75,8 +75,8 @@ async def test_config_manager_initialization():
         await manager.initialize()
 
         assert (
-            manager.get("models")["agents"]["universal"]["model"]
-            == defaults["models"]["agents"]["universal"]["model"]
+            manager.get("models")["agents"]["universal"]["provider"]
+            == defaults["models"]["agents"]["universal"]["provider"]
         )
 
 
@@ -168,7 +168,10 @@ async def test_settings_with_config_manager():
         settings = Settings(config_manager=manager)
 
         # Test property access
-        assert settings.model == defaults["models"]["agents"]["universal"]["model"]
+        # With new structure, model is resolved from provider definition
+        provider_name = defaults["models"]["agents"]["universal"]["provider"]
+        expected_model = defaults["providers"][provider_name]["model"]
+        assert settings.model == expected_model
         assert settings.streaming_enabled == defaults["streaming_enabled"]
 
 
