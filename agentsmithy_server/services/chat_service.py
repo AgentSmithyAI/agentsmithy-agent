@@ -151,9 +151,17 @@ class ChatService:
         for task in self._active_streams:
             if not task.done():
                 task.cancel()
-        # Wait for all tasks to complete
+        # Wait for all tasks to complete with timeout
         if self._active_streams:
-            await asyncio.gather(*self._active_streams, return_exceptions=True)
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*self._active_streams, return_exceptions=True),
+                    timeout=2.0,
+                )
+            except (TimeoutError, asyncio.CancelledError):
+                # Shutdown interrupted or timed out, that's ok
+                api_logger.debug("Stream cleanup interrupted during shutdown")
+                pass
 
     async def _process_structured_chunk(
         self,
