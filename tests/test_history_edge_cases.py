@@ -79,5 +79,7 @@ def test_empty_ai_after_pagination_limit(client, test_project):
     tool_calls = [e for e in data["events"] if e["type"] == "tool_call"]
 
     # This SHOULD be 1, but might be 0 if not loaded
-    event_types = [e['type'] for e in data['events']]
-    assert len(tool_calls) == 1, f"Expected 1 tool_call, got {len(tool_calls)}. Events: {event_types}"
+    event_types = [e["type"] for e in data["events"]]
+    assert (
+        len(tool_calls) == 1
+    ), f"Expected 1 tool_call, got {len(tool_calls)}. Events: {event_types}"
