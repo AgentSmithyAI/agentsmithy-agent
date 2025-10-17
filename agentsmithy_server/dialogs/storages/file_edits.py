@@ -154,3 +154,49 @@ class DialogFileEditStorage:
                 "Failed to load file edit events", exc_info=True, error=str(e)
             )
             return []
+
+    def get_for_indices(self, message_indices: set[int]) -> list[FileEditEvent]:
+        """Get file edit events for specific message indices (optimized SQL query).
+        
+        Args:
+            message_indices: Set of message indices to load edits for
+            
+        Returns:
+            List of file edit events for the specified indices
+        """
+        if not message_indices:
+            return []
+        
+        self._ensure_db()
+        try:
+            engine = self._get_engine()
+            with get_session(engine) as session:
+                stmt = (
+                    select(DialogFileEditORM)
+                    .where(
+                        DialogFileEditORM.dialog_id == self.dialog_id,
+                        DialogFileEditORM.message_index.in_(list(message_indices)),
+                    )
+                    .order_by(DialogFileEditORM.created_at)
+                )
+                rows = session.execute(stmt).scalars().all()
+                return [
+                    FileEditEvent(
+                        id=row.id,
+                        dialog_id=row.dialog_id,
+                        file=row.file,
+                        diff=row.diff,
+                        checkpoint=row.checkpoint,
+                        created_at=row.created_at,
+                        message_index=row.message_index,
+                    )
+                    for row in rows
+                ]
+        except Exception as e:
+            agent_logger.error(
+                "Failed to load file edits for indices",
+                exc_info=True,
+                error=str(e),
+                indices_count=len(message_indices),
+            )
+            return []

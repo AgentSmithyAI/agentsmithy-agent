@@ -4,9 +4,9 @@
 from importlib import import_module
 
 MODULES = [
-    "agentsmithy_server.core.providers.openai.models.gpt4_1",
-    "agentsmithy_server.core.providers.openai.models.gpt5",
-    "agentsmithy_server.core.providers.openai.models.gpt5_mini",
+    "agentsmithy_server.llm.providers.openai.models.gpt4_1",
+    "agentsmithy_server.llm.providers.openai.models.gpt5",
+    "agentsmithy_server.llm.providers.openai.models.gpt5_mini",
 ]
 
 for m in MODULES:

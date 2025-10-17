@@ -14,8 +14,12 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import json
+import sqlite3
+
 from langchain_community.chat_message_histories import SQLChatMessageHistory
 from langchain_core.messages import BaseMessage
+from langchain_core.messages import messages_from_dict
 
 if TYPE_CHECKING:
     from agentsmithy_server.core.project import Project
@@ -28,6 +32,7 @@ class DialogHistory:
         self.project = project
         self.dialog_id = dialog_id
         self._history: SQLChatMessageHistory | None = None
+        self._cached_messages: list[BaseMessage] | None = None
 
     @property
     def db_path(self) -> Path:
@@ -64,6 +69,7 @@ class DialogHistory:
     def add_user_message(self, content: str) -> None:
         """Add a user message to the history."""
         self.history.add_user_message(content)
+        self._cached_messages = None  # Invalidate cache
         # Touch dialog metadata updated_at
         try:
             self.project.upsert_dialog_meta(self.dialog_id)
@@ -73,6 +79,7 @@ class DialogHistory:
     def add_ai_message(self, content: str) -> None:
         """Add an AI message to the history."""
         self.history.add_ai_message(content)
+        self._cached_messages = None  # Invalidate cache
         # Touch dialog metadata updated_at
         try:
             self.project.upsert_dialog_meta(self.dialog_id)
@@ -82,6 +89,7 @@ class DialogHistory:
     def add_message(self, message: BaseMessage) -> None:
         """Add a generic LangChain BaseMessage to the history."""
         self.history.add_message(message)
+        self._cached_messages = None  # Invalidate cache
         try:
             self.project.upsert_dialog_meta(self.dialog_id)
         except Exception:
@@ -91,21 +99,190 @@ class DialogHistory:
         """Add multiple messages atomically where possible."""
         for msg in messages:
             self.history.add_message(msg)
+        self._cached_messages = None  # Invalidate cache
         try:
             self.project.upsert_dialog_meta(self.dialog_id)
         except Exception:
             pass
 
+    def _get_all_messages(self) -> list[BaseMessage]:
+        """Get all messages with caching."""
+        if self._cached_messages is None:
+            self._cached_messages = self.history.messages
+        return self._cached_messages
+
     def get_messages(self, limit: int | None = None) -> list[BaseMessage]:
         """Get messages from history, optionally limiting to last N messages."""
-        messages = self.history.messages
+        messages = self._get_all_messages()
         if limit and len(messages) > limit:
             return messages[-limit:]
         return messages
 
+    def get_messages_count(self) -> int:
+        """Get total count of non-empty visible messages via direct SQL.
+        
+        Only counts messages that will have idx (non-ToolMessage, non-empty AI).
+        """
+        try:
+            conn = sqlite3.connect(str(self.db_path))
+            cursor = conn.execute(
+                """
+                SELECT COUNT(*) FROM message_store 
+                WHERE session_id = ? 
+                  AND json_extract(message, '$.type') != 'tool'
+                  AND NOT (
+                      json_extract(message, '$.type') = 'ai' 
+                      AND TRIM(COALESCE(json_extract(message, '$.data.content'), '')) = ''
+                  )
+                """,
+                (self.dialog_id,)
+            )
+            count = cursor.fetchone()[0]
+            conn.close()
+            return count
+        except Exception:
+            # Fallback to loading all and filtering
+            messages = self._get_all_messages()
+            count = 0
+            for msg in messages:
+                if msg.type == "tool":
+                    continue
+                if msg.type == "ai":
+                    content = msg.content if isinstance(msg.content, str) else str(msg.content)
+                    if not content.strip():
+                        continue
+                count += 1
+            return count
+
+    def get_messages_slice(
+        self, start_index: int | None = None, end_index: int | None = None
+    ) -> tuple[list[BaseMessage], list[int], list[int]]:
+        """Get a slice of NON-EMPTY visible messages via direct SQL with context.
+
+        This loads non-empty messages based on indices, but also loads nearby empty AI
+        messages (before/after) to capture their tool_calls.
+
+        Args:
+            start_index: Starting index in non-empty visible messages.
+            end_index: Ending index in non-empty visible messages (exclusive).
+
+        Returns:
+            Tuple of (messages, original_db_indices, db_ids) where:
+            - messages: BaseMessage objects (includes empty AI near the slice)
+            - original_db_indices: row numbers in full message list
+            - db_ids: actual DB id values (for timestamp ordering)
+        """
+        if start_index is None:
+            start_index = 0
+        
+        try:
+            conn = sqlite3.connect(str(self.db_path))
+            
+            # Calculate LIMIT and OFFSET for visible messages
+            if end_index is None:
+                sql_limit = -1  # No limit in SQLite
+                sql_offset = start_index
+            else:
+                sql_limit = end_index - start_index
+                sql_offset = start_index
+            
+            # Strategy: Load non-empty messages by indices, then add ALL nearby messages
+            # (including empty AI) to get their tool_calls
+            
+            # First, get the slice of non-empty messages
+            cursor1 = conn.execute(
+                """
+                WITH numbered AS (
+                    SELECT 
+                        ROW_NUMBER() OVER (ORDER BY id) - 1 as row_num,
+                        id, 
+                        message,
+                        json_extract(message, '$.type') as msg_type,
+                        TRIM(COALESCE(json_extract(message, '$.data.content'), '')) as content
+                    FROM message_store 
+                    WHERE session_id = ?
+                )
+                SELECT row_num, id
+                FROM numbered
+                WHERE msg_type != 'tool' 
+                  AND NOT (msg_type = 'ai' AND content = '')
+                ORDER BY row_num
+                LIMIT ? OFFSET ?
+                """,
+                (self.dialog_id, sql_limit, sql_offset)
+            )
+            
+            non_empty_indices = cursor1.fetchall()
+            
+            if not non_empty_indices:
+                conn.close()
+                return [], [], []
+            
+            # Get range of DB row_nums to load (with padding for empty AI)
+            min_row_num = non_empty_indices[0][0]
+            max_row_num = non_empty_indices[-1][0]
+            
+            # Now load ALL visible messages in that range (to capture empty AI with tool_calls)
+            cursor2 = conn.execute(
+                """
+                WITH numbered AS (
+                    SELECT 
+                        ROW_NUMBER() OVER (ORDER BY id) - 1 as row_num,
+                        id, 
+                        message,
+                        json_extract(message, '$.type') as msg_type
+                    FROM message_store 
+                    WHERE session_id = ?
+                )
+                SELECT row_num, id, message 
+                FROM numbered
+                WHERE msg_type != 'tool' AND row_num >= ? AND row_num <= ?
+                ORDER BY row_num
+                """,
+                (self.dialog_id, min_row_num, max_row_num)
+            )
+            
+            rows = cursor2.fetchall()
+            conn.close()
+            
+            # Deserialize messages from JSON
+            messages = []
+            indices = []
+            db_ids = []
+            for row_num, db_id, message_json in rows:
+                msg_dict = json.loads(message_json)
+                # Convert dict to LangChain message
+                msg_list = messages_from_dict([msg_dict])
+                if msg_list:
+                    messages.append(msg_list[0])
+                    indices.append(row_num)
+                    db_ids.append(db_id)
+            
+            return messages, indices, db_ids
+        except Exception:
+            # Fallback to loading all and slicing
+            all_msgs = self._get_all_messages()
+            visible = []
+            visible_indices = []
+            visible_db_ids = []
+            for idx, msg in enumerate(all_msgs):
+                # Skip only ToolMessages
+                if msg.type == "tool":
+                    continue
+                # Keep empty AI messages (they may have tool_calls)
+                visible.append(msg)
+                visible_indices.append(idx)
+                visible_db_ids.append(idx)  # In fallback, use idx as db_id
+            return (
+                visible[start_index:end_index], 
+                visible_indices[start_index:end_index],
+                visible_db_ids[start_index:end_index]
+            )
+
     def clear(self) -> None:
         """Clear all messages from the history."""
         self.history.clear()
+        self._cached_messages = None  # Invalidate cache
         try:
             self.project.upsert_dialog_meta(self.dialog_id)
         except Exception:
