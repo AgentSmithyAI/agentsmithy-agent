@@ -54,7 +54,7 @@ class MessagesData:
     db_ids: list[int]
     total_visible: int
     start_pos: int
-    end_pos: int
+    end_pos: int | None  # None when loading last messages to include trailing empty AI
     has_more: bool
 
 
@@ -81,8 +81,9 @@ def _load_messages(
             end_pos = before
             start_pos = max(0, end_pos - limit)
         else:
-            end_pos = total_visible
-            start_pos = max(0, end_pos - limit)
+            # When loading last messages, pass None to include trailing empty AI
+            end_pos = None
+            start_pos = max(0, total_visible - limit)
 
         messages, original_indices, message_db_ids = history.get_messages_slice(
             start_pos, end_pos

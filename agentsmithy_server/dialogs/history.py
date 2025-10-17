@@ -171,9 +171,13 @@ class DialogHistory:
         This loads non-empty messages based on indices, but also loads nearby empty AI
         messages (before/after) to capture their tool_calls.
 
+        IMPORTANT: When end_index is None (loading last messages), this will load ALL
+        trailing empty AI messages to ensure their tool_calls are included in history.
+
         Args:
             start_index: Starting index in non-empty visible messages.
             end_index: Ending index in non-empty visible messages (exclusive).
+                      None means load to end of dialog (including all trailing empty AI).
 
         Returns:
             Tuple of (messages, original_db_indices, db_ids) where:
@@ -229,25 +233,48 @@ class DialogHistory:
                 min_row_num = non_empty_indices[0][0]
                 max_row_num = non_empty_indices[-1][0]
 
-                # Now load ALL visible messages in that range (to capture empty AI with tool_calls)
-                cursor2 = conn.execute(
-                    """
-                    WITH numbered AS (
-                        SELECT 
-                            ROW_NUMBER() OVER (ORDER BY id) - 1 as row_num,
-                            id, 
-                            message,
-                            json_extract(message, '$.type') as msg_type
-                        FROM message_store 
-                        WHERE session_id = ?
+                # Load ALL visible messages in range + trailing empty AI
+                # If end_index is None, we're loading the last messages, so include ALL trailing empty AI
+                if end_index is None:
+                    # Load from min to end of dialog (to capture all trailing empty AI)
+                    cursor2 = conn.execute(
+                        """
+                        WITH numbered AS (
+                            SELECT 
+                                ROW_NUMBER() OVER (ORDER BY id) - 1 as row_num,
+                                id, 
+                                message,
+                                json_extract(message, '$.type') as msg_type
+                            FROM message_store 
+                            WHERE session_id = ?
+                        )
+                        SELECT row_num, id, message 
+                        FROM numbered
+                        WHERE msg_type != 'tool' AND row_num >= ?
+                        ORDER BY row_num
+                        """,
+                        (self.dialog_id, min_row_num),
                     )
-                    SELECT row_num, id, message 
-                    FROM numbered
-                    WHERE msg_type != 'tool' AND row_num >= ? AND row_num <= ?
-                    ORDER BY row_num
-                    """,
-                    (self.dialog_id, min_row_num, max_row_num),
-                )
+                else:
+                    # Paginating in the middle, only load between min and max
+                    cursor2 = conn.execute(
+                        """
+                        WITH numbered AS (
+                            SELECT 
+                                ROW_NUMBER() OVER (ORDER BY id) - 1 as row_num,
+                                id, 
+                                message,
+                                json_extract(message, '$.type') as msg_type
+                            FROM message_store 
+                            WHERE session_id = ?
+                        )
+                        SELECT row_num, id, message 
+                        FROM numbered
+                        WHERE msg_type != 'tool' AND row_num >= ? AND row_num <= ?
+                        ORDER BY row_num
+                        """,
+                        (self.dialog_id, min_row_num, max_row_num),
+                    )
 
                 rows = cursor2.fetchall()
 
