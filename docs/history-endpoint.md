@@ -30,10 +30,10 @@ Returns dialog history as SSE event stream (same format as `POST /api/chat` stre
 **Response fields:**
 - `dialog_id` - Dialog identifier
 - `events` - Array of history events (in chronological order)
-- `total_events` - Total number of events in the full history
+- `total_events` - Total count of **all** events in the dialog (messages + reasoning blocks + tool calls + file edits)
 - `has_more` - `true` if there are more events before the current page (for infinite scroll)
-- `first_idx` - Index of the first event in the returned list
-- `last_idx` - Index of the last event in the returned list
+- `first_idx` - Index of the first **message** (user/chat) in the returned list (message index, not generic event index)
+- `last_idx` - Index of the last **message** (user/chat) in the returned list (message index, not generic event index)
 
 ## Event Types
 
@@ -60,8 +60,7 @@ Model thinking:
 {
   "type": "reasoning",
   "content": "**Analyzing request**\n\nI need to read the file first. Then analyze its contents...",
-  "model_name": "gpt-4o",
-  "idx": 1
+  "model_name": "gpt-4o"
 }
 ```
 
@@ -75,8 +74,7 @@ Tool invocation:
   "type": "tool_call",
   "id": "call_abc123",
   "name": "read_file",
-  "args": {"path": "file.txt"},
-  "idx": 3
+  "args": {"path": "file.txt"}
 }
 ```
 
@@ -88,12 +86,11 @@ File modification:
   "type": "file_edit",
   "file": "/path/to/file.py",
   "diff": "--- a/...\n+++ b/...",
-  "checkpoint": "abc123",
-  "idx": 4
+  "checkpoint": "abc123"
 }
 ```
 
-**Note:** All events include an `idx` field - the event's position in the complete history.
+**Note:** Only `user` and `chat` events include an `idx` field - the message's sequential position among user/chat messages. Other event types (reasoning, tool_call, file_edit) do not have `idx`.
 
 ## Pagination
 

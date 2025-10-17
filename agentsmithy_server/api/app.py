@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -62,11 +63,21 @@ async def lifespan(app: FastAPI):
 
         # Stop config watcher
         if hasattr(app.state, "config_manager"):
-            await app.state.config_manager.stop_watching()
-            api_logger.info("Config file watcher stopped")
+            try:
+                await app.state.config_manager.stop_watching()
+                api_logger.info("Config file watcher stopped")
+            except asyncio.CancelledError:
+                # Shutdown was cancelled, but continue with other cleanup
+                api_logger.debug("Config watcher stop cancelled, continuing cleanup")
 
         chat_service = get_chat_service()
-        await chat_service.shutdown()
+        try:
+            await chat_service.shutdown()
+        except asyncio.CancelledError:
+            # Shutdown was cancelled, but continue with other cleanup
+            api_logger.debug("Chat service shutdown cancelled, continuing cleanup")
+
+        # DB engine disposal is synchronous, always safe
         dispose_db_engine()
         api_logger.info("Chat service shutdown completed")
     except Exception as e:

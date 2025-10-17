@@ -80,7 +80,7 @@ if __name__ == "__main__":
             config_dir, defaults=get_default_config()
         )
 
-        # Run async initialization (watch will start in lifespan to use correct event loop)
+        # Run async initialization (watch will start later in manual startup to use correct event loop)
         async def init_config():
             await config_manager.initialize()
 
@@ -186,14 +186,23 @@ if __name__ == "__main__":
         reload_enabled = reload_enabled_env in {"1", "true", "yes", "on"}
 
         # Create custom server to pass shutdown event
+        # Disable ASGI lifespan to avoid starlette lifespan CancelledError on shutdown
+        # Manual startup/shutdown hooks are used instead (see below)
         config = uvicorn.Config(
             "agentsmithy_server.api.server:app",
             host=settings.server_host,
             port=chosen_port,
             reload=reload_enabled,
             log_config=LOGGING_CONFIG,
+            lifespan="off",
+            timeout_graceful_shutdown=5,
         )
         server = uvicorn.Server(config)
+        # We'll manage signals ourselves; avoid double-handling in packaged builds
+        try:
+            server.install_signal_handlers = False  # type: ignore[attr-defined]
+        except Exception:
+            pass
 
         async def run_server():
             # Pass shutdown event to the app
@@ -299,12 +308,47 @@ if __name__ == "__main__":
                 inspector_task = asyncio.create_task(_run_inspector())
                 app.state.inspector_task = inspector_task
 
-            # Monitor shutdown event
+            # --- Manual startup (since lifespan is off) ---
+            try:
+                # Ensure dialogs state and default dialog
+                from agentsmithy_server.api.deps import (
+                    get_chat_service,
+                    set_shutdown_event,
+                )
+                from agentsmithy_server.core.project import get_current_project
+
+                project_obj = get_current_project()
+                project_obj.ensure_dialogs_dir()
+                index = project_obj.load_dialogs_index()
+                dialogs = index.get("dialogs") or []
+                if not dialogs:
+                    project_obj.create_dialog(title="default", set_current=True)
+
+                # Propagate shutdown event to chat service
+                set_shutdown_event(shutdown_event)
+
+                # Start config watcher and register change callback
+                if hasattr(app.state, "config_manager") and app.state.config_manager:
+
+                    def on_config_change(new_config):
+                        # Invalidate orchestrator on config change
+                        chat_service_local = get_chat_service()
+                        chat_service_local.invalidate_orchestrator()
+
+                    app.state.config_manager.register_change_callback(on_config_change)
+                    await app.state.config_manager.start_watching()
+                    startup_logger.info(
+                        "Config file watcher started with change callback"
+                    )
+            except Exception as e:
+                startup_logger.error("Startup initialization failed", error=str(e))
+
+            # Monitor shutdown event and uvicorn serve()
             shutdown_task = asyncio.create_task(shutdown_event.wait())
             serve_task = asyncio.create_task(server.serve())
 
             # Wait for either shutdown or server to complete
-            done, pending = await asyncio.wait(
+            done, _pending = await asyncio.wait(
                 {shutdown_task, serve_task}, return_when=asyncio.FIRST_COMPLETED
             )
 
@@ -312,7 +356,37 @@ if __name__ == "__main__":
             if shutdown_task in done:
                 startup_logger.info("Stopping server due to shutdown signal...")
                 server.should_exit = True
-                await serve_task
+                try:
+                    await serve_task
+                except Exception:
+                    # Ignore cancellation/transport errors during shutdown
+                    pass
+
+            # --- Manual shutdown (since lifespan is off) ---
+            try:
+                from agentsmithy_server.api.deps import (
+                    dispose_db_engine,
+                    get_chat_service,
+                )
+
+                # Stop config watcher
+                if hasattr(app.state, "config_manager") and app.state.config_manager:
+                    try:
+                        await app.state.config_manager.stop_watching()
+                        startup_logger.info("Config file watcher stopped")
+                    except Exception:
+                        pass
+
+                chat_service = get_chat_service()
+                try:
+                    await chat_service.shutdown()
+                except Exception:
+                    pass
+
+                dispose_db_engine()
+                startup_logger.info("Chat service shutdown completed")
+            except Exception as e:
+                startup_logger.error("Shutdown cleanup failed", error=str(e))
 
         # Run server with asyncio
         asyncio.run(run_server())

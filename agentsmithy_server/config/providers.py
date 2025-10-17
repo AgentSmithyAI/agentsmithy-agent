@@ -202,10 +202,30 @@ class LocalFileConfigProvider(ConfigProvider):
     async def stop_watching(self) -> None:
         """Stop watching for file changes."""
         if self._observer:
-            self._observer.stop()
-            self._observer.join(timeout=1.0)
-            self._observer = None
-            logger.info("Stopped watching config file")
+            try:
+                # Run blocking operations in executor to avoid blocking event loop
+                # Use asyncio.wait_for to add timeout protection
+                loop = asyncio.get_running_loop()
+                await asyncio.wait_for(
+                    loop.run_in_executor(None, self._observer.stop), timeout=2.0
+                )
+                await asyncio.wait_for(
+                    loop.run_in_executor(
+                        None, lambda: self._observer.join(timeout=1.0)
+                    ),
+                    timeout=2.0,
+                )
+                logger.info("Stopped watching config file")
+            except (TimeoutError, asyncio.CancelledError) as e:
+                # Graceful handling during shutdown
+                logger.debug(f"Observer stop interrupted: {type(e).__name__}")
+                # Force stop observer in case it's stuck
+                try:
+                    self._observer.stop()
+                except Exception:
+                    pass
+            finally:
+                self._observer = None
 
 
 class RemoteConfigProvider(ConfigProvider):

@@ -146,14 +146,32 @@ class ChatService:
         self._shutdown_event = event
 
     async def shutdown(self) -> None:
-        """Cancel all active streams during shutdown."""
+        """Cancel all active streams and cleanup resources during shutdown."""
         api_logger.info("Cancelling active streams", count=len(self._active_streams))
         for task in self._active_streams:
             if not task.done():
                 task.cancel()
-        # Wait for all tasks to complete
+        # Wait for all tasks to complete with timeout
         if self._active_streams:
-            await asyncio.gather(*self._active_streams, return_exceptions=True)
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*self._active_streams, return_exceptions=True),
+                    timeout=2.0,
+                )
+            except (TimeoutError, asyncio.CancelledError):
+                # Shutdown interrupted or timed out, that's ok
+                api_logger.debug("Stream cleanup interrupted during shutdown")
+                pass
+
+        # Cleanup orchestrator and its agents
+        if self._orchestrator is not None:
+            try:
+                # Dispose tool executor in universal agent
+                if hasattr(self._orchestrator.universal_agent, "tool_executor"):
+                    self._orchestrator.universal_agent.tool_executor.dispose()
+                    api_logger.debug("Disposed tool executor in universal agent")
+            except Exception as e:
+                api_logger.error("Error disposing agents during shutdown", error=str(e))
 
     async def _process_structured_chunk(
         self,

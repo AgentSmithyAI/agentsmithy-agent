@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from fastapi import APIRouter, Depends, HTTPException
+from langchain_core.messages import BaseMessage
 
 from agentsmithy_server.api.deps import get_project
 from agentsmithy_server.api.schemas import (
@@ -17,143 +20,143 @@ from agentsmithy_server.utils.logger import api_logger
 
 router = APIRouter()
 
-# Event sorting priorities for same message index
-# Reasoning events should appear before other events (chat, tool_call, file_edit)
-SORT_PRIORITY_REASONING = 0
-SORT_PRIORITY_OTHER = 1
+
+# Event ordering priorities - lower number means earlier in the stream
+class EventPriority:
+    """Priority constants for ordering events within a message group."""
+
+    REASONING = 0  # Reasoning blocks come first
+    MESSAGE = 1  # Then the message itself
+    TOOL_CALL = 2  # Then tool calls
+    FILE_EDIT = 3  # Then file edits
+    ORPHAN = 4  # Orphan reasoning at the very end
 
 
-def _event_sort_key(item: tuple[int, HistoryEvent]) -> tuple[int, int]:
-    """Generate sort key for events: (message_index, priority).
+@dataclass
+class EventSortKey:
+    """Sort key for ordering events chronologically."""
 
-    Args:
-        item: Tuple of (message_index, event)
+    db_index: int  # Database index (message position)
+    priority: int  # Event type priority
+    sub_index: int = 0  # Sub-index for multiple events of same type
 
-    Returns:
-        Tuple of (message_index, priority) for sorting
-    """
-    message_index, event = item
-    priority = (
-        SORT_PRIORITY_REASONING
-        if event.type == EventType.REASONING.value
-        else SORT_PRIORITY_OTHER
-    )
-    return (message_index, priority)
+    def to_tuple(self) -> tuple[int, int, int]:
+        """Convert to tuple for sorting."""
+        return (self.db_index, self.priority, self.sub_index)
 
 
-async def _build_history_response(
-    project: Project, dialog_id: str, limit: int = 20, before: int | None = None
-) -> DialogHistoryResponse:
-    """Build complete history response as SSE event stream with cursor-based pagination.
+@dataclass
+class MessagesData:
+    """Container for loaded messages and their metadata."""
+
+    messages: list[BaseMessage]
+    original_indices: list[int]
+    db_ids: list[int]
+    total_visible: int
+    start_pos: int
+    end_pos: int | None  # None when loading last messages to include trailing empty AI
+    has_more: bool
+
+
+def _load_messages(
+    project: Project, dialog_id: str, limit: int, before: int | None
+) -> MessagesData:
+    """Load messages slice with pagination metadata.
 
     Args:
         project: Project instance
         dialog_id: Dialog identifier
-        limit: Maximum number of events to return (default: 20)
-        before: Return events before this cursor/index (exclusive).
-                If None, return last `limit` events.
+        limit: Maximum number of messages to return
+        before: Return messages before this index (exclusive)
+
+    Returns:
+        MessagesData with loaded messages and metadata
     """
-    # Get messages from history and convert to SSE events
-    base_events: list[tuple[int, HistoryEvent]] = []
     try:
         history = project.get_dialog_history(dialog_id)
-        messages = history.get_messages()
+        total_visible = history.get_messages_count()
 
-        for idx, msg in enumerate(messages):
-            msg_type = msg.type
+        # Calculate slice range for visible messages
+        if before is not None:
+            end_pos = before
+            start_pos = max(0, end_pos - limit)
+        else:
+            # When loading last messages, pass None to include trailing empty AI
+            end_pos = None
+            start_pos = max(0, total_visible - limit)
 
-            # Skip ToolMessage - those are results, not events
-            if msg_type == MessageType.TOOL.value:
-                continue
+        messages, original_indices, message_db_ids = history.get_messages_slice(
+            start_pos, end_pos
+        )
+        has_more = start_pos > 0
 
-            # Convert LangChain types to SSE types
-            if msg_type == MessageType.HUMAN.value:
-                event_type = EventType.USER.value
-            elif msg_type == MessageType.AI.value:
-                event_type = EventType.CHAT.value
-            else:
-                # system, etc - keep as is
-                event_type = msg_type
-
-            # Get content as string
-            content_str = (
-                msg.content if isinstance(msg.content, str) else str(msg.content)
-            )
-
-            # Skip empty AI messages (usually they only have tool_calls)
-            # LLM sometimes generates AIMessage with content="" when it only wants to call tools
-            # without producing text. These create empty "chat" events which aren't useful in history.
-            # The tool_calls from these messages will still be added as separate "tool_call" events below.
-            if msg_type == MessageType.AI.value and not content_str.strip():
-                pass
-            else:
-                # Add message as chat/user event
-                base_events.append(
-                    (
-                        idx,
-                        HistoryEvent(
-                            type=event_type,
-                            content=content_str,
-                        ),
-                    )
-                )
-
-            # Extract tool_calls and add as separate tool_call events
-            try:
-                if hasattr(msg, "tool_calls") and msg.tool_calls:
-                    for tc in msg.tool_calls:
-                        tc_id = (
-                            tc.get("id")
-                            if isinstance(tc, dict)
-                            else getattr(tc, "id", "")
-                        )
-                        tc_name = (
-                            tc.get("name")
-                            if isinstance(tc, dict)
-                            else getattr(tc, "name", "")
-                        )
-                        tc_args = (
-                            tc.get("args")
-                            if isinstance(tc, dict)
-                            else getattr(tc, "args", {})
-                        )
-                        base_events.append(
-                            (
-                                idx,  # Same position as AI message
-                                HistoryEvent(
-                                    type=EventType.TOOL_CALL.value,
-                                    id=tc_id,
-                                    name=tc_name,
-                                    args=tc_args,
-                                ),
-                            )
-                        )
-            except Exception:
-                pass
+        return MessagesData(
+            messages=messages,
+            original_indices=original_indices,
+            db_ids=message_db_ids,
+            total_visible=total_visible,
+            start_pos=start_pos,
+            end_pos=end_pos,
+            has_more=has_more,
+        )
     except Exception as e:
         api_logger.error(
             "Failed to load messages", exc_info=True, error=str(e), dialog_id=dialog_id
         )
+        return MessagesData(
+            messages=[],
+            original_indices=[],
+            db_ids=[],
+            total_visible=0,
+            start_pos=0,
+            end_pos=0,
+            has_more=False,
+        )
 
-    # Get reasoning blocks and merge into events
-    reasoning_count = 0
-    reasoning_events: list[tuple[int, HistoryEvent]] = []
+
+def _load_reasoning(
+    project: Project, dialog_id: str, message_indices: set[int], before: int | None
+) -> tuple[dict[int, list[HistoryEvent]], list[HistoryEvent]]:
+    """Load reasoning blocks for selected messages.
+
+    Args:
+        project: Project instance
+        dialog_id: Dialog identifier
+        message_indices: Set of message indices to load reasoning for
+        before: Pagination cursor (None means loading from end)
+
+    Returns:
+        Tuple of (reasoning_by_msg_idx, orphan_reasoning)
+    """
+    reasoning_by_msg_idx: dict[int, list[HistoryEvent]] = {}
+    orphan_reasoning: list[HistoryEvent] = []
+
     try:
         with DialogReasoningStorage(project, dialog_id) as storage:
-            blocks = storage.get_all()
+            # Load reasoning for the selected message indices
+            blocks = storage.get_for_indices(message_indices)
             for block in blocks:
-                # Create reasoning event to insert before related message
-                reasoning_events.append(
-                    (
-                        block.message_index,  # Sort key - insert before this message
+                if block.message_index not in reasoning_by_msg_idx:
+                    reasoning_by_msg_idx[block.message_index] = []
+                reasoning_by_msg_idx[block.message_index].append(
+                    HistoryEvent(
+                        type=EventType.REASONING.value,
+                        content=block.content,
+                        model_name=block.model_name,
+                    )
+                )
+
+            # Load orphan reasoning (message_index=-1) only when loading the END of history
+            if before is None:
+                orphan_blocks = storage.get_for_message(-1)
+                for block in orphan_blocks:
+                    orphan_reasoning.append(
                         HistoryEvent(
                             type=EventType.REASONING.value,
                             content=block.content,
                             model_name=block.model_name,
-                        ),
+                        )
                     )
-                )
-                reasoning_count += 1
     except Exception as e:
         api_logger.error(
             "Failed to load reasoning",
@@ -162,21 +165,36 @@ async def _build_history_response(
             dialog_id=dialog_id,
         )
 
-    # Get file edit events
-    file_edit_events: list[tuple[int, HistoryEvent]] = []
+    return reasoning_by_msg_idx, orphan_reasoning
+
+
+def _load_file_edits(
+    project: Project, dialog_id: str, message_indices: set[int]
+) -> dict[int, list[HistoryEvent]]:
+    """Load file edits for selected messages.
+
+    Args:
+        project: Project instance
+        dialog_id: Dialog identifier
+        message_indices: Set of message indices to load edits for
+
+    Returns:
+        Dictionary mapping message index to list of file edit events
+    """
+    file_edits_by_msg_idx: dict[int, list[HistoryEvent]] = {}
+
     try:
         with DialogFileEditStorage(project, dialog_id) as storage:
-            edits = storage.get_all()
+            edits = storage.get_for_indices(message_indices)
             for edit in edits:
-                file_edit_events.append(
-                    (
-                        edit.message_index,
-                        HistoryEvent(
-                            type=EventType.FILE_EDIT.value,
-                            file=edit.file,
-                            diff=edit.diff,
-                            checkpoint=edit.checkpoint,
-                        ),
+                if edit.message_index not in file_edits_by_msg_idx:
+                    file_edits_by_msg_idx[edit.message_index] = []
+                file_edits_by_msg_idx[edit.message_index].append(
+                    HistoryEvent(
+                        type=EventType.FILE_EDIT.value,
+                        file=edit.file,
+                        diff=edit.diff,
+                        checkpoint=edit.checkpoint,
                     )
                 )
     except Exception as e:
@@ -187,49 +205,302 @@ async def _build_history_response(
             dialog_id=dialog_id,
         )
 
-    # Merge all events and sort by (message_index, priority)
-    # For same index: reasoning comes before other events
-    all_events = base_events + reasoning_events + file_edit_events
-    all_events.sort(key=_event_sort_key)
+    return file_edits_by_msg_idx
 
-    # Assign global indices to all events in chronological order
-    for idx, (_, evt) in enumerate(all_events):
-        evt.idx = idx
 
-    # Total count of events
-    total_count = len(all_events)
+def _is_empty_ai_message(msg: BaseMessage) -> bool:
+    """Check if message is an empty AI message (no content text)."""
+    if msg.type != MessageType.AI.value:
+        return False
+    content_str = msg.content if isinstance(msg.content, str) else str(msg.content)
+    return not content_str.strip()
 
-    # Apply cursor-based pagination
-    if before is not None:
-        # Get `limit` events before cursor
-        end_pos = before
-        start_pos = max(0, end_pos - limit)
-        paginated_events = all_events[start_pos:end_pos]
-    else:
-        # Get last `limit` events (default behavior)
-        start_pos = max(0, total_count - limit)
-        paginated_events = all_events[start_pos:]
 
-    # Extract events in sorted order (already chronological)
-    events_data: list[HistoryEvent] = [evt for _, evt in paginated_events]
+def _extract_tool_calls(msg: BaseMessage) -> list[HistoryEvent]:
+    """Extract tool call events from a message.
 
-    # Determine pagination metadata
-    if events_data:
-        first_idx: int = (
-            events_data[0].idx or 0
-        )  # idx is always set above, but need type hint
-        last_idx: int = events_data[-1].idx or 0
-        has_more = first_idx > 0
+    Args:
+        msg: Message to extract tool calls from
+
+    Returns:
+        List of tool call events
+    """
+    tool_call_events = []
+    try:
+        if hasattr(msg, "tool_calls") and msg.tool_calls:
+            for tc in msg.tool_calls:
+                tc_id = tc.get("id") if isinstance(tc, dict) else getattr(tc, "id", "")
+                tc_name = (
+                    tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", "")
+                )
+                tc_args = (
+                    tc.get("args") if isinstance(tc, dict) else getattr(tc, "args", {})
+                )
+
+                tool_call_events.append(
+                    HistoryEvent(
+                        type=EventType.TOOL_CALL.value,
+                        id=tc_id,
+                        name=tc_name,
+                        args=tc_args,
+                    )
+                )
+    except Exception:
+        pass
+
+    return tool_call_events
+
+
+def _build_events_stream(
+    messages_data: MessagesData,
+    reasoning_by_msg_idx: dict[int, list[HistoryEvent]],
+    file_edits_by_msg_idx: dict[int, list[HistoryEvent]],
+    orphan_reasoning: list[HistoryEvent],
+) -> list[HistoryEvent]:
+    """Build chronologically ordered event stream from all data sources.
+
+    Args:
+        messages_data: Loaded messages with metadata
+        reasoning_by_msg_idx: Reasoning blocks indexed by message
+        file_edits_by_msg_idx: File edits indexed by message
+        orphan_reasoning: Orphan reasoning blocks (not linked to messages)
+
+    Returns:
+        List of events in chronological order
+    """
+    all_events_with_sort: list[tuple[EventSortKey, HistoryEvent]] = []
+    non_empty_count = 0  # Track sequential index for non-empty messages only
+
+    # Process each message and its related events
+    for msg, db_idx, _msg_db_id in zip(
+        messages_data.messages,
+        messages_data.original_indices,
+        messages_data.db_ids,
+        strict=False,
+    ):
+        # Skip ToolMessage - already filtered by SQL
+        if msg.type == MessageType.TOOL.value:
+            continue
+
+        is_empty_ai = _is_empty_ai_message(msg)
+
+        # 1. Add reasoning blocks (come before message)
+        if db_idx in reasoning_by_msg_idx:
+            for idx, reasoning_event in enumerate(reasoning_by_msg_idx[db_idx]):
+                sort_key = EventSortKey(
+                    db_index=db_idx, priority=EventPriority.REASONING, sub_index=idx
+                )
+                all_events_with_sort.append((sort_key, reasoning_event))
+
+        # 2. Add message event (only for non-empty messages)
+        if not is_empty_ai:
+            # Determine event type
+            if msg.type == MessageType.HUMAN.value:
+                event_type = EventType.USER.value
+            elif msg.type == MessageType.AI.value:
+                event_type = EventType.CHAT.value
+            else:
+                event_type = msg.type
+
+            content_str = (
+                msg.content if isinstance(msg.content, str) else str(msg.content)
+            )
+
+            # Only user and chat messages get idx (for pagination)
+            if event_type in (EventType.USER.value, EventType.CHAT.value):
+                client_idx = messages_data.start_pos + non_empty_count
+                non_empty_count += 1
+                message_event = HistoryEvent(
+                    type=event_type,
+                    content=content_str,
+                    idx=client_idx,
+                )
+            else:
+                # Other message types (system, tool) don't get idx
+                message_event = HistoryEvent(
+                    type=event_type,
+                    content=content_str,
+                )
+
+            sort_key = EventSortKey(db_index=db_idx, priority=EventPriority.MESSAGE)
+            all_events_with_sort.append((sort_key, message_event))
+
+        # 3. Add tool calls (come after message)
+        tool_call_events = _extract_tool_calls(msg)
+        for idx, tool_event in enumerate(tool_call_events):
+            sort_key = EventSortKey(
+                db_index=db_idx, priority=EventPriority.TOOL_CALL, sub_index=idx
+            )
+            all_events_with_sort.append((sort_key, tool_event))
+
+        # 4. Add file edits (come after tool calls)
+        if db_idx in file_edits_by_msg_idx:
+            for idx, edit_event in enumerate(file_edits_by_msg_idx[db_idx]):
+                sort_key = EventSortKey(
+                    db_index=db_idx, priority=EventPriority.FILE_EDIT, sub_index=idx
+                )
+                all_events_with_sort.append((sort_key, edit_event))
+
+    # 5. Add orphan reasoning at the end
+    orphan_db_idx = (
+        max(messages_data.original_indices) + 1 if messages_data.original_indices else 0
+    )
+    for idx, orphan_event in enumerate(orphan_reasoning):
+        sort_key = EventSortKey(
+            db_index=orphan_db_idx, priority=EventPriority.ORPHAN, sub_index=idx
+        )
+        all_events_with_sort.append((sort_key, orphan_event))
+
+    # Sort events chronologically
+    all_events_with_sort.sort(key=lambda x: x[0].to_tuple())
+
+    # Extract just the events
+    return [event for _, event in all_events_with_sort]
+
+
+def _calculate_pagination_metadata(
+    events: list[HistoryEvent],
+) -> tuple[int, int]:
+    """Calculate first_idx and last_idx from events.
+
+    Args:
+        events: List of events
+
+    Returns:
+        Tuple of (first_idx, last_idx)
+    """
+    message_events_with_idx = [e for e in events if e.idx is not None]
+    if message_events_with_idx:
+        first_idx = message_events_with_idx[0].idx or 0
+        last_idx = message_events_with_idx[-1].idx or 0
     else:
         first_idx = 0
         last_idx = 0
-        has_more = False
+
+    return first_idx, last_idx
+
+
+def _count_total_events(project: Project, dialog_id: str) -> int:
+    """Count total number of all events in the dialog using single DB query.
+
+    This includes:
+    - Messages (user, chat, system, etc.)
+    - Reasoning blocks
+    - Tool calls
+    - File edits
+
+    Args:
+        project: Project instance
+        dialog_id: Dialog identifier
+
+    Returns:
+        Total count of all events
+    """
+    import sqlite3
+
+    try:
+        history = project.get_dialog_history(dialog_id)
+        db_path = history.db_path
+
+        # Single connection, multiple COUNTs in one query
+        with sqlite3.connect(str(db_path)) as conn:
+            cursor = conn.execute(
+                """
+                SELECT 
+                    -- Count non-empty visible messages
+                    (SELECT COUNT(*) FROM message_store 
+                     WHERE session_id = ? 
+                       AND json_extract(message, '$.type') != 'tool'
+                       AND NOT (
+                           json_extract(message, '$.type') = 'ai' 
+                           AND TRIM(COALESCE(json_extract(message, '$.data.content'), '')) = ''
+                       )
+                    ) as messages_count,
+                    
+                    -- Count tool calls
+                    (SELECT COALESCE(SUM(json_array_length(json_extract(message, '$.data.tool_calls'))), 0)
+                     FROM message_store 
+                     WHERE session_id = ? 
+                       AND json_extract(message, '$.data.tool_calls') IS NOT NULL
+                    ) as tool_calls_count,
+                    
+                    -- Count reasoning blocks
+                    (SELECT COUNT(*) FROM dialog_reasoning WHERE dialog_id = ?) as reasoning_count,
+                    
+                    -- Count file edits
+                    (SELECT COUNT(*) FROM dialog_file_edits WHERE dialog_id = ?) as file_edits_count
+                """,
+                (dialog_id, dialog_id, dialog_id, dialog_id),
+            )
+            result = cursor.fetchone()
+            if result:
+                messages_count, tool_calls_count, reasoning_count, file_edits_count = (
+                    result
+                )
+                total = (
+                    messages_count
+                    + tool_calls_count
+                    + reasoning_count
+                    + file_edits_count
+                )
+                return total
+            return 0
+    except Exception as e:
+        api_logger.error(
+            "Failed to count total events",
+            exc_info=True,
+            error=str(e),
+            dialog_id=dialog_id,
+        )
+        return 0
+
+
+async def _build_history_response(
+    project: Project, dialog_id: str, limit: int = 20, before: int | None = None
+) -> DialogHistoryResponse:
+    """Build complete history response with cursor-based pagination on messages.
+
+    This function orchestrates loading messages, reasoning, and file edits,
+    then builds a chronologically ordered event stream.
+
+    Args:
+        project: Project instance
+        dialog_id: Dialog identifier
+        limit: Maximum number of messages to return (default: 20)
+        before: Return messages before this index (exclusive).
+                If None, return last `limit` messages.
+
+    Returns:
+        DialogHistoryResponse with paginated events and metadata
+    """
+    # Step 1: Load messages with pagination
+    messages_data = _load_messages(project, dialog_id, limit, before)
+    message_indices = set(messages_data.original_indices)
+
+    # Step 2: Load reasoning blocks for the selected messages
+    reasoning_by_msg_idx, orphan_reasoning = _load_reasoning(
+        project, dialog_id, message_indices, before
+    )
+
+    # Step 3: Load file edits for the selected messages
+    file_edits_by_msg_idx = _load_file_edits(project, dialog_id, message_indices)
+
+    # Step 4: Build chronologically ordered event stream
+    events = _build_events_stream(
+        messages_data, reasoning_by_msg_idx, file_edits_by_msg_idx, orphan_reasoning
+    )
+
+    # Step 5: Calculate pagination metadata
+    first_idx, last_idx = _calculate_pagination_metadata(events)
+
+    # Step 6: Count total events (all event types)
+    total_events = _count_total_events(project, dialog_id)
 
     return DialogHistoryResponse(
         dialog_id=dialog_id,
-        events=events_data,
-        total_events=total_count,
-        has_more=has_more,
+        events=events,
+        total_events=total_events,
+        has_more=messages_data.has_more,
         first_idx=first_idx,
         last_idx=last_idx,
     )
@@ -244,22 +515,26 @@ async def get_dialog_history(
 ) -> DialogHistoryResponse:
     """Get dialog history with cursor-based pagination.
 
-    By default returns the last 20 events in chronological order.
+    Pagination is based on message indices. By default returns the last 20 messages
+    in chronological order with their associated reasoning, tool_calls, and file_edits.
     Use `before` cursor to load previous pages (e.g., when scrolling up).
+
+    Only messages (user/chat) have `idx` field. Reasoning, tool_calls, and file_edits
+    are attached to messages but don't have their own indices.
 
     Args:
         dialog_id: Dialog identifier
-        limit: Maximum number of events to return (default: 20)
-        before: Cursor - return events before this index (for pagination when scrolling up)
+        limit: Maximum number of messages to return (default: 20)
+        before: Cursor - return messages before this index (for pagination when scrolling up)
 
     Returns:
         Dialog history as SSE events (same format as streaming) with pagination metadata
 
     Example usage:
-        # Get last 20 events
+        # Get last 20 messages
         GET /api/dialogs/{dialog_id}/history?limit=20
 
-        # Get 20 events before index 80 (scroll up)
+        # Get 20 messages before index 80 (scroll up)
         GET /api/dialogs/{dialog_id}/history?limit=20&before=80
 
     Example response:
@@ -267,15 +542,15 @@ async def get_dialog_history(
             "dialog_id": "01J...",
             "events": [
                 {"type": "user", "content": "read file.txt", "idx": 0},
-                {"type": "reasoning", "content": "I need to read...", "idx": 1},
-                {"type": "chat", "content": "I'll read the file...", "idx": 2},
-                {"type": "tool_call", "name": "read_file", "args": {"path": "file.txt"}, "idx": 3},
-                {"type": "chat", "content": "File contains...", "idx": 4}
+                {"type": "reasoning", "content": "I need to read..."},
+                {"type": "chat", "content": "I'll read the file...", "idx": 1},
+                {"type": "tool_call", "name": "read_file", "args": {"path": "file.txt"}},
+                {"type": "chat", "content": "File contains...", "idx": 2}
             ],
             "total_events": 100,
             "has_more": true,
-            "first_idx": 80,
-            "last_idx": 99
+            "first_idx": 0,
+            "last_idx": 2
         }
     """
     api_logger.info(

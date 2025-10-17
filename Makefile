@@ -13,7 +13,7 @@ ifneq ($(UPX),)
 	PYI_FLAGS += --upx-dir=$(UPX_DIR)
 endif
 
-.DEFAULT_GOAL := pyinstall
+.DEFAULT_GOAL := build
 
 .PHONY: venv install install-dev update-reqs lint format typecheck test run clean pyinstall build smoke-test
 
@@ -64,5 +64,9 @@ pyinstall: install-dev
 	@echo "Build complete:"
 	@ls -lh dist/$(BIN)
 
-build: pyinstall
+build:
+	$(MAKE) format
+	$(MAKE) lint || exit 1
+	$(MAKE) test || exit 1
+	$(MAKE) pyinstall || exit 1
 

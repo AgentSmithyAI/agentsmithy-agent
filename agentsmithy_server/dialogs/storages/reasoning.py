@@ -156,6 +156,74 @@ class DialogReasoningStorage:
             )
             return []
 
+    def count_all(self) -> int:
+        """Count total number of reasoning blocks in the dialog.
+
+        Returns:
+            Total count of reasoning blocks
+        """
+        self._ensure_db()
+        try:
+            engine = self._get_engine()
+            with get_session(engine) as session:
+                from sqlalchemy import func
+
+                stmt = select(func.count(DialogReasoningORM.id)).where(
+                    DialogReasoningORM.dialog_id == self.dialog_id
+                )
+                count = session.execute(stmt).scalar()
+                return count or 0
+        except Exception as e:
+            agent_logger.error(
+                "Failed to count reasoning blocks", exc_info=True, error=str(e)
+            )
+            return 0
+
+    def get_for_indices(self, message_indices: set[int]) -> list[ReasoningBlock]:
+        """Get reasoning blocks for specific message indices (optimized SQL query).
+
+        Args:
+            message_indices: Set of message indices to load reasoning for
+
+        Returns:
+            List of reasoning blocks for the specified indices
+        """
+        if not message_indices:
+            return []
+
+        self._ensure_db()
+        try:
+            engine = self._get_engine()
+            with get_session(engine) as session:
+                stmt = (
+                    select(DialogReasoningORM)
+                    .where(
+                        DialogReasoningORM.dialog_id == self.dialog_id,
+                        DialogReasoningORM.message_index.in_(list(message_indices)),
+                    )
+                    .order_by(DialogReasoningORM.created_at)
+                )
+                rows = session.execute(stmt).scalars().all()
+                return [
+                    ReasoningBlock(
+                        id=row.id,
+                        dialog_id=row.dialog_id,
+                        content=row.content,
+                        created_at=row.created_at,
+                        message_index=row.message_index,
+                        model_name=row.model_name,
+                    )
+                    for row in rows
+                ]
+        except Exception as e:
+            agent_logger.error(
+                "Failed to load reasoning for indices",
+                exc_info=True,
+                error=str(e),
+                indices_count=len(message_indices),
+            )
+            return []
+
     def get_for_message(self, message_index: int) -> list[ReasoningBlock]:
         """Get reasoning blocks linked to a specific message."""
         self._ensure_db()
