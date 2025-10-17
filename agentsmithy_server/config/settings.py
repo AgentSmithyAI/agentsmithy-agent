@@ -140,7 +140,7 @@ class Settings:
 
     @property
     def server_port(self) -> int:
-        return self._get("server_port", 11434, "SERVER_PORT")
+        return self._get("server_port", 8765, "SERVER_PORT")
 
     # RAG Configuration
     @property

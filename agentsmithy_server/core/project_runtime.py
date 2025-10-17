@@ -79,7 +79,7 @@ def set_scan_status(
 
 def ensure_singleton_and_select_port(
     project: Project,
-    base_port: int = 11434,
+    base_port: int = 8765,
     host: str = "127.0.0.1",
     max_probe: int = 200,
 ) -> int:

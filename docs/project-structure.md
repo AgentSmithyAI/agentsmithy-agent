@@ -41,7 +41,7 @@ Example:
 ```json
 {
   "server_pid": 53124,
-  "port": 11434,
+  "port": 8765,
   "server_started_at": "2025-08-20T17:34:12Z",
   "scan_status": "idle",
   "scan_started_at": null,
@@ -57,7 +57,7 @@ Example:
 
 Notes:
 - On startup AgentSmithy checks if `server_pid` is alive. If yes, it exits with an error to avoid multiple servers per project
-- The server will probe for a free port starting from `SERVER_PORT` (or 11434), and write the chosen port here
+- The server will probe for a free port starting from `SERVER_PORT` (or 8765), and write the chosen port here
 - The inspector will update `scan_*` fields during scanning
 
 ## `project.json`

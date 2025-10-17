@@ -71,7 +71,7 @@ DEFAULT_MODEL=gpt-5  # required
 # REASONING_EFFORT=medium       # only for gpt-5 models
 # REASONING_VERBOSITY=auto      # only for gpt-5 models
 # SERVER_HOST=localhost
-# SERVER_PORT=11434             # base port; actual port may auto-increment
+# SERVER_PORT=8765              # base port; actual port may auto-increment
 # LOG_FORMAT=pretty             # or json
 # SERVER_RELOAD=false           # enable hot-reload in dev with true
 ```
@@ -90,7 +90,7 @@ python main.py --workdir /abs/path/to/workspace --ide vscode
 python main.py --workdir /abs/path/to/workspace --ide jetbrains
 ```
 
-The server starts at base port `11434` (auto-increments if busy). Check startup logs for the actual URL, e.g., `http://localhost:11434`.
+The server starts at base port `8765` (auto-increments if busy). Check startup logs for the actual URL, e.g., `http://localhost:8765`.
 
 Notes:
 - `--workdir` should point to the project directory you want to work with. The server stores state in `<workdir>/.agentsmithy`.
@@ -112,7 +112,7 @@ Notes:
 
 #### Streaming request (SSE):
 ```bash
-curl -X POST http://localhost:11434/api/chat \
+curl -X POST http://localhost:8765/api/chat \
      -H "Content-Type: application/json" \
      -H "Accept: text/event-stream" \
      -d '{
@@ -132,7 +132,7 @@ curl -X POST http://localhost:11434/api/chat \
 
 #### Regular request:
 ```bash
-curl -X POST http://localhost:11434/api/chat \
+curl -X POST http://localhost:8765/api/chat \
      -H "Content-Type: application/json" \
      -d '{
        "messages": [
@@ -147,7 +147,7 @@ The endpoint is `POST /api/chat` (SSE over POST). Use `fetch` with a streaming r
 
 ```javascript
 // Browser example
-const res = await fetch('http://localhost:11434/api/chat', {
+const res = await fetch('http://localhost:8765/api/chat', {
   method: 'POST',
   headers: {
     'Content-Type': 'application/json',
