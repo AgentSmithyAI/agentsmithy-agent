@@ -1,3 +1,10 @@
+# [1.5.0](https://github.com/AgentSmithyAI/agentsmithy-agent/compare/v1.4.1...v1.5.0) (2025-10-17)
+
+
+### Features
+
+* Improve providers config ([#28](https://github.com/AgentSmithyAI/agentsmithy-agent/issues/28)) ([5cb2419](https://github.com/AgentSmithyAI/agentsmithy-agent/commit/5cb2419f900062376fc419b4db207293d84076d0))
+
 ## [1.4.1](https://github.com/AgentSmithyAI/agentsmithy-agent/compare/v1.4.0...v1.4.1) (2025-10-17)
 
 
