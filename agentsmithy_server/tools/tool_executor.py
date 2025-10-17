@@ -38,13 +38,22 @@ class ToolExecutor:
         # Set via set_context(...)
         self._tool_results_storage: ToolResultsStorage | None = None
 
-    def __del__(self) -> None:
-        """Clean up resources on garbage collection."""
+    def dispose(self) -> None:
+        """Explicitly clean up resources. Should be called on shutdown."""
         if self._tool_results_storage is not None:
             try:
                 self._tool_results_storage.dispose()
+                self._tool_results_storage = None
             except Exception:
                 pass
+
+    def __del__(self) -> None:
+        """Clean up resources on garbage collection (fallback only).
+
+        Note: __del__ is not guaranteed to run during interpreter shutdown.
+        Use dispose() for reliable cleanup.
+        """
+        self.dispose()
 
     def set_sse_callback(
         self, callback: Callable[[dict[str, Any]], Awaitable[None]] | None
