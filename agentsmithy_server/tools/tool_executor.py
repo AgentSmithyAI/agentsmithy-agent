@@ -38,6 +38,14 @@ class ToolExecutor:
         # Set via set_context(...)
         self._tool_results_storage: ToolResultsStorage | None = None
 
+    def __del__(self) -> None:
+        """Clean up resources on garbage collection."""
+        if self._tool_results_storage is not None:
+            try:
+                self._tool_results_storage.dispose()
+            except Exception:
+                pass
+
     def set_sse_callback(
         self, callback: Callable[[dict[str, Any]], Awaitable[None]] | None
     ) -> None:
@@ -45,6 +53,13 @@ class ToolExecutor:
 
     def set_context(self, project: Project | None, dialog_id: str | None) -> None:
         """Set project and dialog context for tool results storage."""
+        # Dispose old storage before creating new one
+        if self._tool_results_storage is not None:
+            try:
+                self._tool_results_storage.dispose()
+            except Exception:
+                pass
+
         self._project = project
         self._dialog_id = dialog_id
         if project and dialog_id:

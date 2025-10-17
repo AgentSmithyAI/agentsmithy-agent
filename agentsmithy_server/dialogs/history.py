@@ -122,22 +122,21 @@ class DialogHistory:
         Only counts messages that will have idx (non-ToolMessage, non-empty AI).
         """
         try:
-            conn = sqlite3.connect(str(self.db_path))
-            cursor = conn.execute(
-                """
-                SELECT COUNT(*) FROM message_store 
-                WHERE session_id = ? 
-                  AND json_extract(message, '$.type') != 'tool'
-                  AND NOT (
-                      json_extract(message, '$.type') = 'ai' 
-                      AND TRIM(COALESCE(json_extract(message, '$.data.content'), '')) = ''
-                  )
-                """,
-                (self.dialog_id,),
-            )
-            count = cursor.fetchone()[0]
-            conn.close()
-            return count
+            with sqlite3.connect(str(self.db_path)) as conn:
+                cursor = conn.execute(
+                    """
+                    SELECT COUNT(*) FROM message_store 
+                    WHERE session_id = ? 
+                      AND json_extract(message, '$.type') != 'tool'
+                      AND NOT (
+                          json_extract(message, '$.type') = 'ai' 
+                          AND TRIM(COALESCE(json_extract(message, '$.data.content'), '')) = ''
+                      )
+                    """,
+                    (self.dialog_id,),
+                )
+                count = cursor.fetchone()[0]
+                return count
         except Exception:
             # Fallback to loading all and filtering
             messages = self._get_all_messages()
@@ -178,89 +177,86 @@ class DialogHistory:
             start_index = 0
 
         try:
-            conn = sqlite3.connect(str(self.db_path))
+            with sqlite3.connect(str(self.db_path)) as conn:
+                # Calculate LIMIT and OFFSET for visible messages
+                if end_index is None:
+                    sql_limit = -1  # No limit in SQLite
+                    sql_offset = start_index
+                else:
+                    sql_limit = end_index - start_index
+                    sql_offset = start_index
 
-            # Calculate LIMIT and OFFSET for visible messages
-            if end_index is None:
-                sql_limit = -1  # No limit in SQLite
-                sql_offset = start_index
-            else:
-                sql_limit = end_index - start_index
-                sql_offset = start_index
+                # Strategy: Load non-empty messages by indices, then add ALL nearby messages
+                # (including empty AI) to get their tool_calls
 
-            # Strategy: Load non-empty messages by indices, then add ALL nearby messages
-            # (including empty AI) to get their tool_calls
-
-            # First, get the slice of non-empty messages
-            cursor1 = conn.execute(
-                """
-                WITH numbered AS (
-                    SELECT 
-                        ROW_NUMBER() OVER (ORDER BY id) - 1 as row_num,
-                        id, 
-                        message,
-                        json_extract(message, '$.type') as msg_type,
-                        TRIM(COALESCE(json_extract(message, '$.data.content'), '')) as content
-                    FROM message_store 
-                    WHERE session_id = ?
+                # First, get the slice of non-empty messages
+                cursor1 = conn.execute(
+                    """
+                    WITH numbered AS (
+                        SELECT 
+                            ROW_NUMBER() OVER (ORDER BY id) - 1 as row_num,
+                            id, 
+                            message,
+                            json_extract(message, '$.type') as msg_type,
+                            TRIM(COALESCE(json_extract(message, '$.data.content'), '')) as content
+                        FROM message_store 
+                        WHERE session_id = ?
+                    )
+                    SELECT row_num, id
+                    FROM numbered
+                    WHERE msg_type != 'tool' 
+                      AND NOT (msg_type = 'ai' AND content = '')
+                    ORDER BY row_num
+                    LIMIT ? OFFSET ?
+                    """,
+                    (self.dialog_id, sql_limit, sql_offset),
                 )
-                SELECT row_num, id
-                FROM numbered
-                WHERE msg_type != 'tool' 
-                  AND NOT (msg_type = 'ai' AND content = '')
-                ORDER BY row_num
-                LIMIT ? OFFSET ?
-                """,
-                (self.dialog_id, sql_limit, sql_offset),
-            )
 
-            non_empty_indices = cursor1.fetchall()
+                non_empty_indices = cursor1.fetchall()
 
-            if not non_empty_indices:
-                conn.close()
-                return [], [], []
+                if not non_empty_indices:
+                    return [], [], []
 
-            # Get range of DB row_nums to load (with padding for empty AI)
-            min_row_num = non_empty_indices[0][0]
-            max_row_num = non_empty_indices[-1][0]
+                # Get range of DB row_nums to load (with padding for empty AI)
+                min_row_num = non_empty_indices[0][0]
+                max_row_num = non_empty_indices[-1][0]
 
-            # Now load ALL visible messages in that range (to capture empty AI with tool_calls)
-            cursor2 = conn.execute(
-                """
-                WITH numbered AS (
-                    SELECT 
-                        ROW_NUMBER() OVER (ORDER BY id) - 1 as row_num,
-                        id, 
-                        message,
-                        json_extract(message, '$.type') as msg_type
-                    FROM message_store 
-                    WHERE session_id = ?
+                # Now load ALL visible messages in that range (to capture empty AI with tool_calls)
+                cursor2 = conn.execute(
+                    """
+                    WITH numbered AS (
+                        SELECT 
+                            ROW_NUMBER() OVER (ORDER BY id) - 1 as row_num,
+                            id, 
+                            message,
+                            json_extract(message, '$.type') as msg_type
+                        FROM message_store 
+                        WHERE session_id = ?
+                    )
+                    SELECT row_num, id, message 
+                    FROM numbered
+                    WHERE msg_type != 'tool' AND row_num >= ? AND row_num <= ?
+                    ORDER BY row_num
+                    """,
+                    (self.dialog_id, min_row_num, max_row_num),
                 )
-                SELECT row_num, id, message 
-                FROM numbered
-                WHERE msg_type != 'tool' AND row_num >= ? AND row_num <= ?
-                ORDER BY row_num
-                """,
-                (self.dialog_id, min_row_num, max_row_num),
-            )
 
-            rows = cursor2.fetchall()
-            conn.close()
+                rows = cursor2.fetchall()
 
-            # Deserialize messages from JSON
-            messages = []
-            indices = []
-            db_ids = []
-            for row_num, db_id, message_json in rows:
-                msg_dict = json.loads(message_json)
-                # Convert dict to LangChain message
-                msg_list = messages_from_dict([msg_dict])
-                if msg_list:
-                    messages.append(msg_list[0])
-                    indices.append(row_num)
-                    db_ids.append(db_id)
+                # Deserialize messages from JSON
+                messages = []
+                indices = []
+                db_ids = []
+                for row_num, db_id, message_json in rows:
+                    msg_dict = json.loads(message_json)
+                    # Convert dict to LangChain message
+                    msg_list = messages_from_dict([msg_dict])
+                    if msg_list:
+                        messages.append(msg_list[0])
+                        indices.append(row_num)
+                        db_ids.append(db_id)
 
-            return messages, indices, db_ids
+                return messages, indices, db_ids
         except Exception:
             # Fallback to loading all and slicing
             all_msgs = self._get_all_messages()
