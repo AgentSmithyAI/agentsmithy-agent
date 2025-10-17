@@ -136,9 +136,6 @@ async def _build_history_response(
     # Build event stream: collect all events with timestamps, then sort chronologically
     # Need to gather timestamps for proper ordering
 
-    # First, build a map of DB index -> timestamp (message id from DB)
-    message_timestamps = dict(zip(original_indices, message_db_ids, strict=False))
-
     # Collect all events with (sort_key, event)
     all_events_with_sort: list[tuple[tuple[int, str, int], HistoryEvent]] = []
     # sort_key = (db_idx, timestamp_str, priority) for stable sorting
@@ -147,7 +144,7 @@ async def _build_history_response(
     non_empty_count = 0
 
     # Process messages: use sequential idx for client, but original DB indices for linking data
-    for msg, db_idx, msg_db_id in zip(
+    for msg, db_idx, _msg_db_id in zip(
         messages, original_indices, message_db_ids, strict=False
     ):
         msg_type = msg.type
@@ -242,9 +239,11 @@ async def _build_history_response(
 
     # Determine pagination metadata based on messages with idx (non-empty)
     message_events_with_idx = [e for e in events_data if e.idx is not None]
+    first_idx: int
+    last_idx: int
     if message_events_with_idx:
-        first_idx = message_events_with_idx[0].idx
-        last_idx = message_events_with_idx[-1].idx
+        first_idx = message_events_with_idx[0].idx or 0
+        last_idx = message_events_with_idx[-1].idx or 0
     else:
         first_idx = 0
         last_idx = 0

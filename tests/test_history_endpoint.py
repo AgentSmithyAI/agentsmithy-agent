@@ -458,7 +458,6 @@ def test_get_history_with_orphan_reasoning(client, test_project):
     assert len(reasoning_events) == 1
 
     # It should appear after all messages
-    last_msg_idx = max(e.get("idx", -1) for e in events)
     reasoning_position = events.index(reasoning_events[0])
     message_positions = [i for i, e in enumerate(events) if e.get("idx") is not None]
     if message_positions:
