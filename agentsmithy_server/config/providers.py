@@ -49,6 +49,9 @@ class LocalFileConfigProvider(ConfigProvider):
         self._callback: Callable[[dict[str, Any]], None] | None = None
         self._last_mtime: float | None = None
         self._last_valid_config: dict[str, Any] | None = None
+        self._user_config: dict[str, Any] | None = (
+            None  # Original user config without defaults
+        )
         self._loop: asyncio.AbstractEventLoop | None = None
 
     async def load(self) -> dict[str, Any]:
@@ -60,6 +63,7 @@ class LocalFileConfigProvider(ConfigProvider):
             )
             await self.save(self.defaults.copy())
             self._last_valid_config = self.defaults.copy()
+            self._user_config = self.defaults.copy()
             return self.defaults.copy()
 
         try:
@@ -67,7 +71,10 @@ class LocalFileConfigProvider(ConfigProvider):
             config = json.loads(content)
             self._last_mtime = self.config_path.stat().st_mtime
 
-            # Merge with defaults to ensure all keys exist
+            # Store original user config (without defaults)
+            self._user_config = config.copy()
+
+            # Merge with defaults to ensure all keys exist (for runtime use)
             merged = self.defaults.copy()
             merged.update(config)
 
@@ -133,7 +140,12 @@ class LocalFileConfigProvider(ConfigProvider):
             tmp_path.replace(self.config_path)
 
             self._last_mtime = self.config_path.stat().st_mtime
-            self._last_valid_config = config.copy()
+            # Update both user_config and last_valid_config
+            self._user_config = config.copy()
+            # Merge with defaults for runtime use
+            merged = self.defaults.copy()
+            merged.update(config)
+            self._last_valid_config = merged
             logger.debug("Config saved to file", path=str(self.config_path))
         except Exception as e:
             logger.error(

@@ -79,7 +79,7 @@ ChatService.shutdown() -> cancel all active streams
 
 2. Make a streaming request:
    ```bash
-   curl -X POST http://localhost:11434/api/chat \
+   curl -X POST http://localhost:8765/api/chat \
      -H "Content-Type: application/json" \
      -H "Accept: text/event-stream" \
      -d '{"messages": [{"role": "user", "content": "Tell me a long story"}], "stream": true}'
@@ -150,6 +150,6 @@ No additional configuration is required. Graceful shutdown is automatically enab
 - Ensure client properly handles error events
 
 ### Testing issues
-- Ensure port 11434 is available
+- Ensure port 8765 is available (or the port specified in your config)
 - Check .env file configuration
 - Verify Python dependencies are installed

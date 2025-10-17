@@ -48,29 +48,52 @@ class OpenAIProvider:
         else:
             agent_entry = None
 
-        # Use explicit values or fall back to agent profile -> nested OpenAI chat -> global
-        resolved_agent_model = (
-            agent_entry.get("model") if isinstance(agent_entry, dict) else None
-        )
+        # New structure: check if agent_entry references a provider definition
+        provider_name = None
+        provider_def = None
+        if isinstance(agent_entry, dict) and "provider" in agent_entry:
+            provider_name = agent_entry.get("provider")
+            if provider_name:
+                provider_def = settings._get(f"providers.{provider_name}", None)
+                if not isinstance(provider_def, dict):
+                    agent_logger.warning(
+                        f"Provider '{provider_name}' not found in configuration"
+                    )
+                    provider_def = None
+
+        # Resolve model, api_key, base_url from provider definition or fallback to legacy
+        if provider_def:
+            # New structure: get from provider definition
+            resolved_model = provider_def.get("model")
+            resolved_api_key = provider_def.get("api_key")
+            resolved_base_url = provider_def.get("base_url")
+            resolved_options = provider_def.get("options", {})
+        else:
+            # Legacy structure: get model from agent_entry, credentials from default openai provider
+            resolved_model = (
+                agent_entry.get("model") if isinstance(agent_entry, dict) else None
+            )
+            prov_openai = settings.get_provider_config("openai")
+            resolved_api_key = prov_openai.get("api_key") or settings.openai_api_key
+            resolved_base_url = prov_openai.get("base_url") or settings.openai_base_url
+            resolved_options = prov_openai.get("options", {})
+
+        # Apply explicit parameters with highest priority, then resolved values, then global defaults
         self.model = (
-            model
-            or resolved_agent_model
-            or settings.openai_chat_model
-            or settings.model
+            model or resolved_model or settings.openai_chat_model or settings.model
         )
-        # Temperature and max_tokens are not in agent profile; use explicit or settings defaults
+        self.api_key = api_key or resolved_api_key
+        self.base_url = base_url or resolved_base_url
+        self.provider_options = (
+            resolved_options if isinstance(resolved_options, dict) else {}
+        )
+
+        # Temperature and max_tokens are not in provider definition; use explicit or settings defaults
         self.temperature = (
             temperature if temperature is not None else settings.openai_chat_temperature
         )
         self.max_tokens = (
             max_tokens if max_tokens is not None else settings.openai_chat_max_tokens
-        )
-
-        # Provider credentials: prefer providers.openai, then openai section, then flat env
-        prov_openai = settings.get_provider_config("openai")
-        self.api_key = api_key or prov_openai.get("api_key") or settings.openai_api_key
-        self.base_url = (
-            base_url or prov_openai.get("base_url") or settings.openai_base_url
         )
 
         if not self.model:
@@ -84,6 +107,7 @@ class OpenAIProvider:
             temperature=self.temperature,
             max_tokens=self.max_tokens,
             base_url=self.base_url,
+            provider=provider_name or "default",
         )
 
         # Ensure adapters are registered (no import side-effects outside this call)
@@ -95,9 +119,9 @@ class OpenAIProvider:
             reasoning_effort=settings.reasoning_effort,
         )
 
-        # Apply extended OpenAI per-model options from provider config (preferred)
+        # Apply extended OpenAI per-model options from provider config
         try:
-            extra_opts = settings.openai_chat_options or {}
+            extra_opts = self.provider_options
             if isinstance(extra_opts, dict) and extra_opts:
                 family = getattr(
                     get_model_spec(self.model), "family", "chat_completions"

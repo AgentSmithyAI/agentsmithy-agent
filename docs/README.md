@@ -21,7 +21,7 @@ python main.py --workdir /abs/path/to/your/project
 3) Send a streaming chat request:
 
 ```bash
-curl -X POST http://localhost:11434/api/chat \
+curl -X POST http://localhost:8765/api/chat \
   -H "Content-Type: application/json" \
   -H "Accept: text/event-stream" \
   -d '{
