@@ -87,7 +87,7 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     app = FastAPI(
         title="AgentSmithy Server",
-        description="AI agent server similar to Cursor, powered by LangGraph",
+        description="AI coding assistant server with LangGraph orchestration and RAG-powered context",
         version="1.0.0",
         lifespan=lifespan,
     )

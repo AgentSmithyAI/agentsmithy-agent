@@ -29,7 +29,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--ide",
         required=False,
-        help="IDE identifier (e.g., 'vscode', 'cursor', 'jetbrains')",
+        help="IDE identifier (e.g., 'vscode', 'jetbrains', 'vim')",
     )
     # No --project: workdir is the project
     args, _ = parser.parse_known_args()

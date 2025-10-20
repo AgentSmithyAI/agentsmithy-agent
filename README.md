@@ -1,4 +1,4 @@
-# AgentSmithy Local Server
+# AgentSmithy - AI Coding Assistant Server
 
 [![GitHub release](https://img.shields.io/github/v/release/AgentSmithyAI/agentsmithy-agent)](https://github.com/AgentSmithyAI/agentsmithy-agent/releases)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
@@ -6,7 +6,7 @@
 [![codecov](https://codecov.io/gh/AgentSmithyAI/agentsmithy-agent/branch/master/graph/badge.svg)](https://codecov.io/gh/AgentSmithyAI/agentsmithy-agent)
 [![Python](https://img.shields.io/badge/Python-3.13-blue)](https://www.python.org/)
 
-A local AI server similar to Cursor, built using LangGraph for orchestration, RAG for contextualization, and SSE streaming.
+A self-hosted AI coding assistant server that integrates with your IDE. Built with LangGraph orchestration, RAG-powered context understanding, and real-time SSE streaming. Provides code assistance through a comprehensive set of tools and supports multiple LLM providers.
 
 ## Documentation
 
@@ -33,12 +33,13 @@ Or use Makefile shortcuts:
 
 ## Features
 
-- 🤖 **Universal agent** orchestrated with LangGraph
-- 📚 **RAG (Retrieval-Augmented Generation)** for context handling
-- 🔄 **Streaming responses** via Server-Sent Events (SSE)
-- 🧰 **Tool-aware workflow** with structured SSE events (chat/reasoning/tool_call/file_edit)
-- 🔌 **Flexible LLM provider interface** (OpenAI supported out of the box)
-- 🗄️ **ChromaDB** vector store for context persistence
+- 🤖 **Universal AI Agent** - Intelligent coding assistant powered by LangGraph orchestration
+- 📚 **RAG-Powered Context** - ChromaDB-based vector store for semantic code understanding and retrieval
+- 🔄 **Real-time Streaming** - Server-Sent Events (SSE) for immediate response feedback
+- 🧰 **Comprehensive Tools** - File operations, code search, project inspection, and more
+- 🔌 **Multi-Provider Support** - Extensible LLM provider system (OpenAI with GPT-5 support included)
+- 💬 **Conversation Persistence** - Dialog management with full history and resumable conversations
+- 🎯 **IDE Integration** - Context-aware assistance tailored to your development environment
 
 ## Architecture
 
@@ -58,12 +59,28 @@ graph TD
     O --> P[Client]
 ```
 
+## What is AgentSmithy?
+
+AgentSmithy is a self-hosted AI coding assistant server that brings powerful language model capabilities to your development workflow. It runs as a standalone local server and connects to your IDE through plugins, allowing you to use it with any editor or IDE of your choice.
+
+**Architecture:**
+- **Server-based**: AgentSmithy runs as a separate process, not embedded directly in your IDE
+- **Plugin Integration**: Connect through lightweight IDE plugins (e.g., [VSCode extension prototype](https://github.com/AgentSmithyAI/agentsmithy-vscode))
+- **IDE Agnostic**: Works with any IDE that has a developed plugin system - VSCode, JetBrains, Vim, Emacs, etc.
+
+**Key Capabilities:**
+- **Code Understanding**: Analyzes your codebase using RAG to provide contextually relevant suggestions
+- **Code Generation**: Creates new code, refactors existing code, and implements features based on your requirements
+- **Code Explanation**: Explains complex code segments and provides documentation
+- **Project Navigation**: Helps you understand project structure and find relevant code
+- **Tool Execution**: Performs file operations, runs commands, and interacts with your development environment
+
 ## Installation
 
 1. Clone the repository:
 ```bash
-git clone <repo-url>
-cd agentsmithy-local
+git clone https://github.com/AgentSmithyAI/agentsmithy-agent.git
+cd agentsmithy-agent
 ```
 
 2. Create a virtual environment (option A: Makefile-managed):
@@ -109,9 +126,9 @@ DEFAULT_MODEL=gpt-5  # required
 python main.py --workdir /abs/path/to/workspace
 
 # With IDE specification (recommended for better context)
-python main.py --workdir /abs/path/to/workspace --ide cursor
 python main.py --workdir /abs/path/to/workspace --ide vscode
 python main.py --workdir /abs/path/to/workspace --ide jetbrains
+python main.py --workdir /abs/path/to/workspace --ide vim
 ```
 
 The server starts at base port `8765` (auto-increments if busy). Check startup logs for the actual URL, e.g., `http://localhost:8765`.
@@ -124,7 +141,7 @@ Notes:
 
 - `--workdir` (required): absolute path to the project directory. On startup, the server ensures `/abs/path/to/workspace/.agentsmithy` exists. Project-specific data (e.g., RAG index, dialogs, status.json) is stored under each project's `.agentsmithy` directory. The server keeps this path in-process; no env var is used.
 
-- `--ide` (optional): IDE identifier to provide better context to the AI agent. Common values: `cursor`, `vscode`, `jetbrains`, `vim`, `emacs`, `sublime`. If not specified, the agent will see "unknown IDE". This parameter is runtime-only and not saved to configuration. The agent receives environment information (OS, shell, IDE) in its system prompt, allowing it to provide IDE-specific advice and use appropriate commands for your platform.
+- `--ide` (optional): IDE identifier to provide better context to the AI agent. Common values: `vscode`, `jetbrains`, `vim`, `emacs`, `sublime`, `neovim`. If not specified, the agent will see "unknown IDE". This parameter is runtime-only and not saved to configuration. The agent receives environment information (OS, shell, IDE) in its system prompt, allowing it to provide IDE-specific advice and use appropriate commands for your platform.
 
 ### Projects and RAG Storage
 
@@ -291,46 +308,6 @@ make typecheck
 
 # run tests
 make test
-```
-
-## Extending Functionality
-
-### Adding a New LLM Provider
-
-1. Create a new provider class in `agentsmithy_server/core/llm_provider.py`:
-```python
-class YourLLMProvider(LLMProvider):
-    async def agenerate(self, messages, stream=False):
-        ...
-    def get_model_name(self) -> str:
-        ...
-    def bind_tools(self, tools: List[BaseTool]):
-        ...
-```
-
-2. Instantiate your provider directly where needed:
-```python
-provider = YourLLMProvider(...)
-```
-
-### Adding a New Agent
-
-The orchestrator currently routes everything to a single `UniversalAgent`. To introduce specialized agents, add your agent in `agentsmithy_server/agents/` and update `agentsmithy_server/core/agent_graph.py` to add nodes and routing.
-
-## Project Structure
-
-```
-agentsmithy-local/
-├── agentsmithy_server/
-│   ├── agents/              # Agent implementations (UniversalAgent)
-│   ├── api/                 # FastAPI server
-│   ├── config/              # Configuration (settings, logging)
-│   ├── core/                # Core components (LLM, LangGraph)
-│   ├── rag/                 # RAG system
-│   └── utils/               # Utilities
-├── requirements.txt         # Dependencies
-├── .env.example             # Copy to .env and fill values
-└── README.md               # Documentation
 ```
 
 ## Debugging and Diagnostics
