@@ -1,0 +1,52 @@
+version: 2
+updates:
+  - package-ecosystem: 'github-actions'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+  - package-ecosystem: 'pip'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+    groups:
+      langchain:
+        patterns:
+          - 'langchain'
+          - 'langchain-*'
+          - 'langsmith'
+      langgraph:
+        patterns:
+          - 'langgraph'
+          - 'langgraph-*'
+      openai:
+        patterns:
+          - 'openai'
+          - 'tiktoken'
+      fastapi:
+        patterns:
+          - 'fastapi'
+          - 'starlette'
+          - 'uvicorn'
+          - 'sse-starlette'
+      pydantic:
+        patterns:
+          - 'pydantic'
+          - 'pydantic-*'
+      chromadb:
+        patterns:
+          - 'chromadb'
+      pytest:
+        patterns:
+          - 'pytest'
+          - 'pytest-*'
+          - 'coverage'
+      linters:
+        patterns:
+          - 'black'
+          - 'isort'
+          - 'ruff'
+          - 'mypy'
+      opentelemetry:
+        patterns:
+          - 'opentelemetry-*'
+
