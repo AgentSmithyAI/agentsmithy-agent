@@ -9,7 +9,7 @@ router = APIRouter()
 async def root():
     return {
         "title": "AgentSmithy Server",
-        "description": "AI agent server similar to Cursor, powered by LangGraph",
+        "description": "AI coding assistant server with LangGraph orchestration and RAG-powered context",
         "endpoints": {
             "POST /api/chat": "Main chat endpoint (supports SSE streaming)",
             "GET /health": "Health check",

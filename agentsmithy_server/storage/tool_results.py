@@ -300,19 +300,36 @@ class ToolResultsStorage:
             engine = self._get_engine()
             with get_session(engine) as session:
                 stmt = (
-                    select(ToolResultORM.tool_call_id)
+                    select(
+                        ToolResultORM.tool_call_id,
+                        ToolResultORM.tool_name,
+                        ToolResultORM.timestamp,
+                        ToolResultORM.size_bytes,
+                        ToolResultORM.summary,
+                        ToolResultORM.error,
+                    )
                     .where(ToolResultORM.dialog_id == self.dialog_id)
                     .order_by(ToolResultORM.timestamp.asc())
                 )
                 rows = session.execute(stmt).all()
-            results: list[ToolResultMetadata] = []
-            for (tcid,) in rows:
-                md = await self.get_metadata(tcid)
-                if md:
-                    results.append(md)
-            return results
+
+                results: list[ToolResultMetadata] = []
+                for tool_call_id, tool_name, ts, size_bytes, summary, error in rows:
+                    results.append(
+                        ToolResultMetadata(
+                            tool_call_id=tool_call_id,
+                            tool_name=tool_name,
+                            timestamp=ts,
+                            size_bytes=int(size_bytes or 0),
+                            summary=summary,
+                            error=error,
+                        )
+                    )
+                return results
         except Exception as e:
-            agent_logger.error("Failed to list tool results", error=str(e))
+            agent_logger.error(
+                "Failed to list tool results", error=str(e), exc_info=True
+            )
             return []
 
     def get_truncated_preview(

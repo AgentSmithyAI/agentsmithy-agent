@@ -116,6 +116,14 @@ class DialogHistory:
             return messages[-limit:]
         return messages
 
+    def _table_exists(self, conn: sqlite3.Connection, table_name: str) -> bool:
+        """Check if a table exists in the database."""
+        cursor = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+            (table_name,),
+        )
+        return cursor.fetchone() is not None
+
     def get_messages_count(self) -> int:
         """Get total count of non-empty visible messages via direct SQL.
 
@@ -123,6 +131,9 @@ class DialogHistory:
         """
         try:
             with sqlite3.connect(str(self.db_path)) as conn:
+                if not self._table_exists(conn, "message_store"):
+                    return 0
+
                 cursor = conn.execute(
                     """
                     SELECT COUNT(*) FROM message_store 
@@ -149,6 +160,9 @@ class DialogHistory:
         """
         try:
             with sqlite3.connect(str(self.db_path)) as conn:
+                if not self._table_exists(conn, "message_store"):
+                    return 0
+
                 cursor = conn.execute(
                     """
                     SELECT SUM(json_array_length(json_extract(message, '$.data.tool_calls')))
@@ -161,7 +175,7 @@ class DialogHistory:
                 count = cursor.fetchone()[0]
                 return count or 0
         except Exception:
-            return 0
+            raise
 
     def get_messages_slice(
         self, start_index: int | None = None, end_index: int | None = None
@@ -190,6 +204,9 @@ class DialogHistory:
 
         try:
             with sqlite3.connect(str(self.db_path)) as conn:
+                if not self._table_exists(conn, "message_store"):
+                    return [], [], []
+
                 # Calculate LIMIT and OFFSET for visible messages
                 if end_index is None:
                     sql_limit = -1  # No limit in SQLite

@@ -26,7 +26,7 @@ def get_runtime_info(ide: str | None = None) -> str:
     """Get runtime environment information (OS, shell, IDE).
 
     Args:
-        ide: IDE identifier (e.g., 'vscode', 'cursor', 'jetbrains') or None
+        ide: IDE identifier (e.g., 'vscode', 'jetbrains', 'vim') or None
 
     Returns:
         Formatted string with runtime information
