@@ -10,6 +10,8 @@ build==1.3.0
     # via pip-tools
 click==8.3.0
     # via pip-tools
+coverage[toml]==8.0.0
+    # via pytest-cov
 mypy==1.18.2
     # via -r requirements-dev.in
 mypy-extensions==1.1.0
@@ -31,6 +33,8 @@ pyproject-hooks==1.2.0
     # via
     #   build
     #   pip-tools
+pytest-cov==7.0.0
+    # via -r requirements-dev.in
 ruff==0.13.2
     # via -r requirements-dev.in
 typing-extensions==4.15.0

@@ -44,6 +44,9 @@ format:
 	$(PY) -m black .
 	$(PY) -m isort .
 
+typecheck:
+	$(PY) -m mypy agentsmithy_server
+
 test:
 	$(VENV)/bin/pytest -q
 

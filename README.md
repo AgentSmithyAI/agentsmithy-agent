@@ -1,11 +1,35 @@
 # AgentSmithy Local Server
 
+[![GitHub release](https://img.shields.io/github/v/release/AgentSmithyAI/agentsmithy-agent)](https://github.com/AgentSmithyAI/agentsmithy-agent/releases)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+[![CI](https://github.com/AgentSmithyAI/agentsmithy-agent/actions/workflows/workflow.yaml/badge.svg?branch=master)](https://github.com/AgentSmithyAI/agentsmithy-agent/actions/workflows/workflow.yaml)
+[![codecov](https://codecov.io/gh/AgentSmithyAI/agentsmithy-agent/branch/master/graph/badge.svg)](https://codecov.io/gh/AgentSmithyAI/agentsmithy-agent)
+[![Python](https://img.shields.io/badge/Python-3.13-blue)](https://www.python.org/)
+
 A local AI server similar to Cursor, built using LangGraph for orchestration, RAG for contextualization, and SSE streaming.
 
 ## Documentation
 
 - See the documentation in [docs/](./docs).
 - SSE protocol details (current): [docs/sse-protocol.md](./docs/sse-protocol.md)
+
+## Formatting, Linting & Tests
+
+- Black format check: `black --check .`
+- Black autofix: `black .`
+- isort check: `isort --check-only .`
+- isort autofix: `isort .`
+- Ruff linting: `ruff check .`
+- Type checking (MyPy): `mypy agentsmithy_server`
+- Unit tests (pytest):
+  - Run once: `pytest -v`
+  - With coverage: `pytest --cov=agentsmithy_server --cov-report=term-missing`
+
+Or use Makefile shortcuts:
+- `make format` - Run black and isort
+- `make lint` - Run ruff
+- `make typecheck` - Run mypy
+- `make test` - Run pytest
 
 ## Features
 
@@ -336,3 +360,9 @@ Example log output:
 {"timestamp": "2024-01-01T12:00:01", "level": "DEBUG", "logger": "agentsmithy.agents", "message": "Classifying task", "query_preview": "Help me refactor this code"}
 {"timestamp": "2024-01-01T12:00:02", "level": "INFO", "logger": "agentsmithy.agents", "message": "Task classified", "task_type": "refactor"}
 ```
+
+## License
+
+This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
+
+Copyright 2025 Alexander Morozov
