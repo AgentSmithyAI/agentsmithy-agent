@@ -82,4 +82,22 @@ filterwarnings = [
     "ignore::DeprecationWarning",
 ]
 
+[tool.semantic_release]
+version_variable = [
+    "agentsmithy_server/__init__.py:__version__",
+]
+upload_to_vcs_release = true
+commit_message = "chore(release): {version} [skip ci]"
+commit_parser = "angular"
+logging_use_named_masks = false
+major_on_zero = true
+tag_format = "v{version}"
+
+[tool.semantic_release.changelog]
+exclude_commit_patterns = []
+
+[tool.semantic_release.branches.master]
+match = "master"
+prerelease = false
+
 

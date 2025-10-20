@@ -10,7 +10,6 @@ permissions:
 
 env:
   PYTHON_VERSION: '3.13'
-  SEMANTIC_VERSION: '19.0.2'
   working-dir: .
 
 jobs:
@@ -113,8 +112,8 @@ jobs:
     name: Release Version Management
     outputs:
       new_sha: ${{ steps.sha.outputs.SHA }}
-      new_release_published: ${{ steps.semantic.outputs.new_release_published }}
-      new_release_version: ${{ steps.semantic.outputs.new_release_version }}
+      new_release_published: ${{ steps.semantic.outputs.released }}
+      new_release_version: ${{ steps.semantic.outputs.version }}
     runs-on: ubuntu-latest
     needs: [lint, test]
     steps:
@@ -123,18 +122,42 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Semantic Release
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install python-semantic-release
+        run: pip install python-semantic-release
+
+      - name: Python Semantic Release
         id: semantic
         if: startsWith(github.ref, 'refs/heads/master') || startsWith(github.ref, 'refs/heads/main')
-        uses: cycjimmy/semantic-release-action@v5
-        with:
-          semantic_version: ${{ env.SEMANTIC_VERSION }}
-          extra_plugins: |
-            @semantic-release/changelog@6.0.0
-            @semantic-release/git@10.0.0
-            @semantic-release/exec@6.0.1
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          
+          # Read version before release (directly from file)
+          OLD_VERSION=$(grep '__version__' agentsmithy_server/__init__.py | cut -d'"' -f2)
+          echo "Current version: $OLD_VERSION"
+          
+          # Run semantic-release
+          semantic-release version
+          
+          # Read version after release (directly from file)
+          NEW_VERSION=$(grep '__version__' agentsmithy_server/__init__.py | cut -d'"' -f2)
+          
+          if [ "$OLD_VERSION" != "$NEW_VERSION" ]; then
+            echo "released=true" >> $GITHUB_OUTPUT
+            echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+            echo "✅ New version released: $OLD_VERSION → $NEW_VERSION"
+          else
+            echo "released=false" >> $GITHUB_OUTPUT
+            echo "version=" >> $GITHUB_OUTPUT
+            echo "ℹ️ No new version to release (no qualifying commits)"
+          fi
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Get SHA
         id: sha
@@ -144,8 +167,8 @@ jobs:
           echo "SHA=$sha_new" >> $GITHUB_OUTPUT
 
       - run: echo ${{ steps.sha.outputs.SHA }}
-      - run: echo "New release published=${{ steps.semantic.outputs.new_release_published }}"
-      - run: echo "New release version=${{ steps.semantic.outputs.new_release_version }}"
+      - run: echo "New release published=${{ steps.semantic.outputs.released }}"
+      - run: echo "New release version=${{ steps.semantic.outputs.version }}"
 
 
   build_binaries:

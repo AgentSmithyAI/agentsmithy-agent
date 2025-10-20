@@ -46,6 +46,9 @@ updates:
           - 'isort'
           - 'ruff'
           - 'mypy'
+      semantic-release:
+        patterns:
+          - 'python-semantic-release'
       opentelemetry:
         patterns:
           - 'opentelemetry-*'

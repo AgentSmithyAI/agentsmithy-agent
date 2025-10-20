@@ -6,11 +6,11 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
+from agentsmithy_server import __version__
 from agentsmithy_server.api.routes.chat import router as chat_router
 from agentsmithy_server.api.routes.dialogs import router as dialogs_router
 from agentsmithy_server.api.routes.health import router as health_router
 from agentsmithy_server.api.routes.history import router as history_router
-from agentsmithy_server.api.routes.meta import router as meta_router
 from agentsmithy_server.api.routes.tool_results import router as tool_results_router
 from agentsmithy_server.core.project import get_current_project
 from agentsmithy_server.utils.logger import api_logger
@@ -88,7 +88,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="AgentSmithy Server",
         description="AI coding assistant server with LangGraph orchestration and RAG-powered context",
-        version="1.0.0",
+        version=__version__,
         lifespan=lifespan,
     )
 
@@ -112,7 +112,6 @@ def create_app() -> FastAPI:
     app.include_router(health_router)
     app.include_router(dialogs_router)
     app.include_router(history_router)
-    app.include_router(meta_router)
     app.include_router(tool_results_router)
 
     # Basic error handler example
