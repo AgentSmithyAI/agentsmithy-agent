@@ -262,8 +262,15 @@ data: {"type": "chat_end", "dialog_id": "01J..."}
 data: {"type": "done", "done": true, "dialog_id": "01J..."}
 ```
 
-### GET /
-Root endpoint with API information and usage examples.
+### API Documentation
+
+Interactive API documentation is available when the server is running:
+
+- **`GET /docs`** - Swagger UI (interactive API documentation with request/response examples)
+- **`GET /redoc`** - ReDoc UI (alternative documentation interface with better formatting)
+- **`GET /openapi.json`** - OpenAPI JSON schema (for programmatic access)
+
+Example: if your server runs at `http://localhost:8765`, visit `http://localhost:8765/docs` to explore all endpoints interactively.
 
 ### GET /health
 Server health check.
