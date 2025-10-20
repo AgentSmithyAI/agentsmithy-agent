@@ -138,13 +138,13 @@ jobs:
           git config user.email "github-actions@github.com"
           
           # Read version before release (directly from file)
-          OLD_VERSION=$(grep -oP '__version__ = "\K[^"]+' agentsmithy_server/__init__.py)
+          OLD_VERSION=$(grep '__version__' agentsmithy_server/__init__.py | cut -d'"' -f2)
           echo "Current version: $OLD_VERSION"
           
           # Run semantic-release
           if semantic-release version; then
             # Read version after release (directly from file)
-            NEW_VERSION=$(grep -oP '__version__ = "\K[^"]+' agentsmithy_server/__init__.py)
+            NEW_VERSION=$(grep '__version__' agentsmithy_server/__init__.py | cut -d'"' -f2)
             
             if [ "$OLD_VERSION" != "$NEW_VERSION" ]; then
               echo "released=true" >> $GITHUB_OUTPUT
