@@ -1,3 +1,10 @@
+## [1.5.1](https://github.com/AgentSmithyAI/agentsmithy-agent/compare/v1.5.0...v1.5.1) (2025-10-20)
+
+
+### Bug Fixes
+
+* Bug fixes for `tools` and `history` database ([#34](https://github.com/AgentSmithyAI/agentsmithy-agent/issues/34)) ([26e680f](https://github.com/AgentSmithyAI/agentsmithy-agent/commit/26e680f94ff3b99e391da6b0e287f0c3cf387658))
+
 # [1.5.0](https://github.com/AgentSmithyAI/agentsmithy-agent/compare/v1.4.1...v1.5.0) (2025-10-17)
 
 
