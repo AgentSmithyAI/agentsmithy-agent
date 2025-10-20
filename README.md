@@ -289,6 +289,38 @@ Manage per-project conversations persisted under `<workdir>/.agentsmithy/dialogs
 - `GET /api/dialogs/{dialog_id}/tool-results` - List all tool results metadata for a dialog
 - `GET /api/dialogs/{dialog_id}/tool-results/{tool_call_id}` - Get full tool execution result
 
+## Binary Distribution
+
+AgentSmithy can be built as a standalone binary using PyInstaller, eliminating the need for Python runtime on target systems.
+
+### Building Binary
+
+```bash
+# Build binary with all checks (format, lint, test, package)
+make build
+
+# Or build binary only (skip checks)
+make pyinstall
+```
+
+The binary will be created at `dist/agentsmithy`.
+
+### Binary Features
+
+- **Single executable**: No Python installation required
+- **UPX compression**: Automatically enabled if `upx` is installed (reduces binary size)
+- **Bundled dependencies**: All dependencies (ChromaDB, LangChain, etc.) included
+- **Cross-platform**: Build on your target OS (Linux, macOS, Windows)
+
+### Running Binary
+
+```bash
+# Same usage as Python version
+agentsmithy --workdir /path/to/project --ide vscode
+```
+
+**Note**: The binary includes all dependencies but still requires network access for LLM API calls and will create `.agentsmithy` directories in your project workspaces.
+
 ## Development
 
 ### Tooling
