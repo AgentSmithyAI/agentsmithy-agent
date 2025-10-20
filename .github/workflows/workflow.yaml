@@ -141,8 +141,8 @@ jobs:
           OLD_VERSION=$(grep '__version__' agentsmithy_server/__init__.py | cut -d'"' -f2)
           echo "Current version: $OLD_VERSION"
           
-          # Run semantic-release
-          semantic-release version
+          # Run semantic-release (full cycle: commit, tag, push, release)
+          semantic-release version --changelog --commit --tag --push --vcs-release
           
           # Read version after release (directly from file)
           NEW_VERSION=$(grep '__version__' agentsmithy_server/__init__.py | cut -d'"' -f2)
@@ -163,12 +163,7 @@ jobs:
         id: sha
         run: |
           sha_new=$(git rev-parse HEAD)
-          echo $sha_new
           echo "SHA=$sha_new" >> $GITHUB_OUTPUT
-
-      - run: echo ${{ steps.sha.outputs.SHA }}
-      - run: echo "New release published=${{ steps.semantic.outputs.released }}"
-      - run: echo "New release version=${{ steps.semantic.outputs.version }}"
 
 
   build_binaries:

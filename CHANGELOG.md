@@ -1,3 +1,44 @@
+<!-- version list -->
+
+## v1.5.2 (2025-10-20)
+
+### Bug Fixes
+
+- Add changelog flag and fix parser warning
+  ([`231993c`](https://github.com/AgentSmithyAI/agentsmithy-agent/commit/231993c05e44a23b6621e68a3c7ffc9eaf3627d3))
+
+- Fix docs & versioning ([#35](https://github.com/AgentSmithyAI/agentsmithy-agent/pull/35),
+  [`099dd99`](https://github.com/AgentSmithyAI/agentsmithy-agent/commit/099dd99c001506226061a9fbef3517cad4e149d4))
+
+- Fix pyproject
+  ([`ac144ea`](https://github.com/AgentSmithyAI/agentsmithy-agent/commit/ac144eab3194e9415c33f0619988740f0dda067e))
+
+- Fix semantic-release workflow and version management
+  ([`33207fa`](https://github.com/AgentSmithyAI/agentsmithy-agent/commit/33207fa26716dab745e1aac23a49da9fb59c0b10))
+
+- Sync version with git tag ([#36](https://github.com/AgentSmithyAI/agentsmithy-agent/pull/36),
+  [`121e2b3`](https://github.com/AgentSmithyAI/agentsmithy-agent/commit/121e2b3d62794679302cb87a26acc710ca043add))
+
+- Test semantic-release with changelog generation
+  ([`d356a29`](https://github.com/AgentSmithyAI/agentsmithy-agent/commit/d356a293a3cb71340ef10f4486c1e857f3ed682d))
+
+### Chores
+
+- Fix CHANGELOG generation config
+  ([`962a2c8`](https://github.com/AgentSmithyAI/agentsmithy-agent/commit/962a2c82f69570b0d102144a98bd73242ec6aa03))
+
+- Fix workflow ([#37](https://github.com/AgentSmithyAI/agentsmithy-agent/pull/37),
+  [`f876320`](https://github.com/AgentSmithyAI/agentsmithy-agent/commit/f876320a867cb883e66e46790c1de85fefa327a6))
+
+### Continuous Integration
+
+- Add CODECOV_TOKEN to workflow
+  ([`dc9641f`](https://github.com/AgentSmithyAI/agentsmithy-agent/commit/dc9641fe01d7ddcd9efdd5a132981321aea18bc4))
+
+- Trigger workflow for codecov
+  ([`f2978be`](https://github.com/AgentSmithyAI/agentsmithy-agent/commit/f2978bef08ace78cb224499da3a7f9d5beb10bec))
+
+
 ## [1.5.1](https://github.com/AgentSmithyAI/agentsmithy-agent/compare/v1.5.0...v1.5.1) (2025-10-20)
 
 
