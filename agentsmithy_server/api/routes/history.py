@@ -404,6 +404,13 @@ def _count_total_events(project: Project, dialog_id: str) -> int:
 
         # Single connection, multiple COUNTs in one query
         with sqlite3.connect(str(db_path)) as conn:
+            # Check if message_store table exists
+            cursor_check = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='message_store'"
+            )
+            if not cursor_check.fetchone():
+                return 0
+                
             cursor = conn.execute(
                 """
                 SELECT 

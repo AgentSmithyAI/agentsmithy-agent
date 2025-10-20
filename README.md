@@ -262,19 +262,32 @@ data: {"type": "chat_end", "dialog_id": "01J..."}
 data: {"type": "done", "done": true, "dialog_id": "01J..."}
 ```
 
+### GET /
+Root endpoint with API information and usage examples.
+
 ### GET /health
 Server health check.
 
 ### Dialogs API
 Manage per-project conversations persisted under `<workdir>/.agentsmithy/dialogs`.
 
-- `GET /api/dialogs`
-- `POST /api/dialogs`
-- `GET /api/dialogs/current`
-- `PATCH /api/dialogs/current?id=<id>`
-- `GET /api/dialogs/{dialog_id}`
-- `PATCH /api/dialogs/{dialog_id}`
-- `DELETE /api/dialogs/{dialog_id}`
+**Dialog Management:**
+- `GET /api/dialogs` - List all dialogs with sorting and pagination
+- `POST /api/dialogs` - Create a new dialog
+- `GET /api/dialogs/current` - Get current active dialog
+- `PATCH /api/dialogs/current?id=<id>` - Set current active dialog
+- `GET /api/dialogs/{dialog_id}` - Get dialog metadata
+- `PATCH /api/dialogs/{dialog_id}` - Update dialog (e.g., change title)
+- `DELETE /api/dialogs/{dialog_id}` - Delete a dialog
+
+**Dialog History:**
+- `GET /api/dialogs/{dialog_id}/history` - Get dialog history with cursor-based pagination
+  - Query params: `limit` (default: 20), `before` (cursor for scrolling up)
+  - Returns events in chronological order: messages, reasoning blocks, tool calls, file edits
+
+**Tool Results:**
+- `GET /api/dialogs/{dialog_id}/tool-results` - List all tool results metadata for a dialog
+- `GET /api/dialogs/{dialog_id}/tool-results/{tool_call_id}` - Get full tool execution result
 
 ## Development
 
