@@ -120,7 +120,7 @@ class DialogHistory:
         """Check if a table exists in the database."""
         cursor = conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
-            (table_name,)
+            (table_name,),
         )
         return cursor.fetchone() is not None
 
@@ -133,7 +133,7 @@ class DialogHistory:
             with sqlite3.connect(str(self.db_path)) as conn:
                 if not self._table_exists(conn, "message_store"):
                     return 0
-                    
+
                 cursor = conn.execute(
                     """
                     SELECT COUNT(*) FROM message_store 
@@ -162,7 +162,7 @@ class DialogHistory:
             with sqlite3.connect(str(self.db_path)) as conn:
                 if not self._table_exists(conn, "message_store"):
                     return 0
-                    
+
                 cursor = conn.execute(
                     """
                     SELECT SUM(json_array_length(json_extract(message, '$.data.tool_calls')))
@@ -206,7 +206,7 @@ class DialogHistory:
             with sqlite3.connect(str(self.db_path)) as conn:
                 if not self._table_exists(conn, "message_store"):
                     return [], [], []
-                    
+
                 # Calculate LIMIT and OFFSET for visible messages
                 if end_index is None:
                     sql_limit = -1  # No limit in SQLite

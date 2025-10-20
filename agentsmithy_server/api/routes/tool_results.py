@@ -56,13 +56,13 @@ async def get_tool_result(
 
     with ToolResultsStorage(project, dialog_id) as storage:
         result = await storage.get_result(tool_call_id)
-        
+
         if not result:
             raise HTTPException(
                 status_code=404,
                 detail=f"Tool result not found: {tool_call_id}",
             )
-        
+
         # Get metadata for additional info
         metadata = await storage.get_metadata(tool_call_id)
 

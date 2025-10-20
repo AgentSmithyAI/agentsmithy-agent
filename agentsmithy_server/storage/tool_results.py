@@ -312,7 +312,7 @@ class ToolResultsStorage:
                     .order_by(ToolResultORM.timestamp.asc())
                 )
                 rows = session.execute(stmt).all()
-                
+
                 results: list[ToolResultMetadata] = []
                 for tool_call_id, tool_name, ts, size_bytes, summary, error in rows:
                     results.append(
@@ -327,7 +327,9 @@ class ToolResultsStorage:
                     )
                 return results
         except Exception as e:
-            agent_logger.error("Failed to list tool results", error=str(e), exc_info=True)
+            agent_logger.error(
+                "Failed to list tool results", error=str(e), exc_info=True
+            )
             return []
 
     def get_truncated_preview(

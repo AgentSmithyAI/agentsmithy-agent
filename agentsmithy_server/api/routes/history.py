@@ -410,7 +410,7 @@ def _count_total_events(project: Project, dialog_id: str) -> int:
             )
             if not cursor_check.fetchone():
                 return 0
-                
+
             cursor = conn.execute(
                 """
                 SELECT 
