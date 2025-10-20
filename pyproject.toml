@@ -88,7 +88,6 @@ version_variable = [
 ]
 branch = "master"
 upload_to_vcs_release = true
-build_command = false
 commit_message = "chore(release): {version} [skip ci]"
 commit_parser = "angular"
 logging_use_named_masks = false
