@@ -141,8 +141,8 @@ jobs:
           OLD_VERSION=$(grep '__version__' agentsmithy_server/__init__.py | cut -d'"' -f2)
           echo "Current version: $OLD_VERSION"
           
-          # Run semantic-release
-          semantic-release version
+          # Run semantic-release (with --push and --vcs-release to commit and push changes)
+          semantic-release version --push --vcs-release
           
           # Read version after release (directly from file)
           NEW_VERSION=$(grep '__version__' agentsmithy_server/__init__.py | cut -d'"' -f2)
