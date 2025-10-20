@@ -86,7 +86,6 @@ filterwarnings = [
 version_variable = [
     "agentsmithy_server/__init__.py:__version__",
 ]
-branch = "master"
 upload_to_vcs_release = true
 commit_message = "chore(release): {version} [skip ci]"
 commit_parser = "angular"
