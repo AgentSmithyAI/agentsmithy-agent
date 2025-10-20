@@ -137,23 +137,29 @@ jobs:
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           
-          # Run semantic-release and capture output
-          if semantic-release version 2>&1 | tee /tmp/semrel.log; then
-            # Check if new version was created by looking for version bump message
-            NEW_VERSION=$(grep -oP 'Bumping version from .* to \K[0-9.]+' /tmp/semrel.log || echo '')
-            if [ -n "$NEW_VERSION" ]; then
+          # Read version before release (directly from file)
+          OLD_VERSION=$(grep -oP '__version__ = "\K[^"]+' agentsmithy_server/__init__.py)
+          echo "Current version: $OLD_VERSION"
+          
+          # Run semantic-release
+          if semantic-release version; then
+            # Read version after release (directly from file)
+            NEW_VERSION=$(grep -oP '__version__ = "\K[^"]+' agentsmithy_server/__init__.py)
+            
+            if [ "$OLD_VERSION" != "$NEW_VERSION" ]; then
               echo "released=true" >> $GITHUB_OUTPUT
               echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
-              echo "✅ New version released: $NEW_VERSION"
+              echo "✅ New version released: $OLD_VERSION → $NEW_VERSION"
             else
               echo "released=false" >> $GITHUB_OUTPUT
               echo "version=" >> $GITHUB_OUTPUT
-              echo "ℹ️ No new version to release"
+              echo "ℹ️ No new version to release (no qualifying commits)"
             fi
           else
             echo "released=false" >> $GITHUB_OUTPUT
             echo "version=" >> $GITHUB_OUTPUT
-            echo "⚠️ Semantic release failed or no commits to release"
+            echo "⚠️ Semantic release failed"
+            exit 0  # Don't fail the workflow
           fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
