@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
+from agentsmithy_server import __version__
 from agentsmithy_server.api.routes.chat import router as chat_router
 from agentsmithy_server.api.routes.dialogs import router as dialogs_router
 from agentsmithy_server.api.routes.health import router as health_router
@@ -88,7 +89,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="AgentSmithy Server",
         description="AI coding assistant server with LangGraph orchestration and RAG-powered context",
-        version="1.0.0",
+        version=__version__,
         lifespan=lifespan,
     )
 

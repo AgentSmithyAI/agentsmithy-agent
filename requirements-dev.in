@@ -3,3 +3,4 @@ mypy
 pip-tools
 pyinstaller
 pytest-cov
+python-semantic-release
