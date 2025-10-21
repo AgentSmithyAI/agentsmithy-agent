@@ -21,6 +21,7 @@ from agentsmithy_server.tools.builtin.return_inspection import (
 )
 from agentsmithy_server.tools.builtin.run_command import RunCommandTool
 from agentsmithy_server.tools.builtin.search_files import SearchFilesTool
+from agentsmithy_server.tools.builtin.set_dialog_title import SetDialogTitleTool
 from agentsmithy_server.tools.builtin.web_fetch import WebFetchTool
 from agentsmithy_server.tools.builtin.web_search import WebSearchTool
 from agentsmithy_server.tools.builtin.write_file import WriteFileTool
@@ -34,6 +35,7 @@ TOOL_CLASSES = [
     ReturnInspectionTool,
     RunCommandTool,
     SearchFilesTool,
+    SetDialogTitleTool,
     WebFetchTool,
     WebSearchTool,
     WriteFileTool,
@@ -49,6 +51,7 @@ __all__ = [
     "ReturnInspectionTool",
     "RunCommandTool",
     "SearchFilesTool",
+    "SetDialogTitleTool",
     "WebFetchTool",
     "WebSearchTool",
     "WriteFileTool",
