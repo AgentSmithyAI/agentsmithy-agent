@@ -6,7 +6,10 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from agentsmithy_server.api.deps import get_project
 from agentsmithy_server.api.schemas import (
+    CurrentDialogResponse,
     DialogCreateRequest,
+    DialogListResponse,
+    DialogMetadata,
     DialogPatchRequest,
 )
 from agentsmithy_server.core.project import Project
@@ -14,7 +17,9 @@ from agentsmithy_server.core.project import Project
 router = APIRouter()
 
 
-@router.get("/api/dialogs")
+@router.get(
+    "/api/dialogs", response_model=DialogListResponse, response_model_exclude_none=True
+)
 async def list_dialogs(
     sort: str = "updated_at",
     order: str = "desc",
@@ -29,16 +34,10 @@ async def list_dialogs(
         limit=limit,
         offset=offset,
     )
-    # Remove null title fields
-    cleaned_items = []
-    for item in items:
-        cleaned = {k: v for k, v in item.items() if v is not None}
-        cleaned_items.append(cleaned)
-
-    return {
-        "current_dialog_id": project.get_current_dialog_id(),
-        "dialogs": cleaned_items,
-    }
+    return DialogListResponse(
+        current_dialog_id=project.get_current_dialog_id(),
+        dialogs=[DialogMetadata(**item) for item in items],
+    )
 
 
 @router.post("/api/dialogs")
@@ -52,15 +51,20 @@ async def create_dialog(
     return {"id": dialog_id}
 
 
-@router.get("/api/dialogs/current")
+@router.get(
+    "/api/dialogs/current",
+    response_model=CurrentDialogResponse,
+    response_model_exclude_none=True,
+)
 async def get_current_dialog(project: Project = Depends(get_project)):  # noqa: B008
     cid = project.get_current_dialog_id()
     if not cid:
-        return {"id": None}
+        return CurrentDialogResponse(id=None, meta=None)
     meta = project.get_dialog_meta(cid)
-    # Remove null fields from meta
-    cleaned_meta = {k: v for k, v in meta.items() if v is not None} if meta else None
-    return {"id": cid, "meta": cleaned_meta}
+    return CurrentDialogResponse(
+        id=cid,
+        meta=DialogMetadata(**meta) if meta else None,
+    )
 
 
 @router.patch("/api/dialogs/current")
@@ -72,7 +76,11 @@ async def set_current_dialog(
     return {"ok": True}
 
 
-@router.get("/api/dialogs/{dialog_id}")
+@router.get(
+    "/api/dialogs/{dialog_id}",
+    response_model=DialogMetadata,
+    response_model_exclude_none=True,
+)
 async def get_dialog(
     dialog_id: str,
     project: Project = Depends(get_project),  # noqa: B008
@@ -80,8 +88,7 @@ async def get_dialog(
     meta = project.get_dialog_meta(dialog_id)
     if not meta:
         raise HTTPException(status_code=404, detail="Dialog not found")
-    # Remove null fields
-    return {k: v for k, v in meta.items() if v is not None}
+    return DialogMetadata(**meta)
 
 
 @router.patch("/api/dialogs/{dialog_id}")
