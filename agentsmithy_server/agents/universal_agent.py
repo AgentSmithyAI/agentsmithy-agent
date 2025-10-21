@@ -40,6 +40,29 @@ class UniversalAgent(BaseAgent):
     def get_agent_name(self) -> str:
         return "universal_agent"
 
+    def _manage_title_tool(self, dialog_title: str | None) -> None:
+        """Conditionally add or remove set_dialog_title tool.
+
+        The tool is available only when:
+        - Title is None or empty
+        """
+        from agentsmithy_server.tools.builtin.set_dialog_title import SetDialogTitleTool
+
+        tool_name = "set_dialog_title"
+        should_have_tool = not dialog_title  # Add tool if title is None or empty
+
+        has_tool = self.tool_manager.has_tool(tool_name)
+
+        if should_have_tool and not has_tool:
+            # Add the tool
+            tool = SetDialogTitleTool()
+            self.tool_manager.register(tool)
+            agent_logger.debug("Added set_dialog_title tool (title not set)")
+        elif not should_have_tool and has_tool:
+            # Remove the tool
+            self.tool_manager.unregister(tool_name)
+            agent_logger.debug("Removed set_dialog_title tool (title already set)")
+
     def _prepare_messages(
         self,
         query: str,
@@ -65,8 +88,10 @@ class UniversalAgent(BaseAgent):
         # Extract dialog_id and project from context
         dialog_id = None
         project = None
+        dialog_title = None
         if context and context.get("dialog"):
             dialog_id = context["dialog"].get("id")
+            dialog_title = context["dialog"].get("title")
             # Propagate dialog_id early for all tools
             self.tool_manager.set_dialog_id(dialog_id)
 
@@ -81,6 +106,9 @@ class UniversalAgent(BaseAgent):
         if hasattr(self.tool_manager, "set_context"):
             # Allows tools like get_tool_result to access storage
             self.tool_manager.set_context(project, dialog_id)
+
+        # Conditionally add/remove set_dialog_title tool based on whether title is set
+        self._manage_title_tool(dialog_title)
 
         # Build context
         full_context = await self.context_builder.build_context(query, context)

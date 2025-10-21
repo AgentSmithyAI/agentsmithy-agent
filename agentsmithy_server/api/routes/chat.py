@@ -45,7 +45,7 @@ async def chat(
 
         dialog_id = request.dialog_id or project.get_current_dialog_id()
         if not dialog_id:
-            dialog_id = project.create_dialog(set_current=True)
+            dialog_id = project.create_dialog(title=None, set_current=True)
 
         request.context = dict(request.context or {})
         # Add IDE runtime parameter to context

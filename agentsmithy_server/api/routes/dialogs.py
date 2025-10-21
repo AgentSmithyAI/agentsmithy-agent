@@ -29,9 +29,15 @@ async def list_dialogs(
         limit=limit,
         offset=offset,
     )
+    # Remove null title fields
+    cleaned_items = []
+    for item in items:
+        cleaned = {k: v for k, v in item.items() if v is not None}
+        cleaned_items.append(cleaned)
+
     return {
         "current_dialog_id": project.get_current_dialog_id(),
-        "dialogs": items,
+        "dialogs": cleaned_items,
     }
 
 
@@ -51,7 +57,10 @@ async def get_current_dialog(project: Project = Depends(get_project)):  # noqa: 
     cid = project.get_current_dialog_id()
     if not cid:
         return {"id": None}
-    return {"id": cid, "meta": project.get_dialog_meta(cid)}
+    meta = project.get_dialog_meta(cid)
+    # Remove null fields from meta
+    cleaned_meta = {k: v for k, v in meta.items() if v is not None} if meta else None
+    return {"id": cid, "meta": cleaned_meta}
 
 
 @router.patch("/api/dialogs/current")
@@ -71,7 +80,8 @@ async def get_dialog(
     meta = project.get_dialog_meta(dialog_id)
     if not meta:
         raise HTTPException(status_code=404, detail="Dialog not found")
-    return meta
+    # Remove null fields
+    return {k: v for k, v in meta.items() if v is not None}
 
 
 @router.patch("/api/dialogs/{dialog_id}")

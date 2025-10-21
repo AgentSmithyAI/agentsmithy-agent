@@ -88,6 +88,17 @@ class ToolManager:
     def get(self, name: str) -> BaseTool | None:
         return self._tools.get(name)
 
+    def unregister(self, name: str) -> bool:
+        """Unregister a tool by name. Returns True if tool was found and removed."""
+        if name in self._tools:
+            del self._tools[name]
+            return True
+        return False
+
+    def has_tool(self, name: str) -> bool:
+        """Check if a tool is registered."""
+        return name in self._tools
+
     async def run_tool(self, name: str, **kwargs: Any) -> dict[str, Any]:
         tool = self.get(name)
         if tool is None:
