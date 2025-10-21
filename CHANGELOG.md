@@ -1,5 +1,14 @@
 <!-- version list -->
 
+## v1.6.0 (2025-10-21)
+
+### Features
+
+- Add tool to generate dialogue title
+  ([#38](https://github.com/AgentSmithyAI/agentsmithy-agent/pull/38),
+  [`2e7ef6f`](https://github.com/AgentSmithyAI/agentsmithy-agent/commit/2e7ef6f2a2828199032f9a1b0a3f6458810c9e7c))
+
+
 ## v1.5.2 (2025-10-20)
 
 ### Bug Fixes
