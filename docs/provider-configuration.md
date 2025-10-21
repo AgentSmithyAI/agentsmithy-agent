@@ -57,7 +57,7 @@ In the `models` section, reference providers by name:
       "provider": "embeddings"
     },
     "summarization": {
-      "provider": "gpt4o-mini"
+      "provider": "gpt5-mini"
     }
   }
 }
@@ -188,7 +188,7 @@ When no provider is specified, the system falls back to the default "openai" pro
 
 The `summarization` model is specifically used for generating dialog history summaries. When a conversation becomes too long, the system automatically creates summaries to maintain context while reducing token usage.
 
-**Best Practice**: Use a weaker/cheaper model (like `gpt-4o-mini`) for summarization to optimize costs, while keeping strong models (like `gpt-5`) for actual agent work.
+**Best Practice**: Use a weaker/cheaper model (like `gpt-5-mini`) for summarization to optimize costs, while keeping strong models (like `gpt-5`) for actual agent work.
 
 Example configuration:
 
@@ -201,9 +201,9 @@ Example configuration:
       "api_key": "sk-your-key",
       "base_url": "https://api.openai.com/v1"
     },
-    "gpt4o-mini": {
+    "gpt5-mini": {
       "type": "openai",
-      "model": "gpt-4o-mini",
+      "model": "gpt-5-mini",
       "api_key": "sk-your-key",
       "base_url": "https://api.openai.com/v1"
     }
@@ -212,7 +212,7 @@ Example configuration:
     "agents": {
       "universal": {"provider": "gpt5"}
     },
-    "summarization": {"provider": "gpt4o-mini"}
+    "summarization": {"provider": "gpt5-mini"}
   }
 }
 ```

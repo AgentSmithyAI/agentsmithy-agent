@@ -8,8 +8,8 @@ from agentsmithy_server.agents.universal_agent import UniversalAgent
 
 
 @pytest.mark.asyncio
-async def test_title_tool_added_when_no_title(monkeypatch):
-    """Test that set_dialog_title tool is added when title is None."""
+async def test_title_tool_stays_when_no_title(monkeypatch):
+    """Test that set_dialog_title tool stays when title is None."""
     # Arrange
     mock_llm = Mock()
     mock_llm.get_model_name = Mock(return_value="test-model")
@@ -27,6 +27,9 @@ async def test_title_tool_added_when_no_title(monkeypatch):
         return_value={"type": "text", "content": "response"}
     )
 
+    # Tool should be in registry by default
+    assert agent.tool_manager.has_tool("set_dialog_title") is True
+
     context = {
         "dialog": {"id": "test_id", "title": None},  # No title
         "project": None,  # No project to avoid path issues
@@ -35,7 +38,7 @@ async def test_title_tool_added_when_no_title(monkeypatch):
     # Act
     await agent.process("test query", context)
 
-    # Assert - tool should be present
+    # Assert - tool should still be present (not removed)
     assert agent.tool_manager.has_tool("set_dialog_title") is True
 
 
@@ -96,6 +99,9 @@ async def test_title_tool_stays_when_no_title_multiple_calls(monkeypatch):
         return_value={"type": "text", "content": "response"}
     )
 
+    # Tool should be in registry by default
+    assert agent.tool_manager.has_tool("set_dialog_title") is True
+
     context = {
         "dialog": {"id": "test_id", "title": None},
         "project": None,
@@ -110,19 +116,19 @@ async def test_title_tool_stays_when_no_title_multiple_calls(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_title_tool_not_in_initial_registry():
-    """Test that set_dialog_title is not in the default registry."""
+async def test_title_tool_in_initial_registry():
+    """Test that set_dialog_title is in the default registry."""
     from agentsmithy_server.tools.build_registry import build_registry
 
     registry = build_registry()
 
-    # Assert - tool should not be in default registry
-    assert registry.has_tool("set_dialog_title") is False
+    # Assert - tool should be in default registry
+    assert registry.has_tool("set_dialog_title") is True
 
 
 @pytest.mark.asyncio
-async def test_title_tool_added_when_empty_string_title(monkeypatch):
-    """Test that set_dialog_title tool is added when title is empty string."""
+async def test_title_tool_stays_when_empty_string_title(monkeypatch):
+    """Test that set_dialog_title tool stays when title is empty string."""
     # Arrange
     mock_llm = Mock()
     mock_llm.get_model_name = Mock(return_value="test-model")
@@ -139,6 +145,9 @@ async def test_title_tool_added_when_empty_string_title(monkeypatch):
         return_value={"type": "text", "content": "response"}
     )
 
+    # Tool should be in registry by default
+    assert agent.tool_manager.has_tool("set_dialog_title") is True
+
     context = {
         "dialog": {"id": "test_id", "title": ""},  # Empty string
         "project": None,
@@ -147,5 +156,5 @@ async def test_title_tool_added_when_empty_string_title(monkeypatch):
     # Act
     await agent.process("test query", context)
 
-    # Assert - tool should be present (empty string is treated as no title)
+    # Assert - tool should stay (empty string is treated as no title)
     assert agent.tool_manager.has_tool("set_dialog_title") is True

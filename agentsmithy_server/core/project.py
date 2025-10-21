@@ -214,6 +214,14 @@ class Project:
         found = False
         for d in dialogs_list:
             if d.get("id") == dialog_id:
+                # Log what we're updating
+                if fields:
+                    logger.debug(
+                        "Updating dialog metadata",
+                        dialog_id=dialog_id,
+                        fields=fields,
+                        current_title=d.get("title"),
+                    )
                 d.update(fields)
                 # Always bump updated_at when we touch metadata
                 d["updated_at"] = self._now_iso()
@@ -228,6 +236,11 @@ class Project:
                 "updated_at": now,
             }
             dialogs_list.append(meta)
+            logger.debug(
+                "Created new dialog metadata",
+                dialog_id=dialog_id,
+                title=meta.get("title"),
+            )
         index["dialogs"] = dialogs_list
         self.save_dialogs_index(index)
 

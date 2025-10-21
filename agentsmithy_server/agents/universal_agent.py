@@ -40,28 +40,23 @@ class UniversalAgent(BaseAgent):
     def get_agent_name(self) -> str:
         return "universal_agent"
 
-    def _manage_title_tool(self, dialog_title: str | None) -> None:
-        """Conditionally add or remove set_dialog_title tool.
+    def _manage_title_tool(
+        self, dialog_title: str | None, project=None, dialog_id=None
+    ) -> None:
+        """Remove set_dialog_title tool when title is already set.
 
-        The tool is available only when:
-        - Title is None or empty
+        The tool is included by default and should be removed when:
+        - Title is set (not None and not empty)
         """
-        from agentsmithy_server.tools.builtin.set_dialog_title import SetDialogTitleTool
-
         tool_name = "set_dialog_title"
-        should_have_tool = not dialog_title  # Add tool if title is None or empty
-
         has_tool = self.tool_manager.has_tool(tool_name)
 
-        if should_have_tool and not has_tool:
-            # Add the tool
-            tool = SetDialogTitleTool()
-            self.tool_manager.register(tool)
-            agent_logger.debug("Added set_dialog_title tool (title not set)")
-        elif not should_have_tool and has_tool:
-            # Remove the tool
+        # Remove tool if title is already set
+        if dialog_title and has_tool:
             self.tool_manager.unregister(tool_name)
-            agent_logger.debug("Removed set_dialog_title tool (title already set)")
+            agent_logger.debug(
+                "Removed set_dialog_title tool (title already set)", title=dialog_title
+            )
 
     def _prepare_messages(
         self,
@@ -98,6 +93,9 @@ class UniversalAgent(BaseAgent):
         if context and context.get("project"):
             project = context["project"]
 
+        # Conditionally add/remove set_dialog_title tool based on whether title is set
+        self._manage_title_tool(dialog_title, project, dialog_id)
+
         # Set context for tool executor to enable results storage
         if hasattr(self.tool_executor, "set_context"):
             self.tool_executor.set_context(project, dialog_id)
@@ -106,9 +104,6 @@ class UniversalAgent(BaseAgent):
         if hasattr(self.tool_manager, "set_context"):
             # Allows tools like get_tool_result to access storage
             self.tool_manager.set_context(project, dialog_id)
-
-        # Conditionally add/remove set_dialog_title tool based on whether title is set
-        self._manage_title_tool(dialog_title)
 
         # Build context
         full_context = await self.context_builder.build_context(query, context)

@@ -23,13 +23,6 @@ def get_default_config() -> dict[str, Any]:
                 "base_url": None,
                 "options": {},
             },
-            "gpt4o-mini": {
-                "type": "openai",
-                "model": "gpt-4o-mini",
-                "api_key": None,
-                "base_url": None,
-                "options": {},
-            },
             "embeddings": {
                 "type": "openai",
                 "model": "text-embedding-3-small",
@@ -64,7 +57,7 @@ def get_default_config() -> dict[str, Any]:
                 "inspector": {"provider": "gpt5-mini"},
             },
             "embeddings": {"provider": "embeddings"},
-            "summarization": {"provider": "gpt4o-mini"},
+            "summarization": {"provider": "gpt5-mini"},
         },
         # Streaming toggle
         "streaming_enabled": True,
