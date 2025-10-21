@@ -31,7 +31,9 @@ class AgentState(TypedDict):
 class AgentOrchestrator:
     """Orchestrates multiple agents using LangGraph."""
 
-    def __init__(self, llm_provider: Any | None = None):
+    def __init__(
+        self, llm_provider: Any | None = None, summarization_provider: Any | None = None
+    ):
         # Initialize LLM provider (allow dependency injection)
         if llm_provider is not None:
             self.llm_provider = llm_provider
@@ -43,9 +45,21 @@ class AgentOrchestrator:
             self.llm_provider = OpenAIProvider()
             provider_label = "OpenAIProvider"
 
+        # Initialize separate summarization provider (weak model)
+        if summarization_provider is not None:
+            self.summarization_provider = summarization_provider
+            summ_provider_label = getattr(
+                summarization_provider, "__class__", type(summarization_provider)
+            ).__name__
+        else:
+            # Create dedicated summarization provider from config
+            self.summarization_provider = OpenAIProvider(agent_name="summarization")
+            summ_provider_label = "OpenAIProvider(summarization)"
+
         agent_logger.info(
             "Creating AgentOrchestrator",
             provider=provider_label,
+            summarization_provider=summ_provider_label,
         )
 
         # Initialize context builder
@@ -161,7 +175,10 @@ class AgentOrchestrator:
                     pass
 
             extra_msgs = await maybe_compact_dialog(
-                self.llm_provider, compaction_source, context.get("project"), dialog_id
+                self.summarization_provider,
+                compaction_source,
+                context.get("project"),
+                dialog_id,
             )
             if extra_msgs:
                 from langchain_core.messages import SystemMessage

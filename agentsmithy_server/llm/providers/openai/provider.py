@@ -37,16 +37,21 @@ class OpenAIProvider:
         base_url: str | None = None,
         agent_name: str | None = None,
     ):
-        # Agent model selection via models.agents; default to universal unless agent_name given
-        agents_cfg = settings._get("models.agents", {})
-        if isinstance(agents_cfg, dict):
-            agent_entry = (
-                agents_cfg.get(agent_name)
-                if agent_name
-                else agents_cfg.get("universal")
-            )
+        # Agent model selection via models.agents or models.summarization
+        # Special case: "summarization" agent looks in models.summarization
+        if agent_name == "summarization":
+            agent_entry = settings._get("models.summarization", None)
         else:
-            agent_entry = None
+            # Default: look in models.agents
+            agents_cfg = settings._get("models.agents", {})
+            if isinstance(agents_cfg, dict):
+                agent_entry = (
+                    agents_cfg.get(agent_name)
+                    if agent_name
+                    else agents_cfg.get("universal")
+                )
+            else:
+                agent_entry = None
 
         # New structure: check if agent_entry references a provider definition
         provider_name = None
