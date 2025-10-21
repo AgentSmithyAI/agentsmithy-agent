@@ -32,7 +32,7 @@ class SetDialogTitleTool(BaseTool):
     name: str = "set_dialog_title"
     description: str = (
         "Set or update the title of the whole conversation/dialog. "
-        "The title MUST be 50 characters or less, brief (ideally 3-8 words) and descriptive."
+        "The title MUST be 50 characters or less, brief (3-8 words) and descriptive in English."
         "Use it to describe the whole conversation and only update it if the current one doesn't match the conversation."
     )
     args_schema: type[BaseModel] = SetDialogTitleArgs
