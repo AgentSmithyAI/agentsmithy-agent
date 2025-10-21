@@ -322,7 +322,7 @@ if __name__ == "__main__":
                 index = project_obj.load_dialogs_index()
                 dialogs = index.get("dialogs") or []
                 if not dialogs:
-                    project_obj.create_dialog(title="default", set_current=True)
+                    project_obj.create_dialog(title=None, set_current=True)
 
                 # Propagate shutdown event to chat service
                 set_shutdown_event(shutdown_event)

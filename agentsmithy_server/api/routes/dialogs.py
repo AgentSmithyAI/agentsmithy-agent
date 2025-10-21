@@ -6,7 +6,10 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from agentsmithy_server.api.deps import get_project
 from agentsmithy_server.api.schemas import (
+    CurrentDialogResponse,
     DialogCreateRequest,
+    DialogListResponse,
+    DialogMetadata,
     DialogPatchRequest,
 )
 from agentsmithy_server.core.project import Project
@@ -14,7 +17,9 @@ from agentsmithy_server.core.project import Project
 router = APIRouter()
 
 
-@router.get("/api/dialogs")
+@router.get(
+    "/api/dialogs", response_model=DialogListResponse, response_model_exclude_none=True
+)
 async def list_dialogs(
     sort: str = "updated_at",
     order: str = "desc",
@@ -29,10 +34,10 @@ async def list_dialogs(
         limit=limit,
         offset=offset,
     )
-    return {
-        "current_dialog_id": project.get_current_dialog_id(),
-        "dialogs": items,
-    }
+    return DialogListResponse(
+        current_dialog_id=project.get_current_dialog_id(),
+        dialogs=[DialogMetadata(**item) for item in items],
+    )
 
 
 @router.post("/api/dialogs")
@@ -46,12 +51,20 @@ async def create_dialog(
     return {"id": dialog_id}
 
 
-@router.get("/api/dialogs/current")
+@router.get(
+    "/api/dialogs/current",
+    response_model=CurrentDialogResponse,
+    response_model_exclude_none=True,
+)
 async def get_current_dialog(project: Project = Depends(get_project)):  # noqa: B008
     cid = project.get_current_dialog_id()
     if not cid:
-        return {"id": None}
-    return {"id": cid, "meta": project.get_dialog_meta(cid)}
+        return CurrentDialogResponse(id=None, meta=None)
+    meta = project.get_dialog_meta(cid)
+    return CurrentDialogResponse(
+        id=cid,
+        meta=DialogMetadata(**meta) if meta else None,
+    )
 
 
 @router.patch("/api/dialogs/current")
@@ -63,7 +76,11 @@ async def set_current_dialog(
     return {"ok": True}
 
 
-@router.get("/api/dialogs/{dialog_id}")
+@router.get(
+    "/api/dialogs/{dialog_id}",
+    response_model=DialogMetadata,
+    response_model_exclude_none=True,
+)
 async def get_dialog(
     dialog_id: str,
     project: Project = Depends(get_project),  # noqa: B008
@@ -71,7 +88,7 @@ async def get_dialog(
     meta = project.get_dialog_meta(dialog_id)
     if not meta:
         raise HTTPException(status_code=404, detail="Dialog not found")
-    return meta
+    return DialogMetadata(**meta)
 
 
 @router.patch("/api/dialogs/{dialog_id}")

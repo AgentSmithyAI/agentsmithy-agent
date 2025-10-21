@@ -25,7 +25,7 @@ async def lifespan(app: FastAPI):
         index = project.load_dialogs_index()
         dialogs = index.get("dialogs") or []
         if not dialogs:
-            project.create_dialog(title="default", set_current=True)
+            project.create_dialog(title=None, set_current=True)
 
         # Get shutdown event from app state if available
         if hasattr(app.state, "shutdown_event"):

@@ -55,10 +55,15 @@ In the `models` section, reference providers by name:
     },
     "embeddings": {
       "provider": "embeddings"
+    },
+    "summarization": {
+      "provider": "gpt5-mini"
     }
   }
 }
 ```
+
+The `summarization` model is used for generating dialog summaries when history becomes too long. Using a weaker/cheaper model for summarization helps reduce costs while maintaining quality for the main agent work.
 
 ## Provider Fields
 
@@ -172,11 +177,56 @@ The legacy configuration format is still supported:
 
 When no provider is specified, the system falls back to the default "openai" provider credentials.
 
+## Model Types
+
+### Agent Models
+
+- **universal**: Main agent used for general-purpose tasks (strong model)
+- **inspector**: Project inspector agent (can use weaker model)
+
+### Summarization Model
+
+The `summarization` model is specifically used for generating dialog history summaries. When a conversation becomes too long, the system automatically creates summaries to maintain context while reducing token usage.
+
+**Best Practice**: Use a weaker/cheaper model (like `gpt-5-mini`) for summarization to optimize costs, while keeping strong models (like `gpt-5`) for actual agent work.
+
+Example configuration:
+
+```json
+{
+  "providers": {
+    "gpt5": {
+      "type": "openai",
+      "model": "gpt-5",
+      "api_key": "sk-your-key",
+      "base_url": "https://api.openai.com/v1"
+    },
+    "gpt5-mini": {
+      "type": "openai",
+      "model": "gpt-5-mini",
+      "api_key": "sk-your-key",
+      "base_url": "https://api.openai.com/v1"
+    }
+  },
+  "models": {
+    "agents": {
+      "universal": {"provider": "gpt5"}
+    },
+    "summarization": {"provider": "gpt5-mini"}
+  }
+}
+```
+
+### Embeddings Model
+
+The `embeddings` model is used for RAG (Retrieval-Augmented Generation) operations.
+
 ## Benefits
 
 1. **Multiple Endpoints**: Use different OpenAI-compatible servers for different agents
-2. **Cost Optimization**: Route different workloads to different API keys or accounts
+2. **Cost Optimization**: Route different workloads to different API keys or accounts (e.g., weak models for summarization, strong models for main work)
 3. **Development/Production Separation**: Use different configurations for different environments
 4. **Local Development**: Use local models for development while keeping production configs separate
 5. **Fallback Support**: Configure multiple providers for redundancy
+6. **Smart Resource Allocation**: Use powerful models where they matter and cheaper models for background tasks
 

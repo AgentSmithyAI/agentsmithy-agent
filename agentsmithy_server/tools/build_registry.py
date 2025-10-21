@@ -12,6 +12,8 @@ def build_registry(
     Importing agentsmithy_server.tools.builtin ensures all builtin tool modules are imported,
     so any decorators (e.g., register_summary_for) run at import time. We then register the
     statically exported TOOL_CLASSES. This approach is robust for PyInstaller onefile builds.
+
+    Note: set_dialog_title is included by default and removed when title is set.
     """
     registry = ToolRegistry()
 
@@ -23,6 +25,7 @@ def build_registry(
     # Register tools filtered by include/exclude
     for tool_cls in BUILTIN_TOOL_CLASSES:
         tool_name = getattr(tool_cls, "name", tool_cls.__name__.lower())
+
         if include and tool_name not in include:
             continue
         if tool_name in exclude:

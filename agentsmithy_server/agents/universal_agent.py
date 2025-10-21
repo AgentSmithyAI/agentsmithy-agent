@@ -40,6 +40,24 @@ class UniversalAgent(BaseAgent):
     def get_agent_name(self) -> str:
         return "universal_agent"
 
+    def _manage_title_tool(
+        self, dialog_title: str | None, project=None, dialog_id=None
+    ) -> None:
+        """Remove set_dialog_title tool when title is already set.
+
+        The tool is included by default and should be removed when:
+        - Title is set (not None and not empty)
+        """
+        tool_name = "set_dialog_title"
+        has_tool = self.tool_manager.has_tool(tool_name)
+
+        # Remove tool if title is already set
+        if dialog_title and has_tool:
+            self.tool_manager.unregister(tool_name)
+            agent_logger.debug(
+                "Removed set_dialog_title tool (title already set)", title=dialog_title
+            )
+
     def _prepare_messages(
         self,
         query: str,
@@ -65,13 +83,18 @@ class UniversalAgent(BaseAgent):
         # Extract dialog_id and project from context
         dialog_id = None
         project = None
+        dialog_title = None
         if context and context.get("dialog"):
             dialog_id = context["dialog"].get("id")
+            dialog_title = context["dialog"].get("title")
             # Propagate dialog_id early for all tools
             self.tool_manager.set_dialog_id(dialog_id)
 
         if context and context.get("project"):
             project = context["project"]
+
+        # Conditionally add/remove set_dialog_title tool based on whether title is set
+        self._manage_title_tool(dialog_title, project, dialog_id)
 
         # Set context for tool executor to enable results storage
         if hasattr(self.tool_executor, "set_context"):

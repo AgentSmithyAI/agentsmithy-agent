@@ -69,11 +69,14 @@ class ContextBuilder:
         # Add dialog context (if supplied by caller)
         if file_context and file_context.get("dialog"):
             dialog_info = file_context["dialog"]
-            # expect: {"id": str, "messages": list[{role, content}]}
+            # expect: {"id": str, "messages": list[{role, content}], "title": str (optional)}
             context["dialog"] = {
                 "id": dialog_info.get("id"),
                 "messages": dialog_info.get("messages", []),
             }
+            # Include dialog title if available
+            if dialog_info.get("title"):
+                context["dialog"]["title"] = dialog_info.get("title")
 
         # Add current file context
         if file_context and file_context.get("current_file"):

@@ -29,6 +29,7 @@ async def test_no_previous_summary_stores_total_message_count(monkeypatch):
     # Create AgentOrchestrator instance without running __init__ to avoid workspace/global setup
     orchestrator = agent_graph.AgentOrchestrator.__new__(agent_graph.AgentOrchestrator)
     orchestrator.llm_provider = None
+    orchestrator.summarization_provider = None
     orchestrator._sse_callback = None
     orchestrator.universal_agent = None
 
@@ -78,6 +79,7 @@ async def test_with_previous_summary_stores_total_message_count(monkeypatch):
 
     orchestrator = agent_graph.AgentOrchestrator.__new__(agent_graph.AgentOrchestrator)
     orchestrator.llm_provider = None
+    orchestrator.summarization_provider = None
     orchestrator._sse_callback = None
     orchestrator.universal_agent = None
 
@@ -126,6 +128,7 @@ async def test_tail_shorter_than_keep_last_still_stores_total(monkeypatch):
 
     orchestrator = agent_graph.AgentOrchestrator.__new__(agent_graph.AgentOrchestrator)
     orchestrator.llm_provider = None
+    orchestrator.summarization_provider = None
     orchestrator._sse_callback = None
     orchestrator.universal_agent = None
 

@@ -377,7 +377,19 @@ class ChatService:
                 "Failed to load dialog history", exc_info=True, error=str(e)
             )
 
+        # Get dialog metadata to include title
+        dialog_meta = None
+        try:
+            dialog_meta = project.get_dialog_meta(dialog_id)
+        except Exception:
+            pass
+
         ctx["dialog"] = {"id": dialog_id, "messages": messages}
+
+        # Add dialog title to context if available
+        if dialog_meta and dialog_meta.get("title"):
+            ctx["dialog"]["title"] = dialog_meta.get("title")
+
         if summary_text:
             ctx["dialog_summary"] = summary_text
         # Add project reference for tool results storage

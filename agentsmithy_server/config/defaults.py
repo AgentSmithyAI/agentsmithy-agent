@@ -57,6 +57,7 @@ def get_default_config() -> dict[str, Any]:
                 "inspector": {"provider": "gpt5-mini"},
             },
             "embeddings": {"provider": "embeddings"},
+            "summarization": {"provider": "gpt5-mini"},
         },
         # Streaming toggle
         "streaming_enabled": True,

@@ -43,6 +43,38 @@ class DialogPatchRequest(BaseModel):
     title: str | None = None
 
 
+class DialogMetadata(BaseModel):
+    """Dialog metadata for API responses."""
+
+    id: str
+    title: str | None = None
+    created_at: str
+    updated_at: str
+
+
+class DialogListResponse(BaseModel):
+    """Response for GET /api/dialogs."""
+
+    current_dialog_id: str | None = None
+    dialogs: list[DialogMetadata]
+
+
+class DialogMetadataResponse(BaseModel):
+    """Response for GET /api/dialogs/{dialog_id}."""
+
+    id: str
+    title: str | None = None
+    created_at: str
+    updated_at: str
+
+
+class CurrentDialogResponse(BaseModel):
+    """Response for GET /api/dialogs/current."""
+
+    id: str | None = None
+    meta: DialogMetadata | None = None
+
+
 class DialogListParams(BaseModel):
     sort: str = "updated_at"  # created_at|updated_at
     order: str = "desc"  # asc|desc
