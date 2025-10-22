@@ -30,7 +30,7 @@ The model might execute the same tool multiple times due to unclear result summa
 
 ### 1. Tool Results Storage (`ToolResultsStorage`)
 
-Located in `agentsmithy_server/core/tool_results_storage.py`, this class manages separate storage of tool results:
+Located in `agentsmithy/core/tool_results_storage.py`, this class manages separate storage of tool results:
 
 - **Storage Location**: `.agentsmithy/dialogs/{dialog_id}/tool_results/`
 - **File Format**: JSON files named `{tool_call_id}.json` and `{tool_call_id}.meta.json`

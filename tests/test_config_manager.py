@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from agentsmithy_server.config import (
+from agentsmithy.config import (
     ConfigManager,
     LocalFileConfigProvider,
     Settings,

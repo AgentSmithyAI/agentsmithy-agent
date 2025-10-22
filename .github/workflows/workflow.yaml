@@ -37,7 +37,7 @@ jobs:
           path: |
             .mypy_cache
             .ruff_cache
-          key: lint-cache-${{ runner.os }}-${{ hashFiles('agentsmithy_server/**/*.py', 'main.py') }}
+          key: lint-cache-${{ runner.os }}-${{ hashFiles('agentsmithy/**/*.py', 'main.py') }}
           restore-keys: |
             lint-cache-${{ runner.os }}-
 
@@ -56,7 +56,7 @@ jobs:
         run: ruff check .
 
       - name: Type check (MyPy)
-        run: mypy agentsmithy_server
+        run: mypy agentsmithy
 
   test:
     name: Run Tests
@@ -79,7 +79,7 @@ jobs:
         with:
           path: |
             .pytest_cache
-          key: pytest-cache-${{ runner.os }}-${{ hashFiles('tests/**/*.py', 'agentsmithy_server/**/*.py') }}
+          key: pytest-cache-${{ runner.os }}-${{ hashFiles('tests/**/*.py', 'agentsmithy/**/*.py') }}
           restore-keys: |
             pytest-cache-${{ runner.os }}-
 
@@ -89,7 +89,7 @@ jobs:
           pip install -r requirements.txt -r requirements-dev.txt
 
       - name: Run tests with coverage
-        run: pytest -v --cov=agentsmithy_server --cov-report=xml --cov-report=term-missing || test $? -eq 5
+        run: pytest -v --cov=agentsmithy --cov-report=xml --cov-report=term-missing || test $? -eq 5
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
@@ -138,14 +138,14 @@ jobs:
           git config user.email "github-actions@github.com"
           
           # Read version before release (directly from file)
-          OLD_VERSION=$(grep '__version__' agentsmithy_server/__init__.py | cut -d'"' -f2)
+          OLD_VERSION=$(grep '__version__' agentsmithy/__init__.py | cut -d'"' -f2)
           echo "Current version: $OLD_VERSION"
           
           # Run semantic-release (full cycle: commit, tag, push, release)
           semantic-release version --changelog --commit --tag --push --vcs-release
           
           # Read version after release (directly from file)
-          NEW_VERSION=$(grep '__version__' agentsmithy_server/__init__.py | cut -d'"' -f2)
+          NEW_VERSION=$(grep '__version__' agentsmithy/__init__.py | cut -d'"' -f2)
           
           if [ "$OLD_VERSION" != "$NEW_VERSION" ]; then
             echo "released=true" >> $GITHUB_OUTPUT
@@ -263,7 +263,7 @@ jobs:
           path: |
             build
             *.spec
-          key: pyinstaller-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('requirements.txt', 'main.py', 'agentsmithy_server/**/*.py') }}
+          key: pyinstaller-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('requirements.txt', 'main.py', 'agentsmithy/**/*.py') }}
           restore-keys: |
             pyinstaller-${{ runner.os }}-${{ runner.arch }}-
             pyinstaller-${{ runner.os }}-
@@ -287,8 +287,8 @@ jobs:
           pyinstaller --onefile \
             --name agentsmithy \
             $UPX_ARG \
-            --collect-submodules agentsmithy_server.tools \
-            --collect-submodules agentsmithy_server.tools.builtin \
+            --collect-submodules agentsmithy.tools \
+            --collect-submodules agentsmithy.tools.builtin \
             --collect-submodules chromadb \
             --collect-submodules chromadb.telemetry.product \
             --collect-data chromadb \

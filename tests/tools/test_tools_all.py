@@ -4,12 +4,12 @@ from pathlib import Path
 
 import pytest
 
-from agentsmithy_server.tools.builtin.delete_file import DeleteFileTool
-from agentsmithy_server.tools.builtin.list_files import ListFilesTool
-from agentsmithy_server.tools.builtin.read_file import ReadFileTool
-from agentsmithy_server.tools.builtin.replace_in_file import ReplaceInFileTool
-from agentsmithy_server.tools.builtin.search_files import SearchFilesTool
-from agentsmithy_server.tools.builtin.write_file import WriteFileTool
+from agentsmithy.tools.builtin.delete_file import DeleteFileTool
+from agentsmithy.tools.builtin.list_files import ListFilesTool
+from agentsmithy.tools.builtin.read_file import ReadFileTool
+from agentsmithy.tools.builtin.replace_in_file import ReplaceInFileTool
+from agentsmithy.tools.builtin.search_files import SearchFilesTool
+from agentsmithy.tools.builtin.write_file import WriteFileTool
 
 pytestmark = pytest.mark.asyncio
 

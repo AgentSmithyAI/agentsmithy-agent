@@ -4,8 +4,8 @@ import sqlite3
 
 import pytest
 
-from agentsmithy_server.core.project import Project
-from agentsmithy_server.dialogs.history import DialogHistory
+from agentsmithy.core.project import Project
+from agentsmithy.dialogs.history import DialogHistory
 
 
 @pytest.fixture

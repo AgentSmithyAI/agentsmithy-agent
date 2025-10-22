@@ -11,9 +11,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from agentsmithy_server.core.project import Project
-from agentsmithy_server.tools.tool_executor import ToolExecutor
-from agentsmithy_server.tools.tool_factory import ToolFactory
+from agentsmithy.core.project import Project
+from agentsmithy.tools.tool_executor import ToolExecutor
+from agentsmithy.tools.tool_factory import ToolFactory
 
 
 def test_tool_executor_set_context_propagates_project_root(tmp_path: Path):

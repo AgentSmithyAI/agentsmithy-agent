@@ -1,6 +1,6 @@
 ### OpenAI provider and settings
 
-This project now isolates the OpenAI chat provider in `agentsmithy_server/core/providers/openai/provider.py` and supports a nested configuration structure for OpenAI-specific options.
+This project now isolates the OpenAI chat provider in `agentsmithy/core/providers/openai/provider.py` and supports a nested configuration structure for OpenAI-specific options.
 
 Recommended `.agentsmithy/config.json` structure:
 
@@ -37,15 +37,15 @@ Environment variables supported:
 
 ### Class layout
 
-- Chat provider: `agentsmithy_server.core.providers.openai.provider.OpenAIProvider`
-- Embeddings provider: `agentsmithy_server.core.providers.openai.provider_embeddings.OpenAIEmbeddingsProvider`
-- OpenAI model specs: `agentsmithy_server.core.providers.openai.models.*`
+- Chat provider: `agentsmithy.core.providers.openai.provider.OpenAIProvider`
+- Embeddings provider: `agentsmithy.core.providers.openai.provider_embeddings.OpenAIEmbeddingsProvider`
+- OpenAI model specs: `agentsmithy.core.providers.openai.models.*`
   - Base: `_base.OpenAIModelSpec`
   - Responses family base: `_responses_base._ResponsesFamilySpec`
   - Models: `gpt5`, `gpt5_mini` (registered via decorator)
 
 ### Compatibility
 
-- Existing imports still work: `from agentsmithy_server.core import OpenAIProvider`.
+- Existing imports still work: `from agentsmithy.core import OpenAIProvider`.
 
 

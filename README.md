@@ -20,10 +20,10 @@ A self-hosted AI coding assistant server that integrates with your IDE. Built wi
 - isort check: `isort --check-only .`
 - isort autofix: `isort .`
 - Ruff linting: `ruff check .`
-- Type checking (MyPy): `mypy agentsmithy_server`
+- Type checking (MyPy): `mypy agentsmithy`
 - Unit tests (pytest):
   - Run once: `pytest -v`
-  - With coverage: `pytest --cov=agentsmithy_server --cov-report=term-missing`
+  - With coverage: `pytest --cov=agentsmithy --cov-report=term-missing`
 
 Or use Makefile shortcuts:
 - `make format` - Run black and isort

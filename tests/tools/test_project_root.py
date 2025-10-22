@@ -11,11 +11,11 @@ from pathlib import Path
 
 import pytest
 
-from agentsmithy_server.tools.builtin.delete_file import DeleteFileTool
-from agentsmithy_server.tools.builtin.list_files import ListFilesTool
-from agentsmithy_server.tools.builtin.read_file import ReadFileTool
-from agentsmithy_server.tools.builtin.run_command import RunCommandTool
-from agentsmithy_server.tools.builtin.write_file import WriteFileTool
+from agentsmithy.tools.builtin.delete_file import DeleteFileTool
+from agentsmithy.tools.builtin.list_files import ListFilesTool
+from agentsmithy.tools.builtin.read_file import ReadFileTool
+from agentsmithy.tools.builtin.run_command import RunCommandTool
+from agentsmithy.tools.builtin.write_file import WriteFileTool
 
 pytestmark = pytest.mark.asyncio
 
@@ -221,7 +221,7 @@ async def test_tool_without_project_root_fallback_to_cwd(tmp_path: Path):
 
 async def test_tool_manager_propagates_project_root():
     """Test that ToolManager.set_project_root propagates to all tools."""
-    from agentsmithy_server.tools.tool_manager import ToolManager
+    from agentsmithy.tools.tool_manager import ToolManager
 
     manager = ToolManager()
     tool1 = WriteFileTool()

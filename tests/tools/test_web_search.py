@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 
-from agentsmithy_server.tools.builtin.web_search import WebSearchTool
+from agentsmithy.tools.builtin.web_search import WebSearchTool
 
 
 @pytest.mark.asyncio
@@ -35,7 +35,7 @@ async def test_web_search_success():
     mock_ddgs_manager.__exit__.return_value = None
 
     with patch(
-        "agentsmithy_server.tools.builtin.web_search.DDGS",
+        "agentsmithy.tools.builtin.web_search.DDGS",
         return_value=mock_ddgs_manager,
     ):
         result = await tool._arun(query="test query", num_results=2)
@@ -66,7 +66,7 @@ async def test_web_search_exception():
     mock_ddgs_manager.__exit__.return_value = None
 
     with patch(
-        "agentsmithy_server.tools.builtin.web_search.DDGS",
+        "agentsmithy.tools.builtin.web_search.DDGS",
         return_value=mock_ddgs_manager,
     ):
         result = await tool._arun(query="test query")
@@ -96,7 +96,7 @@ async def test_web_search_default_num_results():
     mock_ddgs_manager.__exit__.return_value = None
 
     with patch(
-        "agentsmithy_server.tools.builtin.web_search.DDGS",
+        "agentsmithy.tools.builtin.web_search.DDGS",
         Mock(return_value=mock_ddgs_manager),
     ):
         result = await tool._arun(query="test query")

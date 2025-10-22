@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from agentsmithy_server.tools.builtin.write_file import WriteFileTool
+from agentsmithy.tools.builtin.write_file import WriteFileTool
 
 pytestmark = pytest.mark.asyncio
 

@@ -13,13 +13,6 @@ Each provider is defined in the `providers` section with a complete configuratio
 ```json
 {
   "providers": {
-    "gpt-local": {
-      "type": "openai",
-      "model": "gpt-oss:20b",
-      "api_key": "dummy-key-for-local-server",
-      "base_url": "http://localhost:11434/v1",  // Ollama default port
-      "options": {}
-    },
     "gpt5": {
       "type": "openai",
       "model": "gpt-5",
@@ -47,7 +40,7 @@ In the `models` section, reference providers by name:
   "models": {
     "agents": {
       "universal": {
-        "provider": "gpt-local"
+        "provider": "gpt5"
       },
       "inspector": {
         "provider": "gpt5"
@@ -86,7 +79,7 @@ The `summarization` model is used for generating dialog summaries when history b
   "providers": {
     "local-llm": {
       "type": "openai",
-      "model": "gpt-oss:20b",
+      "model": "gpt-4.1",
       "api_key": "not-needed",
       "base_url": "http://localhost:11434/v1",  // Ollama server
       "options": {}

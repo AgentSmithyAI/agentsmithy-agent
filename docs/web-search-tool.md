@@ -26,7 +26,7 @@ This dependency is included in the project's `requirements.txt`.
 The tool is automatically registered in the builtin registry and available to all agents:
 
 ```python
-from agentsmithy_server.tools import build_registry
+from agentsmithy.tools import build_registry
 
 registry = build_registry()
 ```

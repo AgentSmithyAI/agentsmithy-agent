@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Main entry point for AgentSmithy server.
 
-Bootstraps a Uvicorn ASGI server for agentsmithy_server.api.server:app.
+Bootstraps a Uvicorn ASGI server for agentsmithy.api.server:app (shim over legacy
+agentsmithy.api.server:app during migration).
 Requires a .env (DEFAULT_MODEL and OPENAI_API_KEY) and a --workdir path.
 """
 
@@ -35,7 +36,7 @@ if __name__ == "__main__":
     args, _ = parser.parse_known_args()
 
     # Setup logging for startup (after argparse, so --help doesn't need logger)
-    from agentsmithy_server.utils.logger import get_logger
+    from agentsmithy.utils.logger import get_logger
 
     startup_logger = get_logger("server.startup")
 
@@ -64,7 +65,7 @@ if __name__ == "__main__":
     startup_logger.debug("Changed working directory", workdir=str(workdir_path))
 
     # Initialize configuration manager
-    from agentsmithy_server.config import (
+    from agentsmithy.config import (
         create_config_manager,
         get_default_config,
         settings,
@@ -108,7 +109,7 @@ if __name__ == "__main__":
         # Ensure hidden state directory exists
         try:
             # Initialize a workspace entity to own directory management
-            from agentsmithy_server.core.project import set_workspace
+            from agentsmithy.core.project import set_workspace
 
             workspace = set_workspace(workdir_path)
             state_dir = workspace.root_state_dir
@@ -119,8 +120,8 @@ if __name__ == "__main__":
         # Workspace is now held in-process via set_workspace(); no env var needed
 
         # Delegate port selection and status.json management to project runtime
-        from agentsmithy_server.core.project import get_current_project
-        from agentsmithy_server.core.project_runtime import (
+        from agentsmithy.core.project import get_current_project
+        from agentsmithy.core.project_runtime import (
             ensure_singleton_and_select_port,
         )
 
@@ -140,11 +141,11 @@ if __name__ == "__main__":
         try:
             import asyncio
 
-            from agentsmithy_server.agents.project_inspector_agent import (
+            from agentsmithy.agents.project_inspector_agent import (
                 ProjectInspectorAgent,
             )
-            from agentsmithy_server.core.project import get_current_project
-            from agentsmithy_server.llm.providers.openai.provider import OpenAIProvider
+            from agentsmithy.core.project import get_current_project
+            from agentsmithy.llm.providers.openai.provider import OpenAIProvider
 
             project = get_current_project()
             project.root.mkdir(parents=True, exist_ok=True)
@@ -168,7 +169,7 @@ if __name__ == "__main__":
 
         import uvicorn
 
-        from agentsmithy_server.config import settings
+        from agentsmithy.config import settings
 
         startup_logger.info(
             "Starting AgentSmithy Server",
@@ -179,7 +180,7 @@ if __name__ == "__main__":
         )
 
         # Use custom logging configuration for consistent JSON output
-        from agentsmithy_server.config import LOGGING_CONFIG
+        from agentsmithy.config import LOGGING_CONFIG
 
         # Allow reload to be controlled via env (default False for prod)
         reload_enabled_env = os.getenv("SERVER_RELOAD", "false").lower()
@@ -189,7 +190,7 @@ if __name__ == "__main__":
         # Disable ASGI lifespan to avoid starlette lifespan CancelledError on shutdown
         # Manual startup/shutdown hooks are used instead (see below)
         config = uvicorn.Config(
-            "agentsmithy_server.api.server:app",
+            "agentsmithy.api.server:app",
             host=settings.server_host,
             port=chosen_port,
             reload=reload_enabled,
@@ -206,7 +207,7 @@ if __name__ == "__main__":
 
         async def run_server():
             # Pass shutdown event to the app
-            from agentsmithy_server.api.server import app
+            from agentsmithy.api.server import app
 
             app.state.shutdown_event = shutdown_event
             # Set IDE identifier as runtime parameter
@@ -215,7 +216,7 @@ if __name__ == "__main__":
             app.state.config_manager = config_manager
 
             # Log runtime environment information
-            from agentsmithy_server.platforms import get_os_adapter
+            from agentsmithy.platforms import get_os_adapter
 
             adapter = get_os_adapter()
             os_ctx = adapter.os_context()
@@ -240,7 +241,7 @@ if __name__ == "__main__":
             if should_inspect:
 
                 async def _run_inspector():
-                    from agentsmithy_server.core.project_runtime import set_scan_status
+                    from agentsmithy.core.project_runtime import set_scan_status
 
                     try:
                         # Check if model is configured
@@ -311,11 +312,11 @@ if __name__ == "__main__":
             # --- Manual startup (since lifespan is off) ---
             try:
                 # Ensure dialogs state and default dialog
-                from agentsmithy_server.api.deps import (
+                from agentsmithy.api.deps import (
                     get_chat_service,
                     set_shutdown_event,
                 )
-                from agentsmithy_server.core.project import get_current_project
+                from agentsmithy.core.project import get_current_project
 
                 project_obj = get_current_project()
                 project_obj.ensure_dialogs_dir()
@@ -364,7 +365,7 @@ if __name__ == "__main__":
 
             # --- Manual shutdown (since lifespan is off) ---
             try:
-                from agentsmithy_server.api.deps import (
+                from agentsmithy.api.deps import (
                     dispose_db_engine,
                     get_chat_service,
                 )
