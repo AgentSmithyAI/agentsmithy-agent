@@ -8,4 +8,4 @@ This package provides a flexible and extensible AI agent server with:
 - Extensible LLM provider architecture
 """
 
-__version__ = "1.6.0"
+__version__ = "1.6.1"

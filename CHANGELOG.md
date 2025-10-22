@@ -1,5 +1,14 @@
 <!-- version list -->
 
+## v1.6.1 (2025-10-22)
+
+### Bug Fixes
+
+- Remove inspector history from indexing
+  ([#39](https://github.com/AgentSmithyAI/agentsmithy-agent/pull/39),
+  [`18b2173`](https://github.com/AgentSmithyAI/agentsmithy-agent/commit/18b21733f239f4b716bf9f8d0413df480239f3d5))
+
+
 ## v1.6.0 (2025-10-21)
 
 ### Features
