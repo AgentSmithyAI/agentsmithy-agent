@@ -28,4 +28,3 @@ class GPTOss20BConfig(OpenAIModelSpec):
             "stream_options": {"include_usage": True}
         }
         return base_kwargs, model_kwargs
-
