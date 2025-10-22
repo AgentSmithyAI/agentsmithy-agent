@@ -33,7 +33,7 @@ def get_default_config() -> dict[str, Any]:
             # Example: Local OpenAI-compatible server (Ollama)
             # "gpt-local": {
             #     "type": "openai",
-            #     "model": "gpt-oss:20b",
+            #     "model": "gpt-4.1",
             #     "api_key": None,
             #     "base_url": "http://localhost:11434/v1",
             #     "options": {},

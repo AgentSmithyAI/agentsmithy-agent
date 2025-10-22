@@ -20,6 +20,8 @@ from typing import TYPE_CHECKING
 from langchain_community.chat_message_histories import SQLChatMessageHistory
 from langchain_core.messages import BaseMessage, messages_from_dict
 
+from agentsmithy.utils.logger import agent_logger
+
 if TYPE_CHECKING:
     from agentsmithy.core.project import Project
 
@@ -34,7 +36,11 @@ def _touch_metadata(func: Callable) -> Callable:
             try:
                 self.project.upsert_dialog_meta(self.dialog_id)
             except Exception:
-                pass
+                agent_logger.warn(
+                    "Failed to update dialog metadata",
+                    dialog_id=self.dialog_id,
+                    exc_info=True,
+                )
         return result
 
     return wrapper
