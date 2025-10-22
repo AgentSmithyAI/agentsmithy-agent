@@ -85,7 +85,6 @@ filterwarnings = [
 [tool.semantic_release]
 version_variables = [
     "agentsmithy/__init__.py:__version__",
-    "agentsmithy/api/__init__.py:__version__",
 ]
 upload_to_vcs_release = true
 commit_message = "chore(release): {version} [skip ci]"
