@@ -134,8 +134,12 @@ class Project:
         return self.dialogs_dir / dialog_id
 
     def get_dialog_history(self, dialog_id: str) -> DialogHistory:
-        """Get DialogHistory instance for a given dialog."""
-        return DialogHistory(self, dialog_id)
+        """Get DialogHistory instance for a given dialog.
+
+        Inspector dialog doesn't track metadata (no index.json entry).
+        """
+        track_metadata = dialog_id != "inspector"
+        return DialogHistory(self, dialog_id, track_metadata=track_metadata)
 
     def create_dialog(self, title: str | None = None, set_current: bool = True) -> str:
         """Create a new dialog under this project and return its id.

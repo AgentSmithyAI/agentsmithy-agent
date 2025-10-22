@@ -12,7 +12,8 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
+from functools import wraps
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -23,12 +24,29 @@ if TYPE_CHECKING:
     from agentsmithy_server.core.project import Project
 
 
+def _touch_metadata(func: Callable) -> Callable:
+    """Decorator to touch dialog metadata after modifying history."""
+
+    @wraps(func)
+    def wrapper(self, *args, **kwargs):
+        result = func(self, *args, **kwargs)
+        if self.track_metadata:
+            try:
+                self.project.upsert_dialog_meta(self.dialog_id)
+            except Exception:
+                pass
+        return result
+
+    return wrapper
+
+
 class DialogHistory:
     """Manages dialog history using SQLite via LangChain's SQLChatMessageHistory."""
 
-    def __init__(self, project: Project, dialog_id: str):
+    def __init__(self, project: Project, dialog_id: str, track_metadata: bool = True):
         self.project = project
         self.dialog_id = dialog_id
+        self.track_metadata = track_metadata
         self._history: SQLChatMessageHistory | None = None
         self._cached_messages: list[BaseMessage] | None = None
 
@@ -64,44 +82,30 @@ class DialogHistory:
             )
         return self._history
 
+    @_touch_metadata
     def add_user_message(self, content: str) -> None:
         """Add a user message to the history."""
         self.history.add_user_message(content)
         self._cached_messages = None  # Invalidate cache
-        # Touch dialog metadata updated_at
-        try:
-            self.project.upsert_dialog_meta(self.dialog_id)
-        except Exception:
-            pass
 
+    @_touch_metadata
     def add_ai_message(self, content: str) -> None:
         """Add an AI message to the history."""
         self.history.add_ai_message(content)
         self._cached_messages = None  # Invalidate cache
-        # Touch dialog metadata updated_at
-        try:
-            self.project.upsert_dialog_meta(self.dialog_id)
-        except Exception:
-            pass
 
+    @_touch_metadata
     def add_message(self, message: BaseMessage) -> None:
         """Add a generic LangChain BaseMessage to the history."""
         self.history.add_message(message)
         self._cached_messages = None  # Invalidate cache
-        try:
-            self.project.upsert_dialog_meta(self.dialog_id)
-        except Exception:
-            pass
 
+    @_touch_metadata
     def add_messages(self, messages: Iterable[BaseMessage]) -> None:
         """Add multiple messages atomically where possible."""
         for msg in messages:
             self.history.add_message(msg)
         self._cached_messages = None  # Invalidate cache
-        try:
-            self.project.upsert_dialog_meta(self.dialog_id)
-        except Exception:
-            pass
 
     def _get_all_messages(self) -> list[BaseMessage]:
         """Get all messages with caching."""
@@ -313,11 +317,8 @@ class DialogHistory:
             # Don't silently fall back - if SQL fails, it's a real problem
             raise
 
+    @_touch_metadata
     def clear(self) -> None:
         """Clear all messages from the history."""
         self.history.clear()
         self._cached_messages = None  # Invalidate cache
-        try:
-            self.project.upsert_dialog_meta(self.dialog_id)
-        except Exception:
-            pass
