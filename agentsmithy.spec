@@ -7,8 +7,8 @@ hiddenimports = []
 datas += collect_data_files('chromadb')
 datas += collect_data_files('ddgs')
 datas += collect_data_files('primp')
-hiddenimports += collect_submodules('agentsmithy_server.tools')
-hiddenimports += collect_submodules('agentsmithy_server.tools.builtin')
+hiddenimports += collect_submodules('agentsmithy.tools')
+hiddenimports += collect_submodules('agentsmithy.tools.builtin')
 hiddenimports += collect_submodules('chromadb')
 hiddenimports += collect_submodules('chromadb.telemetry.product')
 hiddenimports += collect_submodules('tiktoken')
@@ -17,13 +17,13 @@ hiddenimports += collect_submodules('ddgs')
 hiddenimports += collect_submodules('ddgs.engines')
 hiddenimports += collect_submodules('primp')
 # Ensure OpenAI model specs are included in frozen build (dynamic autodiscovery needs submodules bundled)
-hiddenimports += collect_submodules('agentsmithy_server.llm.providers.openai')
-hiddenimports += collect_submodules('agentsmithy_server.llm.providers.openai.models')
+hiddenimports += collect_submodules('agentsmithy.llm.providers.openai')
+hiddenimports += collect_submodules('agentsmithy.llm.providers.openai.models')
 # Explicitly add model modules (collect_submodules may miss them)
 hiddenimports += [
-    'agentsmithy_server.llm.providers.openai.models.gpt4_1',
-    'agentsmithy_server.llm.providers.openai.models.gpt5',
-    'agentsmithy_server.llm.providers.openai.models.gpt5_mini',
+    'agentsmithy.llm.providers.openai.models.gpt4_1',
+    'agentsmithy.llm.providers.openai.models.gpt5',
+    'agentsmithy.llm.providers.openai.models.gpt5_mini',
 ]
 
 

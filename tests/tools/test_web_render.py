@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from agentsmithy_server.tools.builtin.web_fetch import WebFetchTool
+from agentsmithy.tools.builtin.web_fetch import WebFetchTool
 
 pytestmark = pytest.mark.asyncio
 

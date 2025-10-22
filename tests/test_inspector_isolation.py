@@ -6,7 +6,7 @@ def test_inspector_not_added_to_index(tmp_path):
     project_root = tmp_path / "test_project"
     project_root.mkdir()
 
-    from agentsmithy_server.core.project import set_workspace
+    from agentsmithy.core.project import set_workspace
 
     workspace = set_workspace(project_root)
     project = workspace.get_project(".")
@@ -33,7 +33,7 @@ def test_regular_dialog_added_to_index(tmp_path):
     project_root = tmp_path / "test_project"
     project_root.mkdir()
 
-    from agentsmithy_server.core.project import set_workspace
+    from agentsmithy.core.project import set_workspace
 
     workspace = set_workspace(project_root)
     project = workspace.get_project(".")
@@ -63,7 +63,7 @@ def test_inspector_uses_shared_storage(tmp_path):
     project_root = tmp_path / "test_project"
     project_root.mkdir()
 
-    from agentsmithy_server.core.project import set_workspace
+    from agentsmithy.core.project import set_workspace
 
     workspace = set_workspace(project_root)
     project = workspace.get_project(".")
@@ -82,7 +82,7 @@ def test_regular_dialog_uses_separate_storage(tmp_path):
     project_root = tmp_path / "test_project"
     project_root.mkdir()
 
-    from agentsmithy_server.core.project import set_workspace
+    from agentsmithy.core.project import set_workspace
 
     workspace = set_workspace(project_root)
     project = workspace.get_project(".")
@@ -102,7 +102,7 @@ def test_inspector_multiple_messages_not_in_index(tmp_path):
     project_root = tmp_path / "test_project"
     project_root.mkdir()
 
-    from agentsmithy_server.core.project import set_workspace
+    from agentsmithy.core.project import set_workspace
 
     workspace = set_workspace(project_root)
     project = workspace.get_project(".")
@@ -131,7 +131,7 @@ def test_inspector_clear_not_in_index(tmp_path):
     project_root = tmp_path / "test_project"
     project_root.mkdir()
 
-    from agentsmithy_server.core.project import set_workspace
+    from agentsmithy.core.project import set_workspace
 
     workspace = set_workspace(project_root)
     project = workspace.get_project(".")
@@ -153,7 +153,7 @@ def test_track_metadata_flag(tmp_path):
     project_root = tmp_path / "test_project"
     project_root.mkdir()
 
-    from agentsmithy_server.core.project import set_workspace
+    from agentsmithy.core.project import set_workspace
 
     workspace = set_workspace(project_root)
     project = workspace.get_project(".")

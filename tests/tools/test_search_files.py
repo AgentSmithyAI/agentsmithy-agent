@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from agentsmithy_server.tools.builtin.search_files import SearchFilesTool
+from agentsmithy.tools.builtin.search_files import SearchFilesTool
 
 pytestmark = pytest.mark.asyncio
 

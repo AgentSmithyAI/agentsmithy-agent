@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from agentsmithy_server.tools.builtin.replace_in_file import ReplaceInFileTool
+from agentsmithy.tools.builtin.replace_in_file import ReplaceInFileTool
 
 pytestmark = pytest.mark.asyncio
 

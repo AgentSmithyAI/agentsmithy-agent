@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from agentsmithy_server.agents.universal_agent import UniversalAgent
+from agentsmithy.agents.universal_agent import UniversalAgent
 
 
 @pytest.mark.asyncio
@@ -63,7 +63,7 @@ async def test_title_tool_removed_when_title_set(monkeypatch):
     )
 
     # First, manually add the tool (simulate it was there from previous call)
-    from agentsmithy_server.tools.builtin.set_dialog_title import SetDialogTitleTool
+    from agentsmithy.tools.builtin.set_dialog_title import SetDialogTitleTool
 
     agent.tool_manager.register(SetDialogTitleTool())
     assert agent.tool_manager.has_tool("set_dialog_title") is True
@@ -118,7 +118,7 @@ async def test_title_tool_stays_when_no_title_multiple_calls(monkeypatch):
 @pytest.mark.asyncio
 async def test_title_tool_in_initial_registry():
     """Test that set_dialog_title is in the default registry."""
-    from agentsmithy_server.tools.build_registry import build_registry
+    from agentsmithy.tools.build_registry import build_registry
 
     registry = build_registry()
 

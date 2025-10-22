@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from agentsmithy_server.llm.orchestration import agent_graph
+from agentsmithy.llm.orchestration import agent_graph
 
 
 @pytest.mark.asyncio

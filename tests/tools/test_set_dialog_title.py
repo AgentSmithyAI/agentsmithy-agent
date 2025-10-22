@@ -4,7 +4,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from agentsmithy_server.tools.builtin.set_dialog_title import SetDialogTitleTool
+from agentsmithy.tools.builtin.set_dialog_title import SetDialogTitleTool
 
 
 @pytest.mark.asyncio

@@ -10,7 +10,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Direct import to avoid circular dependency through api module
-from agentsmithy_server.utils.logger import api_logger
+from agentsmithy.utils.logger import api_logger
 
 
 def _flush_assistant_buffer(

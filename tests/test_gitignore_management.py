@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from agentsmithy_server.core.project import Project
+from agentsmithy.core.project import Project
 
 
 def test_ensure_gitignore_entry_creates_new_file(tmp_path: Path):

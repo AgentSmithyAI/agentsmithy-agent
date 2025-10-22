@@ -4,9 +4,9 @@ import pytest
 from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage
 
-from agentsmithy_server.api.app import create_app
-from agentsmithy_server.core.project import Project
-from agentsmithy_server.dialogs.storages.reasoning import DialogReasoningStorage
+from agentsmithy.api.app import create_app
+from agentsmithy.core.project import Project
+from agentsmithy.dialogs.storages.reasoning import DialogReasoningStorage
 
 
 @pytest.fixture
@@ -30,11 +30,11 @@ def client(test_project, monkeypatch):
         return test_project
 
     monkeypatch.setattr(
-        "agentsmithy_server.core.project.get_current_project",
+        "agentsmithy.core.project.get_current_project",
         mock_get_current_project,
     )
     monkeypatch.setattr(
-        "agentsmithy_server.api.deps.get_current_project",
+        "agentsmithy.api.deps.get_current_project",
         mock_get_current_project,
     )
 

@@ -19,7 +19,7 @@ Currently, tool execution results are stored directly in dialog history as `Tool
 Create a separate storage system for tool results:
 
 ```python
-# agentsmithy_server/core/tool_results_storage.py
+# agentsmithy/core/tool_results_storage.py
 class ToolResultsStorage:
     """Stores tool execution results separately from dialog history."""
     
@@ -106,7 +106,7 @@ async def get_tool_result(
 Add a new tool that allows the model to retrieve previous tool results:
 
 ```python
-# agentsmithy_server/tools/get_tool_result.py
+# agentsmithy/tools/get_tool_result.py
 class GetPreviousResultTool(BaseTool):
     """Retrieve results from previous tool executions in this dialog."""
     
