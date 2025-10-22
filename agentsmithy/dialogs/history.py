@@ -36,7 +36,7 @@ def _touch_metadata(func: Callable) -> Callable:
             try:
                 self.project.upsert_dialog_meta(self.dialog_id)
             except Exception:
-                agent_logger.warn(
+                agent_logger.warning(
                     "Failed to update dialog metadata",
                     dialog_id=self.dialog_id,
                     exc_info=True,
