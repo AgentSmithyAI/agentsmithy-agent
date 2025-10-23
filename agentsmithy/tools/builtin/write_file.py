@@ -24,7 +24,6 @@ class WriteFileArgsDict(TypedDict):
 class WriteFileSuccess(BaseModel):
     type: Literal["write_file_result"] = "write_file_result"
     path: str
-    checkpoint: str | None = None
 
 
 WriteFileResult = WriteFileSuccess | ToolError
@@ -62,7 +61,6 @@ class WriteFileTool(BaseTool):
         tracker.ensure_repo()
         tracker.start_edit([str(file_path)])
         file_path.parent.mkdir(parents=True, exist_ok=True)
-        checkpoint = None
         try:
             file_path.write_text(kwargs["content"], encoding="utf-8")
         except Exception:
@@ -71,16 +69,6 @@ class WriteFileTool(BaseTool):
             raise
         else:
             tracker.finalize_edit()
-            # Track change in transaction or create immediate checkpoint
-            rel_path = (
-                str(file_path.relative_to(project_root))
-                if file_path.is_relative_to(project_root)
-                else str(file_path)
-            )
-            if tracker.is_transaction_active():
-                tracker.track_file_change(rel_path, "write")
-            else:
-                checkpoint = tracker.create_checkpoint(f"write_to_file: {rel_path}")
         # Emit file_edit event in simplified SSE protocol
         if self._sse_callback is not None:
             await self.emit_event(
@@ -92,7 +80,6 @@ class WriteFileTool(BaseTool):
         return {
             "type": "write_file_result",
             "path": str(file_path),
-            "checkpoint": getattr(checkpoint, "commit_id", None),
         }
 
 

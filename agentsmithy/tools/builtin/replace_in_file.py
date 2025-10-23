@@ -28,7 +28,6 @@ class ReplaceInFileSuccess(BaseModel):
     type: Literal["replace_file_result"] = "replace_file_result"
     path: str
     diff: str | None = None
-    checkpoint: str | None = None
 
 
 ReplaceInFileResult = ReplaceInFileSuccess | ToolError
@@ -91,7 +90,6 @@ class ReplaceInFileTool(BaseTool):
         tracker.ensure_repo()
         tracker.start_edit([str(file_path)])
 
-        checkpoint = None
         try:
             agent_logger.info("replace_in_file start", path=str(file_path))
             original_text = (
@@ -134,16 +132,6 @@ class ReplaceInFileTool(BaseTool):
             raise
         else:
             tracker.finalize_edit()
-            # Track change in transaction or create immediate checkpoint
-            rel_path = (
-                str(file_path.relative_to(project_root))
-                if file_path.is_relative_to(project_root)
-                else str(file_path)
-            )
-            if tracker.is_transaction_active():
-                tracker.track_file_change(rel_path, "replace")
-            else:
-                checkpoint = tracker.create_checkpoint(f"replace_in_file: {rel_path}")
 
         diff_str: str | None = None
         if self._sse_callback is not None:
@@ -174,7 +162,6 @@ class ReplaceInFileTool(BaseTool):
             "type": "replace_file_result",
             "path": str(file_path),
             "diff": diff_str,
-            "checkpoint": getattr(checkpoint, "commit_id", None),
         }
 
 

@@ -251,7 +251,7 @@ class ChatService:
                                 storage.save(
                                     file=chunk.get("file", ""),
                                     diff=chunk.get("diff"),
-                                    checkpoint=chunk.get("checkpoint"),
+                                    checkpoint=None,  # Checkpoints now on user messages
                                     message_index=message_index,
                                 )
                         except Exception as e:
@@ -264,7 +264,6 @@ class ChatService:
                 yield SSEEventFactory.file_edit(
                     file=chunk.get("file", ""),
                     diff=chunk.get("diff"),
-                    checkpoint=chunk.get("checkpoint"),
                     dialog_id=dialog_id,
                 ).to_sse()
             elif chunk["type"] == EventType.TOOL_CALL.value:
@@ -313,7 +312,6 @@ class ChatService:
                     sse = SSEEventFactory.file_edit(
                         file=tool_event.get("file", ""),
                         diff=tool_event.get("diff"),
-                        checkpoint=tool_event.get("checkpoint"),
                         dialog_id=dialog_id,
                     ).to_sse()
                 elif tool_event.get("type") == "error":

@@ -35,7 +35,6 @@ class EventType(str, Enum):
     SUMMARY_END = "summary_end"
     TOOL_CALL = "tool_call"
     FILE_EDIT = "file_edit"
-    CHECKPOINT_CREATED = "checkpoint_created"
     SEARCH = "search"
     ERROR = "error"
     DONE = "done"
@@ -120,14 +119,6 @@ class FileEditEvent(BaseEvent):
 
 
 @dataclass
-class CheckpointCreatedEvent(BaseEvent):
-    type: Literal[EventType.CHECKPOINT_CREATED] = EventType.CHECKPOINT_CREATED
-    checkpoint_id: str = ""
-    message: str = ""
-    files: list[str] = field(default_factory=list)
-
-
-@dataclass
 class ErrorEvent(BaseEvent):
     type: Literal[EventType.ERROR] = EventType.ERROR
     error: str = ""
@@ -197,20 +188,6 @@ class EventFactory:
         return FileEditEvent(file=file, diff=diff, dialog_id=dialog_id)
 
     @staticmethod
-    def checkpoint_created(
-        checkpoint_id: str,
-        message: str,
-        files: list[str] | None = None,
-        dialog_id: str | None = None,
-    ) -> CheckpointCreatedEvent:
-        return CheckpointCreatedEvent(
-            checkpoint_id=checkpoint_id,
-            message=message,
-            files=files or [],
-            dialog_id=dialog_id,
-        )
-
-    @staticmethod
     def error(message: str, dialog_id: str | None = None) -> ErrorEvent:
         return ErrorEvent(error=message, dialog_id=dialog_id)
 
@@ -249,8 +226,6 @@ class EventFactory:
             return ToolCallEvent(**data)
         if et == EventType.FILE_EDIT:
             return FileEditEvent(**data)
-        if et == EventType.CHECKPOINT_CREATED:
-            return CheckpointCreatedEvent(**data)
         if et == EventType.ERROR:
             return ErrorEvent(**data)
         if et == EventType.SEARCH:
