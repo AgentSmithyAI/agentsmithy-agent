@@ -167,7 +167,6 @@ class ReplaceInFileTool(BaseTool):
                     "type": EventType.FILE_EDIT.value,
                     "file": str(file_path),
                     "diff": diff_str,
-                    "checkpoint": getattr(checkpoint, "commit_id", None),
                 }
             )
 

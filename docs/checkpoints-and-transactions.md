@@ -10,20 +10,19 @@ A **checkpoint** is a Git commit that contains a complete snapshot of your proje
 
 **Location:** `.agentsmithy/dialogs/<dialog_id>/checkpoints/.git`
 
-### Transactions
-
-A **transaction** groups multiple file operations into a single checkpoint. Instead of creating a separate checkpoint for each modified file, all changes within a single AI response are grouped into one checkpoint.
+**Key principle:** Checkpoints are created BEFORE the AI processes each user message, not after. This provides clean rollback points - you can undo an entire AI response by restoring to the checkpoint from the user message that triggered it.
 
 **Example:**
 ```
 User: "Create a TODO app with main.py, models.py and tests.py"
-
+  → Checkpoint created: snapshot BEFORE AI starts work
+  
 AI executes:
   write_to_file: main.py
   write_to_file: models.py  
   write_to_file: tests.py
 
-Result: ONE checkpoint "Transaction: 3 files"
+Result: All changes can be undone by restoring to the checkpoint
 ```
 
 ## Automatic Checkpoint Creation
@@ -40,35 +39,71 @@ dialog_id = project.create_dialog(title="My Feature")
 # Saved in metadata: dialog["initial_checkpoint"] = "abc123..."
 ```
 
-### Transaction Checkpoints
+### Per-Message Checkpoints
 
-Each time the AI modifies files, a transaction is created:
+Each time the user submits a message, a checkpoint is automatically created BEFORE the AI starts processing:
 
-1. **Begin transaction** — before executing the first file modification tool
-2. **Track changes** — each `write_to_file`, `replace_in_file`, `delete_file` is registered
-3. **Commit transaction** — after successful execution of all tools, one checkpoint is created
+1. **User submits message** — e.g., "Create a TODO app"
+2. **Create checkpoint** — snapshot of current project state (BEFORE AI makes changes)
+3. **AI processes request** — executes tools, modifies files
+4. **User can rollback** — restore to the checkpoint to undo all AI changes
 
 Commit message is auto-generated:
 ```
-Transaction: 3 files
-write: src/main.py
-replace: src/utils.py
-delete: src/old.py
+Before user message: Create a TODO app with 3 files
 ```
 
-### Which Operations Create Checkpoints
+### When Are Checkpoints Created
 
-✅ **Create checkpoints:**
-- `write_to_file` — create/overwrite file
-- `replace_in_file` — edit file (diff)
-- `delete_file` — delete file
+✅ **Checkpoints are created:**
+- **Before each user message** — automatic snapshot before AI processes the request
+- **When creating a dialog** — initial snapshot of project state
 
-❌ **Do NOT create checkpoints:**
-- `run_command` — command execution (even if the command modifies files)
-- `read_file` — read-only
-- `list_files` — read-only
-- `search_files` — search-only
-- Other read-only tools
+❌ **Checkpoints are NOT created:**
+- After individual tool executions (`write_to_file`, `replace_in_file`, etc.)
+- During tool execution
+- For read-only operations (`read_file`, `list_files`, `search_files`)
+- For `run_command` (even if the command modifies files)
+
+**Rationale:** One checkpoint per user message provides clean rollback points. To undo all changes from an AI response, restore to the checkpoint attached to the user message that triggered it.
+
+## SSE Events for Checkpoints
+
+### user Event
+
+Sent when the user submits a message. A checkpoint is automatically created BEFORE the AI processes the request, capturing the project state before any changes.
+
+```json
+{
+  "type": "user",
+  "content": "Create a TODO app with 3 files",
+  "checkpoint": "a1b2c3d4e5f6789abc",
+  "dialog_id": "01J..."
+}
+```
+
+**Purpose:** 
+- Checkpoint represents the state BEFORE AI makes any changes
+- Allows rolling back the entire AI response by restoring to this checkpoint
+- Checkpoint ID is also stored in history for the user message
+
+### file_edit Event
+
+Sent immediately when a file is modified by a tool. This is a **control signal** for the UI to know which files to refresh/redraw.
+
+```json
+{
+  "type": "file_edit",
+  "file": "/abs/path/to/file.py",
+  "diff": "--- a/...\n+++ b/...\n...",
+  "dialog_id": "01J..."
+}
+```
+
+**Purpose:**
+- UI notification to refresh/redraw the file
+- Provides diff for display (optional)
+- Does NOT include checkpoint (checkpoint is on user message)
 
 ## Checkpoint Management API
 
@@ -159,74 +194,54 @@ from agentsmithy.services.versioning import VersioningTracker
 
 tracker = VersioningTracker(project_root, dialog_id)
 
-# Create checkpoint
-checkpoint = tracker.create_checkpoint("My checkpoint")
-# → CheckpointInfo(commit_id="abc123...", message="My checkpoint")
-
-# Transactions
-tracker.begin_transaction()
-tracker.track_file_change("file1.py", "write")
-tracker.track_file_change("file2.py", "replace")
-checkpoint = tracker.commit_transaction()
+# Create checkpoint (done automatically before user messages)
+checkpoint = tracker.create_checkpoint("Before user message: ...")
+# → CheckpointInfo(commit_id="abc123...", message="...")
 
 # List checkpoints
 checkpoints = tracker.list_checkpoints()
 # → [CheckpointInfo(...), CheckpointInfo(...), ...]
 
-# Restore
+# Restore to checkpoint
 tracker.restore_checkpoint("abc123...")
 ```
 
+**Note:** Transactions (`begin_transaction`, `track_file_change`, `commit_transaction`) are available in the API for advanced use cases, but the standard flow creates checkpoints only before user messages.
+
 ### Tool Integration
 
-Tools automatically use transactions:
+Tools use `start_edit()` / `finalize_edit()` for rollback protection:
 
 ```python
-# write_file.py
+# write_file.py (simplified)
 tracker = VersioningTracker(project_root, dialog_id)
 tracker.start_edit([file_path])
 
 try:
     file_path.write_text(content)
 except:
-    tracker.abort_edit()
+    tracker.abort_edit()  # Restore file on error
     raise
 else:
-    tracker.finalize_edit()
+    tracker.finalize_edit()  # Cleanup
     
-    # If transaction is active - only register
-    if tracker.is_transaction_active():
-        tracker.track_file_change(rel_path, "write")
-    else:
-        # Otherwise create checkpoint immediately
-        checkpoint = tracker.create_checkpoint(f"write_to_file: {rel_path}")
+    # Note: Checkpoints are created before user messages, not by tools
 ```
 
-### ToolExecutor Manages Transactions
+### ChatService Creates Checkpoints
 
 ```python
-# tool_executor.py (simplified)
-async def _process_streaming(messages):
-    # ...AI generates tool_calls...
+# chat_service.py (simplified)
+def _append_user_and_prepare_context(query, ...):
+    # Create checkpoint BEFORE adding user message
+    tracker = VersioningTracker(project_root, dialog_id)
+    checkpoint = tracker.create_checkpoint(f"Before user message: {query[:50]}")
     
-    # Begin transaction before executing tools
-    if self._versioning_tracker:
-        self._versioning_tracker.begin_transaction()
+    # Add user message to history with checkpoint
+    history.add_user_message(query, checkpoint=checkpoint.commit_id)
     
-    transaction_success = False
-    try:
-        for tool_call in accumulated_tool_calls:
-            # Execute tools (they register changes themselves)
-            result = await self.tool_manager.run_tool(name, **args)
-        
-        transaction_success = True
-    finally:
-        # Commit or abort transaction
-        if self._versioning_tracker and self._versioning_tracker.is_transaction_active():
-            if transaction_success:
-                checkpoint = self._versioning_tracker.commit_transaction()
-            else:
-                self._versioning_tracker.abort_transaction()
+    # Emit SSE event
+    yield EventFactory.user(content=query, checkpoint=checkpoint.commit_id)
 ```
 
 ## Metadata Storage
@@ -337,57 +352,46 @@ Dialogs created before transaction implementation:
 - Will not have `initial_checkpoint` in metadata
 - Checkpoints are created from the first change after update
 
-Old checkpoints (one per file):
+Old checkpoints (one per file, if applicable from previous versions):
 - Remain unchanged
-- New checkpoints created using new logic (one per transaction)
+- New checkpoints created using new logic (one per user message)
 
 ## Examples
 
-### Simple File Edit
+### Simple Conversation Flow
 
-```python
-# User: "Fix the bug in utils.py"
-
-# AI executes:
-Transaction begins
-  → replace_in_file: utils.py
-Transaction commits
-  → Checkpoint: "Transaction: 1 files\nreplace: utils.py"
 ```
-
-### Multiple File Creation
-
-```python
-# User: "Create REST API with routes, models, and tests"
-
-# AI executes:
-Transaction begins
-  → write_to_file: api/routes.py
-  → write_to_file: api/models.py
-  → write_to_file: tests/test_api.py
-Transaction commits
-  → Checkpoint: "Transaction: 3 files\nwrite: api/routes.py\nwrite: api/models.py\nwrite: tests/test_api.py"
+1. User: "Fix the bug in utils.py"
+   → Checkpoint A: "Before user message: Fix the bug..."
+   
+2. AI executes: replace_in_file: utils.py
+   → file_edit event (UI refreshes utils.py)
+   
+3. User: "Also add tests"
+   → Checkpoint B: "Before user message: Also add tests"
+   
+4. AI executes: write_to_file: tests/test_utils.py
+   → file_edit event (UI shows new test file)
 ```
 
 ### Restore Workflow
 
-```python
-# 1. User makes changes through AI
-Checkpoint A: Initial snapshot
-Checkpoint B: Transaction - created 3 files
-Checkpoint C: Transaction - modified 1 file
+```
+Dialog history:
+  Checkpoint 0: Initial snapshot (dialog creation)
+  Checkpoint 1: Before "Create REST API" → AI created 3 files
+  Checkpoint 2: Before "Add authentication" → AI modified 2 files
+  Checkpoint 3: Before "Fix bug" → AI modified 1 file
 
-# 2. User decides to undo last change
-POST /api/dialogs/{id}/restore
-{"checkpoint_id": "B"}
-
-# 3. System restores to checkpoint B
-All files restored to state at checkpoint B
-Creates Checkpoint D: "Restored to checkpoint B"
-
-# 4. User can still go back to C if needed
-POST /api/dialogs/{id}/restore
-{"checkpoint_id": "C"}
+User decides to undo "Fix bug":
+  POST /api/dialogs/{id}/restore
+  {"checkpoint_id": "<checkpoint_2>"}
+  
+Result:
+  - Project restored to state after "Add authentication"
+  - All changes from "Fix bug" are undone
+  - Checkpoint 4 created: "Restored to checkpoint <checkpoint_2>"
+  - Restore is reversible (can go back to checkpoint 3)
 ```
 
 ## Performance Considerations

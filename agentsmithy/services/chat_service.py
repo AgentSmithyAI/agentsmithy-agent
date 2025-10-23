@@ -335,15 +335,33 @@ class ChatService:
         context: dict[str, Any] | None,
         dialog_id: str | None,
         project: Any | None,
-    ) -> dict[str, Any]:
-        """Append user message and enrich context with dialog history (with summary support)."""
+    ) -> tuple[dict[str, Any], str | None]:
+        """Append user message and enrich context with dialog history (with summary support).
+
+        Returns:
+            Tuple of (context_dict, checkpoint_id)
+        """
         ctx: dict[str, Any] = dict(context or {})
+        checkpoint_id = None
+
         if not project or not dialog_id:
-            return ctx
+            return ctx, None
 
         try:
+            # Create checkpoint BEFORE adding user message (snapshot before AI work)
+            from agentsmithy.services.versioning import VersioningTracker
+
+            tracker = VersioningTracker(str(project.root), dialog_id)
+            checkpoint = tracker.create_checkpoint(f"Before user message: {query[:50]}")
+            checkpoint_id = checkpoint.commit_id
+            api_logger.info(
+                "Created checkpoint before user message",
+                dialog_id=dialog_id,
+                checkpoint_id=checkpoint_id[:8],
+            )
+
             history = project.get_dialog_history(dialog_id)
-            history.add_user_message(query)
+            history.add_user_message(query, checkpoint=checkpoint_id)
         except Exception as e:
             api_logger.error(
                 "Failed to append user message", exc_info=True, error=str(e)
@@ -394,7 +412,7 @@ class ChatService:
             ctx["dialog_summary"] = summary_text
         # Add project reference for tool results storage
         ctx["project"] = project
-        return ctx
+        return ctx, checkpoint_id
 
     async def stream_chat(
         self,
@@ -422,11 +440,20 @@ class ChatService:
         try:
             api_logger.debug("Processing request with orchestrator", streaming=True)
             # Centralize history: append user and inject dialog messages into context
+            user_checkpoint_id = None
             if project_dialog:
                 project_obj, pdialog_id = project_dialog
-                context = self._append_user_and_prepare_context(
+                context, user_checkpoint_id = self._append_user_and_prepare_context(
                     query, context, dialog_id or pdialog_id, project_obj
                 )
+
+                # Emit user message event with checkpoint
+                yield SSEEventFactory.user(
+                    content=query,
+                    checkpoint=user_checkpoint_id,
+                    dialog_id=dialog_id,
+                ).to_sse()
+
             result = await orchestrator.process_request(
                 query=query, context=context, stream=True
             )
@@ -624,7 +651,7 @@ class ChatService:
     ) -> dict[str, Any]:
         orchestrator = self._get_orchestrator()
         # Centralize history: append user and inject dialog messages into context
-        context = self._append_user_and_prepare_context(
+        context, user_checkpoint_id = self._append_user_and_prepare_context(
             query, context, dialog_id, project
         )
         result = await orchestrator.process_request(

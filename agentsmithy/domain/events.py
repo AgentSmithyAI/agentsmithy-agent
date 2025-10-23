@@ -35,6 +35,7 @@ class EventType(str, Enum):
     SUMMARY_END = "summary_end"
     TOOL_CALL = "tool_call"
     FILE_EDIT = "file_edit"
+    CHECKPOINT_CREATED = "checkpoint_created"
     SEARCH = "search"
     ERROR = "error"
     DONE = "done"
@@ -105,11 +106,25 @@ class ToolCallEvent(BaseEvent):
 
 
 @dataclass
+class UserEvent(BaseEvent):
+    type: Literal[EventType.USER] = EventType.USER
+    content: str = ""
+    checkpoint: str | None = None
+
+
+@dataclass
 class FileEditEvent(BaseEvent):
     type: Literal[EventType.FILE_EDIT] = EventType.FILE_EDIT
     file: str = ""
     diff: str | None = None
-    checkpoint: str | None = None
+
+
+@dataclass
+class CheckpointCreatedEvent(BaseEvent):
+    type: Literal[EventType.CHECKPOINT_CREATED] = EventType.CHECKPOINT_CREATED
+    checkpoint_id: str = ""
+    message: str = ""
+    files: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -164,6 +179,12 @@ class EventFactory:
         return SummaryEndEvent(dialog_id=dialog_id)
 
     @staticmethod
+    def user(
+        content: str, checkpoint: str | None = None, dialog_id: str | None = None
+    ) -> UserEvent:
+        return UserEvent(content=content, checkpoint=checkpoint, dialog_id=dialog_id)
+
+    @staticmethod
     def tool_call(
         name: str, args: dict[str, Any], dialog_id: str | None = None
     ) -> ToolCallEvent:
@@ -171,13 +192,22 @@ class EventFactory:
 
     @staticmethod
     def file_edit(
-        file: str,
-        diff: str | None = None,
-        checkpoint: str | None = None,
-        dialog_id: str | None = None,
+        file: str, diff: str | None = None, dialog_id: str | None = None
     ) -> FileEditEvent:
-        return FileEditEvent(
-            file=file, diff=diff, checkpoint=checkpoint, dialog_id=dialog_id
+        return FileEditEvent(file=file, diff=diff, dialog_id=dialog_id)
+
+    @staticmethod
+    def checkpoint_created(
+        checkpoint_id: str,
+        message: str,
+        files: list[str] | None = None,
+        dialog_id: str | None = None,
+    ) -> CheckpointCreatedEvent:
+        return CheckpointCreatedEvent(
+            checkpoint_id=checkpoint_id,
+            message=message,
+            files=files or [],
+            dialog_id=dialog_id,
         )
 
     @staticmethod
@@ -197,6 +227,8 @@ class EventFactory:
         et = data.get("type")
         if dialog_id and "dialog_id" not in data:
             data["dialog_id"] = dialog_id
+        if et == EventType.USER:
+            return UserEvent(**data)
         if et == EventType.CHAT:
             return ChatEvent(**data)
         if et == EventType.REASONING:
@@ -217,6 +249,8 @@ class EventFactory:
             return ToolCallEvent(**data)
         if et == EventType.FILE_EDIT:
             return FileEditEvent(**data)
+        if et == EventType.CHECKPOINT_CREATED:
+            return CheckpointCreatedEvent(**data)
         if et == EventType.ERROR:
             return ErrorEvent(**data)
         if et == EventType.SEARCH:

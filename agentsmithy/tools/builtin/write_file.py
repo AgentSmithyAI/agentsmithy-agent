@@ -87,7 +87,6 @@ class WriteFileTool(BaseTool):
                 {
                     "type": EventType.FILE_EDIT.value,
                     "file": str(file_path),
-                    "checkpoint": getattr(checkpoint, "commit_id", None),
                 }
             )
         return {

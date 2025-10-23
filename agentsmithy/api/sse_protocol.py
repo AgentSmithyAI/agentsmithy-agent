@@ -9,6 +9,7 @@ from agentsmithy.domain.events import (
     ChatEndEvent,
     ChatEvent,
     ChatStartEvent,
+    CheckpointCreatedEvent,
     DoneEvent,
     ErrorEvent,
     EventFactory,
@@ -21,11 +22,13 @@ from agentsmithy.domain.events import (
     SummaryEndEvent,
     SummaryStartEvent,
     ToolCallEvent,
+    UserEvent,
 )
 
 __all__ = [
     "EventType",
     "BaseEvent",
+    "UserEvent",
     "ChatEvent",
     "ReasoningEvent",
     "ChatStartEvent",
@@ -36,6 +39,7 @@ __all__ = [
     "SummaryEndEvent",
     "ToolCallEvent",
     "FileEditEvent",
+    "CheckpointCreatedEvent",
     "SearchEvent",
     "ErrorEvent",
     "DoneEvent",
