@@ -1,5 +1,13 @@
 <!-- version list -->
 
+## v1.6.2 (2025-10-23)
+
+### Bug Fixes
+
+- Fix prompt for dialog namings ([#40](https://github.com/AgentSmithyAI/agentsmithy-agent/pull/40),
+  [`a280fc3`](https://github.com/AgentSmithyAI/agentsmithy-agent/commit/a280fc3aa7867e4d0670cc03e32e9e8a0dac1c1b))
+
+
 ## v1.6.1 (2025-10-22)
 
 ### Bug Fixes
