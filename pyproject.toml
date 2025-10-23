@@ -86,7 +86,7 @@ filterwarnings = [
 version_variables = [
     "agentsmithy/__init__.py:__version__",
 ]
-upload_to_vcs_release = true
+upload_to_vcs_release = false
 commit_message = "chore(release): {version} [skip ci]"
 commit_parser = "conventional"
 logging_use_named_masks = false
