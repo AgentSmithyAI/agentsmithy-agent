@@ -363,6 +363,15 @@ jobs:
         with:
           pattern: agentsmithy-*
           merge-multiple: true
+      - name: Move binaries to root
+        shell: bash
+        run: |
+          if [ -d "dist" ]; then
+            mv dist/* .
+            rmdir dist
+          fi
+          echo "Final files to upload:"
+          ls -lah agentsmithy-* || echo "No files found matching agentsmithy-*"
       - name: Derive tag and version
         id: tag
         shell: bash
