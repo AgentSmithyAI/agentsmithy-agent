@@ -71,7 +71,16 @@ class WriteFileTool(BaseTool):
             raise
         else:
             tracker.finalize_edit()
-            checkpoint = tracker.create_checkpoint(f"write_to_file: {str(file_path)}")
+            # Track change in transaction or create immediate checkpoint
+            rel_path = (
+                str(file_path.relative_to(project_root))
+                if file_path.is_relative_to(project_root)
+                else str(file_path)
+            )
+            if tracker.is_transaction_active():
+                tracker.track_file_change(rel_path, "write")
+            else:
+                checkpoint = tracker.create_checkpoint(f"write_to_file: {rel_path}")
         # Emit file_edit event in simplified SSE protocol
         if self._sse_callback is not None:
             await self.emit_event(

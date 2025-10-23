@@ -12,6 +12,7 @@ A self-hosted AI coding assistant server that integrates with your IDE. Built wi
 
 - See the documentation in [docs/](./docs).
 - SSE protocol details (current): [docs/sse-protocol.md](./docs/sse-protocol.md)
+- Checkpoints and Transactions: [docs/checkpoints-and-transactions.md](./docs/checkpoints-and-transactions.md)
 
 ## Formatting, Linting & Tests
 
@@ -40,6 +41,7 @@ Or use Makefile shortcuts:
 - 🔌 **Multi-Provider Support** - Extensible LLM provider system (OpenAI with GPT-5 support included)
 - 💬 **Conversation Persistence** - Dialog management with full history and resumable conversations
 - 🎯 **IDE Integration** - Context-aware assistance tailored to your development environment
+- ⏮️ **Checkpoints & Rollback** - Automatic snapshots of project state with transaction grouping and one-click restore
 
 ## Architecture
 
@@ -295,6 +297,11 @@ Manage per-project conversations persisted under `<workdir>/.agentsmithy/dialogs
 **Tool Results:**
 - `GET /api/dialogs/{dialog_id}/tool-results` - List all tool results metadata for a dialog
 - `GET /api/dialogs/{dialog_id}/tool-results/{tool_call_id}` - Get full tool execution result
+
+**Checkpoints:**
+- `GET /api/dialogs/{dialog_id}/checkpoints` - List all checkpoints (snapshots) for a dialog
+- `POST /api/dialogs/{dialog_id}/restore` - Restore project state to a specific checkpoint
+- `POST /api/dialogs/{dialog_id}/reset` - Reset dialog to initial checkpoint (undo all changes)
 
 ## Binary Distribution
 

@@ -75,7 +75,16 @@ class DeleteFileTool(BaseTool):
             raise
         else:
             tracker.finalize_edit()
-            checkpoint = tracker.create_checkpoint(f"delete_file: {str(file_path)}")
+            # Track change in transaction or create immediate checkpoint
+            rel_path = (
+                str(file_path.relative_to(project_root))
+                if file_path.is_relative_to(project_root)
+                else str(file_path)
+            )
+            if tracker.is_transaction_active():
+                tracker.track_file_change(rel_path, "delete")
+            else:
+                checkpoint = tracker.create_checkpoint(f"delete_file: {rel_path}")
 
         if self._sse_callback is not None:
             await self.emit_event(

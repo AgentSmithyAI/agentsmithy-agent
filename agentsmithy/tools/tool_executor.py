@@ -10,6 +10,7 @@ from langchain_core.messages import BaseMessage, ToolMessage
 from agentsmithy.dialogs.storages.usage import DialogUsageStorage
 from agentsmithy.domain.events import EventType
 from agentsmithy.llm.provider import LLMProvider
+from agentsmithy.services.versioning import VersioningTracker
 from agentsmithy.storage.tool_results import ToolResultsStorage
 from agentsmithy.utils.logger import agent_logger
 
@@ -37,6 +38,7 @@ class ToolExecutor:
         self._dialog_id: str | None = None
         # Set via set_context(...)
         self._tool_results_storage: ToolResultsStorage | None = None
+        self._versioning_tracker: VersioningTracker | None = None
 
     def dispose(self) -> None:
         """Explicitly clean up resources. Should be called on shutdown."""
@@ -73,8 +75,10 @@ class ToolExecutor:
         self._dialog_id = dialog_id
         if project and dialog_id:
             self._tool_results_storage = ToolResultsStorage(project, dialog_id)
+            self._versioning_tracker = VersioningTracker(str(project.root), dialog_id)
         else:
             self._tool_results_storage = None
+            self._versioning_tracker = None
 
         # Propagate project root to all tools
         if project:
@@ -405,29 +409,59 @@ class ToolExecutor:
             # Execute tools one-by-one, append ToolMessages to conversation
             # IMPORTANT: append the AI response (with tool_calls) first per OpenAI spec
             conversation.append(response)
-            for call in tool_calls:
-                name = call.get("name") or call.get("tool", {}).get("name")
-                args = call.get("args") or call.get("tool", {}).get("args") or {}
-                if not name:
-                    continue
-                result = await self.tool_manager.run_tool(name, **args)
-                # Check if tool output should be aggregated/persisted
-                is_ephemeral = self._is_ephemeral_tool(name)
-                if not is_ephemeral:
-                    aggregated_tool_results.append({"name": name, "result": result})
-                    aggregated_tool_calls.append({"name": name, "args": args})
 
-                # Store result and create reference
-                tool_call_id = call.get("id", "") or f"call_{uuid.uuid4().hex[:8]}"
+            # Begin transaction to group all file changes in this AI response
+            if self._versioning_tracker:
+                self._versioning_tracker.begin_transaction()
 
-                tool_message, is_ephemeral = await self._build_tool_message(
-                    tool_call_id, name, args, result
-                )
-                # Persist to history only if non-ephemeral and storage path built with reference
-                if not is_ephemeral and self._tool_results_storage:
-                    self._append_tool_message_to_history(tool_message)
+            try:
+                for call in tool_calls:
+                    name = call.get("name") or call.get("tool", {}).get("name")
+                    args = call.get("args") or call.get("tool", {}).get("args") or {}
+                    if not name:
+                        continue
+                    result = await self.tool_manager.run_tool(name, **args)
+                    # Check if tool output should be aggregated/persisted
+                    is_ephemeral = self._is_ephemeral_tool(name)
+                    if not is_ephemeral:
+                        aggregated_tool_results.append({"name": name, "result": result})
+                        aggregated_tool_calls.append({"name": name, "args": args})
 
-                conversation.append(tool_message)
+                    # Store result and create reference
+                    tool_call_id = call.get("id", "") or f"call_{uuid.uuid4().hex[:8]}"
+
+                    tool_message, is_ephemeral = await self._build_tool_message(
+                        tool_call_id, name, args, result
+                    )
+                    # Persist to history only if non-ephemeral and storage path built with reference
+                    if not is_ephemeral and self._tool_results_storage:
+                        self._append_tool_message_to_history(tool_message)
+
+                    conversation.append(tool_message)
+
+                # Commit transaction after all tools executed successfully
+                if (
+                    self._versioning_tracker
+                    and self._versioning_tracker.is_transaction_active()
+                ):
+                    checkpoint = self._versioning_tracker.commit_transaction()
+                    if checkpoint:
+                        agent_logger.info(
+                            "Created transaction checkpoint (non-streaming)",
+                            checkpoint_id=checkpoint.commit_id[:8],
+                            message=checkpoint.message[:50],
+                        )
+            except Exception:
+                # Abort transaction on error
+                if (
+                    self._versioning_tracker
+                    and self._versioning_tracker.is_transaction_active()
+                ):
+                    self._versioning_tracker.abort_transaction()
+                    agent_logger.debug(
+                        "Aborted transaction due to tool errors (non-streaming)"
+                    )
+                raise
 
     async def _process_streaming(
         self, messages: list[BaseMessage]
@@ -697,75 +731,103 @@ class ToolExecutor:
             # Persist AI tool_calls message to history for next turns
             self._append_ai_message_with_tool_calls_to_history(ai_message)
 
+            # Begin transaction to group all file changes in this AI response
+            if self._versioning_tracker:
+                self._versioning_tracker.begin_transaction()
+
             # Execute tools and stream results
-            for tool_call in accumulated_tool_calls:
-                try:
-                    name = tool_call.get("name", "")
-                    tool_id = tool_call.get("id", "")
+            transaction_success = False
+            try:
+                for tool_call in accumulated_tool_calls:
+                    try:
+                        name = tool_call.get("name", "")
+                        tool_id = tool_call.get("id", "")
 
-                    # Parse accumulated args string to dict
-                    args_str = tool_call.get("args", "{}") or "{}"
-                    # Ensure it's a string; providers stream arguments as a JSON string
-                    if not isinstance(args_str, str):
-                        args_str = str(args_str)
+                        # Parse accumulated args string to dict
+                        args_str = tool_call.get("args", "{}") or "{}"
+                        # Ensure it's a string; providers stream arguments as a JSON string
+                        if not isinstance(args_str, str):
+                            args_str = str(args_str)
 
-                    args = json.loads(args_str)
+                        args = json.loads(args_str)
 
-                    if not name:
-                        continue
+                        if not name:
+                            continue
 
-                    # Emit tool_call as a structured chunk
-                    yield {
-                        "type": EventType.TOOL_CALL.value,
-                        "name": name,
-                        "args": args,
-                    }
+                        # Emit tool_call as a structured chunk
+                        yield {
+                            "type": EventType.TOOL_CALL.value,
+                            "name": name,
+                            "args": args,
+                        }
 
-                    # Execute tool
-                    result = await self.tool_manager.run_tool(name, **args)
-                    is_ephemeral = self._is_ephemeral_tool(name)
+                        # Execute tool
+                        result = await self.tool_manager.run_tool(name, **args)
+                        is_ephemeral = self._is_ephemeral_tool(name)
 
-                    # Immediately yield file_edit in the same stream if tool produced a file change
-                    if isinstance(result, dict) and result.get("type") in {
-                        "replace_file_result",
-                        "write_file_result",
-                        "delete_file_result",
-                    }:
-                        file_path = result.get("path") or result.get("file")
-                        diff = result.get("diff")
-                        checkpoint = result.get("checkpoint")
-                        if file_path:
-                            # Yield file_edit directly in the chunk stream for immediate delivery
-                            yield {
-                                "type": EventType.FILE_EDIT.value,
-                                "file": file_path,
-                                "diff": diff,
-                                "checkpoint": checkpoint,
-                            }
+                        # Immediately yield file_edit in the same stream if tool produced a file change
+                        if isinstance(result, dict) and result.get("type") in {
+                            "replace_file_result",
+                            "write_file_result",
+                            "delete_file_result",
+                        }:
+                            file_path = result.get("path") or result.get("file")
+                            diff = result.get("diff")
+                            checkpoint = result.get("checkpoint")
+                            if file_path:
+                                # Yield file_edit directly in the chunk stream for immediate delivery
+                                yield {
+                                    "type": EventType.FILE_EDIT.value,
+                                    "file": file_path,
+                                    "diff": diff,
+                                    "checkpoint": checkpoint,
+                                }
 
-                    # Store result and create reference (tool_id must be present)
-                    if not tool_id:
-                        raise RuntimeError(
-                            "Missing tool_call id; cannot attach tool output"
+                        # Store result and create reference (tool_id must be present)
+                        if not tool_id:
+                            raise RuntimeError(
+                                "Missing tool_call id; cannot attach tool output"
+                            )
+
+                        tool_message, is_ephemeral = await self._build_tool_message(
+                            tool_id, name, args, result
                         )
+                        if not is_ephemeral and self._tool_results_storage:
+                            self._append_tool_message_to_history(tool_message)
 
-                    tool_message, is_ephemeral = await self._build_tool_message(
-                        tool_id, name, args, result
-                    )
-                    if not is_ephemeral and self._tool_results_storage:
-                        self._append_tool_message_to_history(tool_message)
+                        conversation.append(tool_message)
 
-                    conversation.append(tool_message)
+                    except json.JSONDecodeError as e:
+                        error_msg = f"Failed to parse tool arguments: {str(e)}"
+                        agent_logger.error(error_msg, tool_name=name, args_str=args_str)
+                        yield {"type": "error", "error": error_msg}
+                        return
+                    except Exception as e:
+                        error_msg = f"Tool '{name}' failed: {str(e)}"
+                        agent_logger.error(error_msg, tool_name=name)
+                        yield {"type": "error", "error": error_msg}
+                        return
 
-                except json.JSONDecodeError as e:
-                    error_msg = f"Failed to parse tool arguments: {str(e)}"
-                    agent_logger.error(error_msg, tool_name=name, args_str=args_str)
-                    yield {"type": "error", "error": error_msg}
-                    return
-                except Exception as e:
-                    error_msg = f"Tool '{name}' failed: {str(e)}"
-                    agent_logger.error(error_msg, tool_name=name)
-                    yield {"type": "error", "error": error_msg}
-                    return
+                # All tools executed successfully
+                transaction_success = True
+            finally:
+                # Commit or abort transaction
+                if (
+                    self._versioning_tracker
+                    and self._versioning_tracker.is_transaction_active()
+                ):
+                    if transaction_success:
+                        # Commit transaction with all file changes
+                        checkpoint = self._versioning_tracker.commit_transaction()
+                        if checkpoint:
+                            agent_logger.info(
+                                "Created transaction checkpoint",
+                                checkpoint_id=checkpoint.commit_id[:8],
+                                message=checkpoint.message[:50],
+                            )
+                    else:
+                        # Abort transaction on error
+                        self._versioning_tracker.abort_transaction()
+                        agent_logger.debug("Aborted transaction due to tool errors")
 
             # Assistant message already appended above

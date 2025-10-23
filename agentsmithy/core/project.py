@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from agentsmithy.dialogs.history import DialogHistory
+from agentsmithy.services.versioning import VersioningTracker
 from agentsmithy.utils.logger import get_logger
 
 logger = get_logger("project")
@@ -146,6 +147,7 @@ class Project:
 
         Creates the directory `.agentsmithy/dialogs/<dialog_id>/` and updates
         `.agentsmithy/dialogs/index.json` with metadata.
+        Also creates an initial checkpoint snapshot of the project state.
         """
         self.ensure_dialogs_dir()
         dialog_id = uuid.uuid4().hex  # simple unique id; can switch to ULID later
@@ -167,6 +169,35 @@ class Project:
         if set_current:
             index["current_dialog_id"] = dialog_id
         self.save_dialogs_index(index)
+
+        # Create initial checkpoint snapshot (best-effort)
+        try:
+            tracker = VersioningTracker(str(self.root), dialog_id)
+            tracker.ensure_repo()
+            initial_checkpoint = tracker.create_checkpoint(
+                f"Initial snapshot before dialog: {title or dialog_id[:8]}"
+            )
+            # Store initial checkpoint ID in metadata
+            meta["initial_checkpoint"] = initial_checkpoint.commit_id
+            # Update index with checkpoint info
+            for i, d in enumerate(dialogs_list):
+                if d.get("id") == dialog_id:
+                    dialogs_list[i] = meta
+                    break
+            index["dialogs"] = dialogs_list
+            self.save_dialogs_index(index)
+            logger.info(
+                "Created initial checkpoint for dialog",
+                dialog_id=dialog_id[:8],
+                checkpoint_id=initial_checkpoint.commit_id[:8],
+            )
+        except Exception as e:
+            logger.warning(
+                "Failed to create initial checkpoint (non-fatal)",
+                dialog_id=dialog_id[:8],
+                error=str(e),
+            )
+
         return dialog_id
 
     def list_dialogs(

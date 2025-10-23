@@ -64,6 +64,11 @@ class VersioningTracker:
         self._tmp_dir: Path | None = None
         self._preedit_snapshots: dict[Path, bytes] = {}
 
+        # Transaction support - group multiple file operations into one checkpoint
+        self._transaction_active: bool = False
+        self._transaction_files: list[str] = []
+        self._transaction_message_parts: list[str] = []
+
     # ---- repo management ----
     def ensure_repo(self) -> Repo:
         # Use a non-bare repository that can track files in project directory
@@ -146,6 +151,71 @@ class VersioningTracker:
         if self._tmp_dir and self._tmp_dir.exists():
             shutil.rmtree(self._tmp_dir, ignore_errors=True)
         self._tmp_dir = None
+
+    # ---- transactions ----
+    def begin_transaction(self) -> None:
+        """Start a transaction to group multiple file operations into one checkpoint."""
+        self._transaction_active = True
+        self._transaction_files = []
+        self._transaction_message_parts = []
+
+    def track_file_change(self, file_path: str, operation: str) -> None:
+        """Track a file change within the current transaction.
+
+        Args:
+            file_path: Path to the changed file (relative to project root)
+            operation: Type of operation (e.g., "write", "replace", "delete")
+        """
+        if self._transaction_active:
+            if file_path not in self._transaction_files:
+                self._transaction_files.append(file_path)
+            self._transaction_message_parts.append(f"{operation}: {file_path}")
+
+    def commit_transaction(self, message: str | None = None) -> CheckpointInfo | None:
+        """Commit the current transaction and create a single checkpoint.
+
+        Args:
+            message: Optional custom message. If None, auto-generates from tracked changes.
+
+        Returns:
+            CheckpointInfo if checkpoint was created, None if no changes tracked
+        """
+        if not self._transaction_active:
+            # No transaction active, fallback to regular checkpoint
+            if message:
+                return self.create_checkpoint(message)
+            return None
+
+        # Build commit message
+        if message:
+            commit_msg = message
+        elif self._transaction_message_parts:
+            commit_msg = (
+                f"Transaction: {len(self._transaction_files)} files\n"
+                + "\n".join(self._transaction_message_parts)
+            )
+        else:
+            commit_msg = "Empty transaction"
+
+        # Create checkpoint
+        checkpoint = self.create_checkpoint(commit_msg)
+
+        # Reset transaction state
+        self._transaction_active = False
+        self._transaction_files = []
+        self._transaction_message_parts = []
+
+        return checkpoint
+
+    def abort_transaction(self) -> None:
+        """Abort the current transaction without creating a checkpoint."""
+        self._transaction_active = False
+        self._transaction_files = []
+        self._transaction_message_parts = []
+
+    def is_transaction_active(self) -> bool:
+        """Check if a transaction is currently active."""
+        return self._transaction_active
 
     # ---- checkpoints ----
     def create_checkpoint(self, message: str) -> CheckpointInfo:
@@ -246,18 +316,28 @@ class VersioningTracker:
         if tree_id is None:
             return
         tree = cast(Tree, repo[tree_id])
-        # Build index of all blobs in target commit
-        for entry in tree.walk():  # type: ignore[attr-defined]
-            _, _, files = entry
-            for name, _mode, sha in files:
-                rel = Path(name.decode())
-                target = self.project_root / rel
-                target.parent.mkdir(parents=True, exist_ok=True)
+
+        # Recursively walk tree and restore files
+        def restore_tree(tree_obj: Tree, path_prefix: str = "") -> None:
+            for name, _mode, sha in tree_obj.items():
+                decoded_name = name.decode("utf-8")
+                full_path = (
+                    f"{path_prefix}/{decoded_name}" if path_prefix else decoded_name
+                )
+
                 obj = repo[sha]
-                data = getattr(obj, "data", None)
-                if data is None:
-                    continue
-                target.write_bytes(data)
+                # Check if it's a subtree (directory)
+                if isinstance(obj, Tree):
+                    restore_tree(obj, full_path)
+                else:
+                    # It's a blob (file)
+                    data = getattr(obj, "data", None)
+                    if data is not None:
+                        target = self.project_root / full_path
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        target.write_bytes(data)
+
+        restore_tree(tree)
 
     def _record_metadata(self, commit_id: str, message: str) -> None:
         meta_file = self.shadow_root / "metadata.json"
@@ -269,3 +349,65 @@ class VersioningTracker:
                 data = {}
         data[commit_id] = {"message": message}
         meta_file.write_text(json.dumps(data, indent=2))
+
+    def list_checkpoints(self) -> list[CheckpointInfo]:
+        """List all checkpoints in chronological order (oldest first).
+
+        Returns:
+            List of CheckpointInfo objects
+        """
+        try:
+            repo = self.ensure_repo()
+            checkpoints: list[CheckpointInfo] = []
+
+            # Read metadata for messages
+            meta_file = self.shadow_root / "metadata.json"
+            metadata: dict[str, dict] = {}
+            if meta_file.exists():
+                try:
+                    metadata = json.loads(meta_file.read_text())
+                except Exception:
+                    pass
+
+            # Walk commit history from HEAD backwards
+            try:
+                current_id = repo.head()
+            except Exception:
+                # No commits yet
+                return []
+
+            visited = set()
+            to_visit = [current_id]
+
+            while to_visit:
+                commit_id = to_visit.pop(0)
+                if commit_id in visited:
+                    continue
+                visited.add(commit_id)
+
+                try:
+                    commit_obj = repo[commit_id]
+                    commit_id_str = commit_id.decode("utf-8")
+
+                    # Get message from metadata or commit
+                    if commit_id_str in metadata:
+                        message = metadata[commit_id_str].get("message", "")
+                    else:
+                        message = getattr(commit_obj, "message", b"").decode("utf-8")
+
+                    checkpoints.append(
+                        CheckpointInfo(commit_id=commit_id_str, message=message)
+                    )
+
+                    # Add parents to visit
+                    parents = getattr(commit_obj, "parents", [])
+                    to_visit.extend(parents)
+                except Exception:
+                    continue
+
+            # Reverse to get chronological order (oldest first)
+            checkpoints.reverse()
+            return checkpoints
+
+        except Exception:
+            return []
