@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import fnmatch
 import hashlib
 import json
 import shutil
@@ -21,11 +22,70 @@ DEFAULT_EXCLUDES = [
     "node_modules/",
     "chroma_db/",
     ".agentsmithy/",
+    "dist/",
+    "build/",
+    "target/",
+    "*.pyc",
+    "*.pyo",
+    "*.so",
+    "*.dylib",
+    "*.dll",
 ]
 
 
 def stable_hash(text: str) -> str:
     return hashlib.sha1(text.encode("utf-8")).hexdigest()[:13]
+
+
+def _load_gitignore_patterns(gitignore_path: Path) -> list[str]:
+    """Load and parse .gitignore patterns.
+
+    Returns list of patterns suitable for fnmatch.
+    """
+    if not gitignore_path.exists():
+        return []
+
+    patterns = []
+    for line in gitignore_path.read_text().splitlines():
+        line = line.strip()
+        # Skip comments and empty lines
+        if not line or line.startswith("#"):
+            continue
+        patterns.append(line)
+
+    return patterns
+
+
+def _is_ignored(path_str: str, patterns: list[str]) -> bool:
+    """Check if a path matches any gitignore pattern.
+
+    Args:
+        path_str: Relative path as string (e.g., "src/main.py" or "dist")
+        patterns: List of gitignore patterns
+
+    Returns:
+        True if path should be ignored
+    """
+    for pattern in patterns:
+        # Directory patterns (ending with /)
+        if pattern.endswith("/"):
+            dir_pattern = pattern.rstrip("/")
+            # Match if path starts with directory or IS the directory
+            if path_str == dir_pattern or path_str.startswith(dir_pattern + "/"):
+                return True
+        # Glob patterns (with * or ?)
+        elif "*" in pattern or "?" in pattern:
+            if fnmatch.fnmatch(path_str, pattern):
+                return True
+            # Also check with leading **/
+            if fnmatch.fnmatch(path_str, f"**/{pattern}"):
+                return True
+        # Exact match
+        else:
+            if path_str == pattern or path_str.startswith(pattern + "/"):
+                return True
+
+    return False
 
 
 @dataclass
@@ -237,22 +297,65 @@ class VersioningTracker:
         # Create new tree by scanning project directory
         tree: Tree = Tree()
 
+        # Load .gitignore patterns
+        gitignore = self.project_root / ".gitignore"
+        ignore_patterns = _load_gitignore_patterns(gitignore)
+
         # Walk through project directory and add files
         for root, dirs, files in os.walk(self.project_root):
-            # Skip hidden directories and common build artifacts
-            dirs[:] = [
-                d
-                for d in dirs
-                if not d.startswith(".")
-                and d not in ["node_modules", "__pycache__", "venv", ".venv"]
-            ]
+            # Convert to relative path for ignore check
+            root_path = Path(root)
+            rel_root = (
+                root_path.relative_to(self.project_root)
+                if root_path != self.project_root
+                else Path(".")
+            )
+
+            # Filter directories using ignore patterns
+            filtered_dirs = []
+            for d in dirs:
+                dir_rel_path = (rel_root / d) if rel_root != Path(".") else Path(d)
+                dir_path_str = str(dir_rel_path).replace("\\", "/")
+
+                # Check if directory should be ignored
+                if _is_ignored(dir_path_str, ignore_patterns):
+                    continue
+
+                # Also apply hardcoded excludes
+                if d.startswith(".") or d in [
+                    "node_modules",
+                    "__pycache__",
+                    "dist",
+                    "build",
+                    "target",
+                ]:
+                    continue
+
+                filtered_dirs.append(d)
+
+            # Update dirs in-place to control recursion
+            dirs[:] = filtered_dirs
 
             for filename in files:
                 # Skip hidden files and common artifacts
-                if filename.startswith(".") or filename.endswith(".pyc"):
+                if (
+                    filename.startswith(".")
+                    or filename.endswith(".pyc")
+                    or filename.endswith(".pyo")
+                    or filename.endswith(".so")
+                    or filename.endswith(".dylib")
+                    or filename.endswith(".dll")
+                ):
                     continue
 
                 file_path = Path(root) / filename
+
+                # Check if file should be ignored
+                file_rel_path = file_path.relative_to(self.project_root)
+                file_path_str = str(file_rel_path).replace("\\", "/")
+                if _is_ignored(file_path_str, ignore_patterns):
+                    continue
+
                 try:
                     # Read file content
                     content = file_path.read_bytes()
@@ -262,8 +365,7 @@ class VersioningTracker:
                     repo.object_store.add_object(blob)
 
                     # Add to tree with relative path
-                    rel_path = file_path.relative_to(self.project_root)
-                    tree_path = str(rel_path).replace("\\", "/").encode("utf-8")
+                    tree_path = file_path_str.encode("utf-8")
                     tree.add(tree_path, 0o100644, blob.id)
 
                 except Exception:
@@ -308,6 +410,10 @@ class VersioningTracker:
         return CheckpointInfo(commit_id=commit_id, message=message)
 
     def restore_checkpoint(self, commit_id: str) -> None:
+        """Restore project files to a specific checkpoint.
+
+        Best-effort restore: skips files that cannot be written (e.g., in use).
+        """
         repo = self.ensure_repo()
         # Checkout the given tree into worktree by reading blobs and writing files
         # mypy: dulwich types use dynamic attributes; guard with isinstance checks
@@ -318,7 +424,12 @@ class VersioningTracker:
         tree = cast(Tree, repo[tree_id])
 
         # Recursively walk tree and restore files
+        restored_count = 0
+        skipped_count = 0
+
         def restore_tree(tree_obj: Tree, path_prefix: str = "") -> None:
+            nonlocal restored_count, skipped_count
+
             for name, _mode, sha in tree_obj.items():
                 decoded_name = name.decode("utf-8")
                 full_path = (
@@ -334,10 +445,31 @@ class VersioningTracker:
                     data = getattr(obj, "data", None)
                     if data is not None:
                         target = self.project_root / full_path
-                        target.parent.mkdir(parents=True, exist_ok=True)
-                        target.write_bytes(data)
+                        try:
+                            target.parent.mkdir(parents=True, exist_ok=True)
+                            target.write_bytes(data)
+                            restored_count += 1
+                        except (OSError, PermissionError) as e:
+                            # Skip files that cannot be written (in use, permission denied, etc)
+                            skipped_count += 1
+                            from agentsmithy.utils.logger import agent_logger
+
+                            agent_logger.debug(
+                                "Skipped file during restore (in use or no permission)",
+                                file=str(target),
+                                error=str(e),
+                            )
 
         restore_tree(tree)
+
+        from agentsmithy.utils.logger import agent_logger
+
+        agent_logger.info(
+            "Checkpoint restore completed",
+            commit_id=commit_id[:8],
+            restored=restored_count,
+            skipped=skipped_count,
+        )
 
     def _record_metadata(self, commit_id: str, message: str) -> None:
         meta_file = self.shadow_root / "metadata.json"

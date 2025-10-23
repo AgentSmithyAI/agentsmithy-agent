@@ -303,11 +303,46 @@ CREATE TABLE dialog_file_edits (
 3. **DON'T create checkpoints in `run_command`**
    - Commands can do anything, not all changes need tracking
 
+## File Filtering and .gitignore Support
+
+### Automatic Exclusions
+
+Checkpoints automatically respect your project's `.gitignore` file. If a `.gitignore` exists, all patterns in it are honored when creating checkpoints.
+
+**Example `.gitignore`:**
+```gitignore
+node_modules/
+dist/
+build/
+*.log
+.env
+```
+
+All files matching these patterns will be excluded from checkpoints.
+
+### Hardcoded Exclusions
+
+In addition to `.gitignore`, the following are always excluded:
+
+- **Hidden files and directories:** anything starting with `.`
+- **Build artifacts:** `dist/`, `build/`, `target/`
+- **Dependencies:** `node_modules/`, `venv/`, `.venv/`, `__pycache__/`
+- **Binary files:** `*.pyc`, `*.pyo`, `*.so`, `*.dylib`, `*.dll`
+- **AgentSmithy state:** `.agentsmithy/`
+
+### Benefits
+
+- **Smaller checkpoints:** Excludes unnecessary files (dependencies, build artifacts)
+- **Faster operations:** Less files to scan and track
+- **No conflicts:** Avoids tracking files that shouldn't be in version control
+- **Respect project conventions:** Uses your existing `.gitignore` rules
+
 ## Limitations
 
-1. **Visible files only**
-   - Hidden files (`.gitignore`, `.env`) are excluded
-   - Directories from `.gitignore` are excluded
+1. **Git-like behavior**
+   - Follows `.gitignore` patterns using standard gitignore matching rules
+   - Directory patterns (`dir/`) match the directory and all contents
+   - Glob patterns (`*.log`) work as expected
 
 2. **Repository size**
    - Each checkpoint = full project snapshot
@@ -317,6 +352,11 @@ CREATE TABLE dialog_file_edits (
 3. **Dialog isolation**
    - Each dialog has its own Git repository
    - Checkpoints from one dialog are not visible in another
+
+4. **Best-effort restore**
+   - Files that cannot be written during restore (e.g., in use by running process) are skipped
+   - Restore logs which files were skipped
+   - Most files will be restored successfully
 
 ## Debugging
 

@@ -219,3 +219,51 @@ def test_transaction_with_custom_message(temp_project):
 
     assert checkpoint is not None
     assert checkpoint.message == "Custom message for this transaction"
+
+
+def test_gitignore_respected_in_checkpoint(temp_project):
+    """Test that .gitignore patterns are respected when creating checkpoints."""
+    dialog_id = "test-dialog-gitignore"
+
+    # Create .gitignore
+    gitignore = temp_project.root / ".gitignore"
+    gitignore.write_text("ignored_dir/\n*.log\ndist/\n")
+
+    # Create various files
+    (temp_project.root / "tracked.txt").write_text("This should be tracked")
+    (temp_project.root / "test.log").write_text("This should be ignored")
+
+    ignored_dir = temp_project.root / "ignored_dir"
+    ignored_dir.mkdir()
+    (ignored_dir / "secret.txt").write_text("This should be ignored")
+
+    dist_dir = temp_project.root / "dist"
+    dist_dir.mkdir()
+    (dist_dir / "binary").write_text("This should be ignored")
+
+    # Create checkpoint
+    tracker = VersioningTracker(str(temp_project.root), dialog_id)
+    tracker.ensure_repo()
+    checkpoint = tracker.create_checkpoint("Test checkpoint")
+
+    # Verify checkpoint was created
+    assert checkpoint is not None
+
+    # Verify .gitignore patterns were applied by checking tree
+    repo = tracker.ensure_repo()
+    commit_obj = repo[checkpoint.commit_id.encode()]
+    tree = repo[commit_obj.tree]
+
+    # Check which files are in the tree
+    tracked_files = []
+    for entry in tree.items():
+        name = entry[0].decode("utf-8")
+        tracked_files.append(name)
+
+    # Should include tracked.txt
+    assert "tracked.txt" in tracked_files
+
+    # Should NOT include ignored files
+    assert "test.log" not in tracked_files
+    assert not any("ignored_dir" in f for f in tracked_files)
+    assert not any("dist/" in f for f in tracked_files)

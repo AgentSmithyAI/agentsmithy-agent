@@ -122,13 +122,21 @@ async def restore_checkpoint(
                 detail=f"Checkpoint {request.checkpoint_id} not found in dialog {dialog_id}",
             )
 
-        # Restore to checkpoint
-        tracker.restore_checkpoint(request.checkpoint_id)
-        logger.info(
-            "Restored to checkpoint",
-            dialog_id=dialog_id,
-            checkpoint_id=request.checkpoint_id[:8],
-        )
+        # Restore to checkpoint (best-effort, skips locked files)
+        try:
+            tracker.restore_checkpoint(request.checkpoint_id)
+            logger.info(
+                "Restored to checkpoint",
+                dialog_id=dialog_id,
+                checkpoint_id=request.checkpoint_id[:8],
+            )
+        except Exception as restore_err:
+            # Log but don't fail - restore is best-effort
+            logger.warning(
+                "Restore completed with errors (some files may be skipped)",
+                dialog_id=dialog_id,
+                error=str(restore_err),
+            )
 
         # Create new checkpoint after restore (makes restore reversible)
         new_checkpoint = tracker.create_checkpoint(
@@ -180,14 +188,22 @@ async def reset_dialog(
                 detail=f"Initial checkpoint not found for dialog {dialog_id}",
             )
 
-        # Restore to initial checkpoint
+        # Restore to initial checkpoint (best-effort, skips locked files)
         tracker = VersioningTracker(str(project.root), dialog_id)
-        tracker.restore_checkpoint(initial_checkpoint_id)
-        logger.info(
-            "Reset dialog to initial checkpoint",
-            dialog_id=dialog_id,
-            checkpoint_id=initial_checkpoint_id[:8],
-        )
+        try:
+            tracker.restore_checkpoint(initial_checkpoint_id)
+            logger.info(
+                "Reset dialog to initial checkpoint",
+                dialog_id=dialog_id,
+                checkpoint_id=initial_checkpoint_id[:8],
+            )
+        except Exception as restore_err:
+            # Log but don't fail - restore is best-effort
+            logger.warning(
+                "Reset completed with errors (some files may be skipped)",
+                dialog_id=dialog_id,
+                error=str(restore_err),
+            )
 
         # Create new checkpoint after reset
         new_checkpoint = tracker.create_checkpoint(
