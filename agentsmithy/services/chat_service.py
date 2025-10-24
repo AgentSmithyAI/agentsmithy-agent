@@ -327,7 +327,7 @@ class ChatService:
 
         return sse_events
 
-    def _append_user_and_prepare_context(
+    async def _append_user_and_prepare_context(
         self,
         query: str,
         context: dict[str, Any] | None,
@@ -363,6 +363,26 @@ class ChatService:
         except Exception as e:
             api_logger.error(
                 "Failed to append user message", exc_info=True, error=str(e)
+            )
+
+        # Sync RAG with actual file state before processing (catch-all for any changes)
+        try:
+            vector_store = project.get_vector_store()
+            sync_stats = await vector_store.sync_files_if_needed()
+            if sync_stats["reindexed"] > 0 or sync_stats["removed"] > 0:
+                api_logger.info(
+                    "Synced RAG before processing user message",
+                    dialog_id=dialog_id,
+                    checked=sync_stats["checked"],
+                    reindexed=sync_stats["reindexed"],
+                    removed=sync_stats["removed"],
+                )
+        except Exception as e:
+            # Don't fail if RAG sync fails
+            api_logger.warning(
+                "Failed to sync RAG before processing",
+                dialog_id=dialog_id,
+                error=str(e),
             )
 
         # Load history; use persisted summary when present
@@ -441,8 +461,10 @@ class ChatService:
             user_checkpoint_id = None
             if project_dialog:
                 project_obj, pdialog_id = project_dialog
-                context, user_checkpoint_id = self._append_user_and_prepare_context(
-                    query, context, dialog_id or pdialog_id, project_obj
+                context, user_checkpoint_id = (
+                    await self._append_user_and_prepare_context(
+                        query, context, dialog_id or pdialog_id, project_obj
+                    )
                 )
 
                 # Emit user message event with checkpoint
@@ -649,7 +671,7 @@ class ChatService:
     ) -> dict[str, Any]:
         orchestrator = self._get_orchestrator()
         # Centralize history: append user and inject dialog messages into context
-        context, user_checkpoint_id = self._append_user_and_prepare_context(
+        context, user_checkpoint_id = await self._append_user_and_prepare_context(
             query, context, dialog_id, project
         )
         result = await orchestrator.process_request(

@@ -140,26 +140,26 @@ async def restore_checkpoint(
                 error=str(restore_err),
             )
 
-        # Sync RAG with actual file state (check hashes and reindex if needed)
-        try:
-            vector_store = project.get_vector_store()
-            sync_stats = await vector_store.sync_files_if_needed()
+        # Reindex restored files in RAG (only those that were previously indexed)
+        if restored_files:
+            try:
+                vector_store = project.get_vector_store()
+                reindexed_count = await vector_store.reindex_files(restored_files)
 
-            if sync_stats["reindexed"] > 0 or sync_stats["removed"] > 0:
-                logger.info(
-                    "Synced RAG after restore",
+                if reindexed_count > 0:
+                    logger.info(
+                        "Reindexed restored files in RAG",
+                        dialog_id=dialog_id,
+                        reindexed=reindexed_count,
+                        total_restored=len(restored_files),
+                    )
+            except Exception as rag_err:
+                # Don't fail restore if RAG reindexing fails
+                logger.warning(
+                    "Failed to reindex files in RAG after restore",
                     dialog_id=dialog_id,
-                    checked=sync_stats["checked"],
-                    reindexed=sync_stats["reindexed"],
-                    removed=sync_stats["removed"],
+                    error=str(rag_err),
                 )
-        except Exception as rag_err:
-            # Don't fail restore if RAG sync fails
-            logger.warning(
-                "Failed to sync RAG after restore",
-                dialog_id=dialog_id,
-                error=str(rag_err),
-            )
 
         # Create new checkpoint after restore (makes restore reversible)
         new_checkpoint = tracker.create_checkpoint(
@@ -230,26 +230,26 @@ async def reset_dialog(
                 error=str(restore_err),
             )
 
-        # Sync RAG with actual file state (check hashes and reindex if needed)
-        try:
-            vector_store = project.get_vector_store()
-            sync_stats = await vector_store.sync_files_if_needed()
+        # Reindex restored files in RAG (only those that were previously indexed)
+        if restored_files:
+            try:
+                vector_store = project.get_vector_store()
+                reindexed_count = await vector_store.reindex_files(restored_files)
 
-            if sync_stats["reindexed"] > 0 or sync_stats["removed"] > 0:
-                logger.info(
-                    "Synced RAG after reset",
+                if reindexed_count > 0:
+                    logger.info(
+                        "Reindexed restored files in RAG after reset",
+                        dialog_id=dialog_id,
+                        reindexed=reindexed_count,
+                        total_restored=len(restored_files),
+                    )
+            except Exception as rag_err:
+                # Don't fail reset if RAG reindexing fails
+                logger.warning(
+                    "Failed to reindex files in RAG after reset",
                     dialog_id=dialog_id,
-                    checked=sync_stats["checked"],
-                    reindexed=sync_stats["reindexed"],
-                    removed=sync_stats["removed"],
+                    error=str(rag_err),
                 )
-        except Exception as rag_err:
-            # Don't fail reset if RAG sync fails
-            logger.warning(
-                "Failed to sync RAG after reset",
-                dialog_id=dialog_id,
-                error=str(rag_err),
-            )
 
         # Create new checkpoint after reset
         new_checkpoint = tracker.create_checkpoint(

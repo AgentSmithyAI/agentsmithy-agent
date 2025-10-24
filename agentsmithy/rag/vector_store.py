@@ -212,6 +212,23 @@ class VectorStoreManager:
             self.delete_by_source(str(file_path))
             return []
 
+    async def reindex_files(self, file_paths: list[str]) -> int:
+        """Reindex multiple files if they were previously indexed.
+
+        Args:
+            file_paths: List of file paths to check and reindex
+
+        Returns:
+            Number of files that were reindexed
+        """
+        reindexed_count = 0
+        for file_path in file_paths:
+            # Only reindex if file was previously indexed
+            if await self.has_file(file_path):
+                await self.reindex_file(file_path)
+                reindexed_count += 1
+        return reindexed_count
+
     def get_indexed_files(self) -> dict[str, str]:
         """Get all indexed files with their hashes.
 

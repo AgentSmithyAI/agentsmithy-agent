@@ -363,27 +363,52 @@ This allows the AI to retrieve relevant file context through semantic similarity
 
 ### Restore and RAG Consistency
 
-When you restore to a checkpoint:
+**Two-tier synchronization approach:**
 
-1. **Files are reverted** to their checkpoint state on disk
-2. **RAG sync is performed** - all indexed files are checked:
-   - File hash is calculated and compared with stored hash in RAG
-   - Files with mismatched hashes are automatically reindexed
-   - Files that no longer exist are removed from RAG
-3. **Model gets accurate context** - similarity search returns up-to-date file content
+#### 1. Immediate reindexing (when we know exactly what changed)
 
-**Hash-based verification:** Each file in RAG stores an MD5 hash of its content in metadata. This allows detecting any discrepancies between indexed content and actual file state, even if files were changed outside of the AI's tools (e.g., via `run_command` or manual edits).
+When files are modified through known operations:
+- **Restore checkpoint** → reindex specific restored files
+- **write_to_file** → index the written file
+- **replace_in_file** → reindex the edited file
+- **delete_file** → remove from RAG
 
-**Example:**
+This provides fast updates for known file changes.
+
+#### 2. Full sync before processing (catch-all)
+
+Before processing each user message, all indexed files are verified:
+- File hash is calculated and compared with stored hash in RAG
+- Files with mismatched hashes are automatically reindexed
+- Files that no longer exist are removed from RAG
+
+This catches changes made outside of tools:
+- Files modified via `run_command`
+- Manual edits by the user
+- Any other external modifications
+
+**Hash-based verification:** Each file in RAG stores an MD5 hash of its content in metadata. This allows detecting any discrepancies between indexed content and actual file state.
+
+**Example workflow:**
 ```
-1. User: "Read main.py" → File indexed in RAG
-2. User: "Modify main.py" → AI uses replace_in_file → RAG updated with new content
+1. User: "Read main.py" 
+   → File indexed in RAG with hash
+   
+2. User: "Modify main.py" 
+   → AI uses replace_in_file → File reindexed in RAG with new hash
+   
 3. User: Restore to earlier checkpoint
-4. System: Reverts main.py AND reindexes it in RAG with old content
-5. Next query: AI retrieves correct (restored) version from RAG
+   → main.py reverted on disk → Reindexed in RAG
+   
+4. User manually edits config.py (outside tools)
+   
+5. User: "Add logging"
+   → Before processing: Full sync detects config.py hash mismatch
+   → config.py reindexed
+   → AI proceeds with accurate context from RAG
 ```
 
-This prevents the AI from receiving outdated file content through RAG similarity search after a restore.
+This two-tier approach ensures the AI always has accurate file context, regardless of how files were modified.
 
 ## Limitations
 

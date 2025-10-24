@@ -264,6 +264,43 @@ async def test_index_file_handles_nonexistent(temp_project):
 
 
 @pytest.mark.asyncio
+async def test_reindex_files_batch(temp_project, mock_embeddings):
+    """Test batch reindexing of multiple files."""
+    vector_store = VectorStoreManager(temp_project)
+
+    # Create and index three files
+    file1 = temp_project.root / "file1.py"
+    file2 = temp_project.root / "file2.py"
+    file3 = temp_project.root / "file3.py"
+
+    file1.write_text("content1")
+    file2.write_text("content2")
+    file3.write_text("content3")
+
+    # Only index two of them
+    await vector_store.index_file("file1.py", file1.read_text())
+    await vector_store.index_file("file2.py", file2.read_text())
+
+    # Modify all three
+    file1.write_text("modified1")
+    file2.write_text("modified2")
+    file3.write_text("modified3")
+
+    # Batch reindex (should only reindex indexed files)
+    reindexed_count = await vector_store.reindex_files(
+        ["file1.py", "file2.py", "file3.py"]
+    )
+
+    # Should have reindexed only 2 (file3 was not indexed)
+    assert reindexed_count == 2
+
+    # Verify reindexed files have new content
+    assert await vector_store.has_file("file1.py")
+    assert await vector_store.has_file("file2.py")
+    assert not await vector_store.has_file("file3.py")
+
+
+@pytest.mark.asyncio
 async def test_multiple_files_selective_reindex(temp_project, mock_embeddings):
     """Test that only indexed files are reindexed on restore."""
     dialog_id = "test-dialog-selective"
