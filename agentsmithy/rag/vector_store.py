@@ -76,6 +76,10 @@ class VectorStoreManager:
 
         chunks = text_splitter.split_documents(documents)
 
+        # If no chunks (e.g., empty documents), return empty list
+        if not chunks:
+            return []
+
         # Add chunks to vector store
         ids = self.vectorstore.add_documents(chunks)
 
