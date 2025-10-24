@@ -149,7 +149,7 @@ async def get_session_status(
         db_path = project.get_dialog_dir(dialog_id) / "journal.sqlite"
         active_session = get_active_session(db_path) or "session_1"
 
-        # Check if there are unapproved changes
+        # Check if there are unapproved changes (compare file trees, not just commits)
         tracker = VersioningTracker(str(project.root), dialog_id)
         repo = tracker.ensure_repo()
 
@@ -159,7 +159,16 @@ async def get_session_status(
             if session_ref in repo.refs:
                 main_head = repo.refs[tracker.MAIN_BRANCH]
                 session_head = repo.refs[session_ref]
-                has_unapproved = main_head != session_head
+
+                # Compare trees (file contents), not commit SHAs
+                if main_head != session_head:
+                    main_commit = repo[main_head]
+                    session_commit = repo[session_head]
+                    main_tree = getattr(main_commit, "tree", None)
+                    session_tree = getattr(session_commit, "tree", None)
+
+                    # If trees are different, there are real file changes
+                    has_unapproved = main_tree != session_tree
 
         # Get last approved timestamp from dialog metadata
         last_approved_at = None
