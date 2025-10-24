@@ -109,6 +109,7 @@ class UserEvent(BaseEvent):
     type: Literal[EventType.USER] = EventType.USER
     content: str = ""
     checkpoint: str | None = None
+    session: str | None = None
 
 
 @dataclass
@@ -171,9 +172,14 @@ class EventFactory:
 
     @staticmethod
     def user(
-        content: str, checkpoint: str | None = None, dialog_id: str | None = None
+        content: str,
+        checkpoint: str | None = None,
+        session: str | None = None,
+        dialog_id: str | None = None,
     ) -> UserEvent:
-        return UserEvent(content=content, checkpoint=checkpoint, dialog_id=dialog_id)
+        return UserEvent(
+            content=content, checkpoint=checkpoint, session=session, dialog_id=dialog_id
+        )
 
     @staticmethod
     def tool_call(

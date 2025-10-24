@@ -108,6 +108,7 @@ class HistoryEvent(BaseModel):
     file: str | None = None
     diff: str | None = None
     checkpoint: str | None = None
+    session: str | None = None
 
 
 class DialogHistoryResponse(BaseModel):

@@ -97,14 +97,16 @@ Sent when the user submits a message. A checkpoint is automatically created BEFO
   "type": "user",
   "content": "Create a TODO app with 3 files",
   "checkpoint": "a1b2c3d4e5f6789abc",
+  "session": "session_1",
   "dialog_id": "01J..."
 }
 ```
 
 **Purpose:** 
 - Checkpoint represents the state BEFORE AI makes any changes
+- Session indicates which work session this checkpoint belongs to
 - Allows rolling back the entire AI response by restoring to this checkpoint
-- Checkpoint ID is also stored in history for the user message
+- Checkpoint and session IDs are also stored in history for the user message
 
 ### file_edit Event
 
