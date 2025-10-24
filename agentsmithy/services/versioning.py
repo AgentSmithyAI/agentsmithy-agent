@@ -409,10 +409,13 @@ class VersioningTracker:
         self._record_metadata(commit_id, message)
         return CheckpointInfo(commit_id=commit_id, message=message)
 
-    def restore_checkpoint(self, commit_id: str) -> None:
+    def restore_checkpoint(self, commit_id: str) -> list[str]:
         """Restore project files to a specific checkpoint.
 
         Best-effort restore: skips files that cannot be written (e.g., in use).
+
+        Returns:
+            List of file paths that were restored (relative to project root)
         """
         repo = self.ensure_repo()
         # Checkout the given tree into worktree by reading blobs and writing files
@@ -420,12 +423,13 @@ class VersioningTracker:
         commit_obj = repo[commit_id.encode()]
         tree_id = getattr(commit_obj, "tree", None)
         if tree_id is None:
-            return
+            return []
         tree = cast(Tree, repo[tree_id])
 
         # Recursively walk tree and restore files
         restored_count = 0
         skipped_count = 0
+        restored_files: list[str] = []
 
         def restore_tree(tree_obj: Tree, path_prefix: str = "") -> None:
             nonlocal restored_count, skipped_count
@@ -449,6 +453,7 @@ class VersioningTracker:
                             target.parent.mkdir(parents=True, exist_ok=True)
                             target.write_bytes(data)
                             restored_count += 1
+                            restored_files.append(full_path)
                         except (OSError, PermissionError) as e:
                             # Skip files that cannot be written (in use, permission denied, etc)
                             skipped_count += 1
@@ -470,6 +475,8 @@ class VersioningTracker:
             restored=restored_count,
             skipped=skipped_count,
         )
+
+        return restored_files
 
     def _record_metadata(self, commit_id: str, message: str) -> None:
         meta_file = self.shadow_root / "metadata.json"

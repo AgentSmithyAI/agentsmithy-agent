@@ -110,3 +110,177 @@ class VectorStoreManager:
         """Persist the vector store to disk."""
         if self._vectorstore and self.persist_directory:
             self._vectorstore.persist()
+
+    async def index_file(
+        self, file_path: str, content: str | None = None, chunk_size: int = 1000
+    ) -> list[str]:
+        """Index a single file in the vector store.
+
+        Args:
+            file_path: Relative or absolute path to the file
+            content: File content (if None, will read from disk)
+            chunk_size: Size of chunks for splitting
+
+        Returns:
+            List of chunk IDs added to the store
+        """
+        import hashlib
+        from datetime import UTC, datetime
+
+        # Delete existing chunks for this file
+        self.delete_by_source(file_path)
+
+        # Read content if not provided
+        if content is None:
+            try:
+                abs_path = (
+                    Path(file_path)
+                    if Path(file_path).is_absolute()
+                    else self.project.root / file_path
+                )
+                content = abs_path.read_text(encoding="utf-8")
+            except Exception:
+                # File doesn't exist or can't be read
+                return []
+
+        # Calculate content hash for consistency checking
+        content_hash = hashlib.md5(content.encode("utf-8")).hexdigest()
+
+        # Create document with metadata including hash
+        doc = Document(
+            page_content=content,
+            metadata={
+                "source": str(file_path),
+                "hash": content_hash,
+                "indexed_at": datetime.now(UTC).isoformat(),
+            },
+        )
+
+        # Split and add
+        ids = await self.add_documents([doc], chunk_size=chunk_size)
+        return ids
+
+    async def has_file(self, file_path: str) -> bool:
+        """Check if a file is indexed in the vector store.
+
+        Args:
+            file_path: Path to check
+
+        Returns:
+            True if file has indexed chunks
+        """
+        try:
+            # Try to find any documents with this source
+            results = self.vectorstore.get(where={"source": str(file_path)})
+            return len(results.get("ids", [])) > 0
+        except Exception:
+            return False
+
+    def delete_by_source(self, file_path: str) -> None:
+        """Delete all chunks for a specific file.
+
+        Args:
+            file_path: Path of the file to remove from index
+        """
+        try:
+            # Chroma supports delete with filter
+            self.vectorstore.delete(where={"source": str(file_path)})
+        except Exception:
+            # If delete fails (e.g., file not indexed), ignore
+            pass
+
+    async def reindex_file(self, file_path: str) -> list[str]:
+        """Reindex a file after it has been modified.
+
+        Args:
+            file_path: Path to the file
+
+        Returns:
+            List of chunk IDs, or empty list if file doesn't exist
+        """
+        abs_path = (
+            Path(file_path)
+            if Path(file_path).is_absolute()
+            else self.project.root / file_path
+        )
+
+        if abs_path.exists():
+            # File exists - reindex it
+            return await self.index_file(str(file_path))
+        else:
+            # File was deleted - remove from index
+            self.delete_by_source(str(file_path))
+            return []
+
+    def get_indexed_files(self) -> dict[str, str]:
+        """Get all indexed files with their hashes.
+
+        Returns:
+            Dictionary mapping file paths to their stored hashes
+        """
+        try:
+            # Get all documents from vector store
+            results = self.vectorstore.get()
+
+            # Extract unique files with their hashes
+            files_dict = {}
+            if results and "metadatas" in results:
+                for metadata in results["metadatas"]:
+                    if metadata and "source" in metadata:
+                        source = metadata["source"]
+                        file_hash = metadata.get("hash", "")
+                        # Only store if we haven't seen this file yet
+                        # (multiple chunks from same file will have same hash)
+                        if source not in files_dict:
+                            files_dict[source] = file_hash
+
+            return files_dict
+        except Exception:
+            return {}
+
+    async def sync_files_if_needed(self) -> dict[str, int]:
+        """Check all indexed files and reindex if hash mismatch.
+
+        Returns:
+            Dictionary with sync results:
+            - "checked": number of files checked
+            - "reindexed": number of files reindexed
+            - "removed": number of files removed (deleted from disk)
+        """
+        import hashlib
+
+        indexed_files = self.get_indexed_files()
+        stats = {"checked": 0, "reindexed": 0, "removed": 0}
+
+        for file_path, stored_hash in indexed_files.items():
+            stats["checked"] += 1
+
+            # Resolve file path
+            abs_path = (
+                Path(file_path)
+                if Path(file_path).is_absolute()
+                else self.project.root / file_path
+            )
+
+            # Check if file exists
+            if not abs_path.exists():
+                # File was deleted - remove from index
+                self.delete_by_source(file_path)
+                stats["removed"] += 1
+                continue
+
+            # Read current content and calculate hash
+            try:
+                current_content = abs_path.read_text(encoding="utf-8")
+                current_hash = hashlib.md5(current_content.encode("utf-8")).hexdigest()
+
+                # Compare hashes
+                if current_hash != stored_hash:
+                    # Hash mismatch - reindex
+                    await self.index_file(file_path, current_content)
+                    stats["reindexed"] += 1
+            except Exception:
+                # Can't read file - skip
+                continue
+
+        return stats

@@ -74,6 +74,24 @@ class DeleteFileTool(BaseTool):
         else:
             tracker.finalize_edit()
 
+        # Remove file from RAG (optional, best-effort)
+        try:
+            if hasattr(self, "_project") and self._project:
+                # Get relative path for RAG
+                try:
+                    rel_path = file_path.relative_to(self._project.root)
+                    index_path = str(rel_path)
+                except ValueError:
+                    # File is outside project root, use absolute path
+                    index_path = str(file_path)
+
+                # Remove from vector store
+                vector_store = self._project.get_vector_store()
+                vector_store.delete_by_source(index_path)
+        except Exception:
+            # Silently ignore RAG deletion errors
+            pass
+
         if self._sse_callback is not None:
             await self.emit_event(
                 {

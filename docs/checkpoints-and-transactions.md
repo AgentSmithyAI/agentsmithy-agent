@@ -154,7 +154,10 @@ Content-Type: application/json
 }
 ```
 
-**Important:** After restoration, a new checkpoint is created, so the restore itself can be undone!
+**Important:** 
+- After restoration, a new checkpoint is created, so the restore itself can be undone!
+- Files that were indexed in the RAG vector store will be automatically reindexed with their restored contents
+- This ensures the AI model gets accurate file context from RAG similarity search
 
 ### Reset Dialog to Initial State
 
@@ -337,6 +340,51 @@ In addition to `.gitignore`, the following are always excluded:
 - **No conflicts:** Avoids tracking files that shouldn't be in version control
 - **Respect project conventions:** Uses your existing `.gitignore` rules
 
+## RAG Integration
+
+### Automatic File Indexing
+
+When the AI works with files, they are automatically indexed in the project's RAG vector store:
+
+**Indexed on:**
+- `read_file` - when reading a file
+- `write_to_file` - when creating or overwriting a file
+- `replace_in_file` - when editing a file
+
+**Removed from index on:**
+- `delete_file` - when deleting a file
+
+**How it works:**
+- File content is split into chunks (default 1000 chars)
+- Chunks are embedded using OpenAI embeddings
+- Stored in ChromaDB under `.agentsmithy/rag/chroma_db/`
+
+This allows the AI to retrieve relevant file context through semantic similarity search.
+
+### Restore and RAG Consistency
+
+When you restore to a checkpoint:
+
+1. **Files are reverted** to their checkpoint state on disk
+2. **RAG sync is performed** - all indexed files are checked:
+   - File hash is calculated and compared with stored hash in RAG
+   - Files with mismatched hashes are automatically reindexed
+   - Files that no longer exist are removed from RAG
+3. **Model gets accurate context** - similarity search returns up-to-date file content
+
+**Hash-based verification:** Each file in RAG stores an MD5 hash of its content in metadata. This allows detecting any discrepancies between indexed content and actual file state, even if files were changed outside of the AI's tools (e.g., via `run_command` or manual edits).
+
+**Example:**
+```
+1. User: "Read main.py" → File indexed in RAG
+2. User: "Modify main.py" → AI uses replace_in_file → RAG updated with new content
+3. User: Restore to earlier checkpoint
+4. System: Reverts main.py AND reindexes it in RAG with old content
+5. Next query: AI retrieves correct (restored) version from RAG
+```
+
+This prevents the AI from receiving outdated file content through RAG similarity search after a restore.
+
 ## Limitations
 
 1. **Git-like behavior**
@@ -357,6 +405,11 @@ In addition to `.gitignore`, the following are always excluded:
    - Files that cannot be written during restore (e.g., in use by running process) are skipped
    - Restore logs which files were skipped
    - Most files will be restored successfully
+
+5. **RAG indexing scope**
+   - Only files explicitly read by the AI are indexed
+   - RAG is not a complete project index
+   - Reindexing on restore only updates files that were previously indexed
 
 ## Debugging
 

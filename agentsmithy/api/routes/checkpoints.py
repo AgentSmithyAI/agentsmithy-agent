@@ -123,12 +123,14 @@ async def restore_checkpoint(
             )
 
         # Restore to checkpoint (best-effort, skips locked files)
+        restored_files = []
         try:
-            tracker.restore_checkpoint(request.checkpoint_id)
+            restored_files = tracker.restore_checkpoint(request.checkpoint_id)
             logger.info(
                 "Restored to checkpoint",
                 dialog_id=dialog_id,
                 checkpoint_id=request.checkpoint_id[:8],
+                files_restored=len(restored_files),
             )
         except Exception as restore_err:
             # Log but don't fail - restore is best-effort
@@ -136,6 +138,27 @@ async def restore_checkpoint(
                 "Restore completed with errors (some files may be skipped)",
                 dialog_id=dialog_id,
                 error=str(restore_err),
+            )
+
+        # Sync RAG with actual file state (check hashes and reindex if needed)
+        try:
+            vector_store = project.get_vector_store()
+            sync_stats = await vector_store.sync_files_if_needed()
+
+            if sync_stats["reindexed"] > 0 or sync_stats["removed"] > 0:
+                logger.info(
+                    "Synced RAG after restore",
+                    dialog_id=dialog_id,
+                    checked=sync_stats["checked"],
+                    reindexed=sync_stats["reindexed"],
+                    removed=sync_stats["removed"],
+                )
+        except Exception as rag_err:
+            # Don't fail restore if RAG sync fails
+            logger.warning(
+                "Failed to sync RAG after restore",
+                dialog_id=dialog_id,
+                error=str(rag_err),
             )
 
         # Create new checkpoint after restore (makes restore reversible)
@@ -190,12 +213,14 @@ async def reset_dialog(
 
         # Restore to initial checkpoint (best-effort, skips locked files)
         tracker = VersioningTracker(str(project.root), dialog_id)
+        restored_files = []
         try:
-            tracker.restore_checkpoint(initial_checkpoint_id)
+            restored_files = tracker.restore_checkpoint(initial_checkpoint_id)
             logger.info(
                 "Reset dialog to initial checkpoint",
                 dialog_id=dialog_id,
                 checkpoint_id=initial_checkpoint_id[:8],
+                files_restored=len(restored_files),
             )
         except Exception as restore_err:
             # Log but don't fail - restore is best-effort
@@ -203,6 +228,27 @@ async def reset_dialog(
                 "Reset completed with errors (some files may be skipped)",
                 dialog_id=dialog_id,
                 error=str(restore_err),
+            )
+
+        # Sync RAG with actual file state (check hashes and reindex if needed)
+        try:
+            vector_store = project.get_vector_store()
+            sync_stats = await vector_store.sync_files_if_needed()
+
+            if sync_stats["reindexed"] > 0 or sync_stats["removed"] > 0:
+                logger.info(
+                    "Synced RAG after reset",
+                    dialog_id=dialog_id,
+                    checked=sync_stats["checked"],
+                    reindexed=sync_stats["reindexed"],
+                    removed=sync_stats["removed"],
+                )
+        except Exception as rag_err:
+            # Don't fail reset if RAG sync fails
+            logger.warning(
+                "Failed to sync RAG after reset",
+                dialog_id=dialog_id,
+                error=str(rag_err),
             )
 
         # Create new checkpoint after reset

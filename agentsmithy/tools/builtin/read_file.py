@@ -73,6 +73,28 @@ class ReadFileTool(BaseTool):
                 )
 
             content = file_path.read_text(encoding="utf-8")
+
+            # Index file in RAG (optional, best-effort)
+            try:
+                if hasattr(self, "_project") and self._project:
+                    # Get relative path for RAG indexing
+                    try:
+                        rel_path = file_path.relative_to(self._project.root)
+                        index_path = str(rel_path)
+                    except ValueError:
+                        # File is outside project root, use absolute path
+                        index_path = str(file_path)
+
+                    # Index in vector store (async, non-blocking)
+                    import asyncio
+
+                    vector_store = self._project.get_vector_store()
+                    # Run in background, don't wait
+                    asyncio.create_task(vector_store.index_file(index_path, content))
+            except Exception:
+                # Silently ignore RAG indexing errors
+                pass
+
             return ReadFileSuccess(
                 path=str(file_path),
                 content=content,
