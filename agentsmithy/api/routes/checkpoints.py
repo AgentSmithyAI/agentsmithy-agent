@@ -8,7 +8,7 @@ Provides endpoints to:
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from agentsmithy.api.deps import get_project
@@ -24,7 +24,7 @@ router = APIRouter(prefix="/api/dialogs", tags=["checkpoints"])
 class CheckpointResponse(BaseModel):
     """Single checkpoint metadata."""
 
-    commit_id: str = Field(..., description="Git commit ID")
+    commit_id: str = Field(..., description="Checkpoint ID")
     message: str = Field(..., description="Checkpoint message")
 
 
@@ -41,7 +41,7 @@ class CheckpointsListResponse(BaseModel):
 class RestoreRequest(BaseModel):
     """Request to restore to a specific checkpoint."""
 
-    checkpoint_id: str = Field(..., description="Checkpoint commit ID to restore to")
+    checkpoint_id: str = Field(..., description="Checkpoint ID to restore to")
 
 
 class RestoreResponse(BaseModel):
@@ -51,6 +51,42 @@ class RestoreResponse(BaseModel):
     new_checkpoint: str = Field(
         ..., description="New checkpoint ID created after restore"
     )
+
+
+class ApproveRequest(BaseModel):
+    """Request to approve current session."""
+
+    message: str | None = Field(None, description="Optional approval message")
+
+
+class ApproveResponse(BaseModel):
+    """Response after approving a session."""
+
+    approved_commit: str = Field(..., description="Approved checkpoint ID")
+    new_session: str = Field(..., description="New active session name")
+    commits_approved: int = Field(..., description="Number of checkpoints approved")
+
+
+class ResetResponse(BaseModel):
+    """Response after resetting to approved state."""
+
+    reset_to: str = Field(..., description="Checkpoint ID of approved state")
+    new_session: str = Field(..., description="New active session name")
+
+
+class SessionStatusResponse(BaseModel):
+    """Response with current session status."""
+
+    active_session: str | None = Field(
+        None, description="Name of active session (null if no unapproved changes)"
+    )
+    session_ref: str | None = Field(
+        None, description="Reference of active session (null if no unapproved changes)"
+    )
+    has_unapproved: bool = Field(
+        ..., description="Whether there are unapproved changes"
+    )
+    last_approved_at: str | None = Field(None, description="Timestamp of last approval")
 
 
 @router.get("/{dialog_id}/checkpoints", response_model=CheckpointsListResponse)
@@ -88,6 +124,71 @@ async def list_checkpoints(
         )
     except Exception as e:
         logger.error("Failed to list checkpoints", dialog_id=dialog_id, error=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.get("/{dialog_id}/session", response_model=SessionStatusResponse)
+async def get_session_status(
+    dialog_id: str,
+    project: Project = Depends(get_project),  # noqa: B008
+) -> SessionStatusResponse:
+    """Get current session status for a dialog.
+
+    Returns information about the active session and approval state.
+
+    Args:
+        dialog_id: Dialog ID
+
+    Returns:
+        SessionStatusResponse with active session info
+    """
+    try:
+        from agentsmithy.db.sessions import get_active_session
+
+        # Get active session from database
+        db_path = project.get_dialog_dir(dialog_id) / "journal.sqlite"
+        active_session = get_active_session(db_path) or "session_1"
+
+        # Check if there are unapproved changes
+        tracker = VersioningTracker(str(project.root), dialog_id)
+        repo = tracker.ensure_repo()
+
+        has_unapproved = False
+        if tracker.MAIN_BRANCH in repo.refs:
+            session_ref = tracker._get_session_ref(active_session)
+            if session_ref in repo.refs:
+                main_head = repo.refs[tracker.MAIN_BRANCH]
+                session_head = repo.refs[session_ref]
+                has_unapproved = main_head != session_head
+
+        # Get last approved timestamp from dialog metadata
+        last_approved_at = None
+        try:
+            index = project.load_dialogs_index()
+            for dialog in index.get("dialogs", []):
+                if dialog.get("id") == dialog_id:
+                    last_approved_at = dialog.get("last_approved_at")
+                    break
+        except Exception:
+            pass
+
+        # If no unapproved changes, return null for session info
+        if has_unapproved:
+            return SessionStatusResponse(
+                active_session=active_session,
+                session_ref=f"refs/heads/{active_session}",
+                has_unapproved=True,
+                last_approved_at=last_approved_at,
+            )
+        else:
+            return SessionStatusResponse(
+                active_session=None,
+                session_ref=None,
+                has_unapproved=False,
+                last_approved_at=last_approved_at,
+            )
+    except Exception as e:
+        logger.error("Failed to get session status", dialog_id=dialog_id, error=str(e))
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
@@ -177,60 +278,105 @@ async def restore_checkpoint(
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
-@router.post("/{dialog_id}/reset", response_model=RestoreResponse)
-async def reset_dialog(
+@router.post("/{dialog_id}/approve", response_model=ApproveResponse)
+async def approve_session(
     dialog_id: str,
     project: Project = Depends(get_project),  # noqa: B008
-) -> RestoreResponse:
-    """Reset dialog to its initial checkpoint (before any changes).
+    request: ApproveRequest = Body(default=ApproveRequest(message=None)),  # noqa: B008
+) -> ApproveResponse:
+    """Approve current session and lock in all changes.
 
-    This is a convenience endpoint that restores to the initial checkpoint
-    created when the dialog was first started.
+    This will:
+    1. Lock in all changes from current session as approved
+    2. Mark session as 'merged' in database
+    3. Create a new active session from approved state
+
+    Args:
+        dialog_id: Dialog ID
+        request: Approve request with optional message
+
+    Returns:
+        ApproveResponse with approved commit ID and new session name
+    """
+    try:
+        tracker = VersioningTracker(str(project.root), dialog_id)
+
+        # Approve session
+        result = tracker.approve_all(message=request.message)
+
+        # Update dialog metadata with new session and approval timestamp
+        from datetime import datetime
+
+        now = datetime.utcnow().isoformat()
+        project.upsert_dialog_meta(
+            dialog_id,
+            active_session=result["new_session"],
+            last_approved_at=now,
+        )
+
+        logger.info(
+            "Approved session",
+            dialog_id=dialog_id,
+            approved_commit=result["approved_commit"][:8],
+            new_session=result["new_session"],
+            commits_approved=result["commits_approved"],
+        )
+
+        return ApproveResponse(**result)
+    except Exception as e:
+        logger.error("Failed to approve session", dialog_id=dialog_id, error=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.post("/{dialog_id}/reset", response_model=ResetResponse)
+async def reset_to_approved(
+    dialog_id: str,
+    project: Project = Depends(get_project),  # noqa: B008
+) -> ResetResponse:
+    """Reset current session to approved state.
+
+    This will:
+    1. Discard current session (mark as 'abandoned' in database)
+    2. Create new session from approved state
+    3. Restore files to approved state
 
     Args:
         dialog_id: Dialog ID
 
     Returns:
-        RestoreResponse with initial checkpoint ID and new checkpoint ID
-
-    Raises:
-        HTTPException: If initial checkpoint not found
+        ResetResponse with reset commit ID and new session name
     """
     try:
-        # Get initial checkpoint from metadata
-        index = project.load_dialogs_index()
-        initial_checkpoint_id = None
-        for dialog in index.get("dialogs", []):
-            if dialog.get("id") == dialog_id:
-                initial_checkpoint_id = dialog.get("initial_checkpoint")
-                break
-
-        if not initial_checkpoint_id:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Initial checkpoint not found for dialog {dialog_id}",
-            )
-
-        # Restore to initial checkpoint (best-effort, skips locked files)
         tracker = VersioningTracker(str(project.root), dialog_id)
+
+        # Reset to approved
+        result = tracker.reset_to_approved()
+
+        # Update dialog metadata with new session
+        project.upsert_dialog_meta(
+            dialog_id,
+            active_session=result["new_session"],
+        )
+
+        # Restore files to approved state
         restored_files = []
         try:
-            restored_files = tracker.restore_checkpoint(initial_checkpoint_id)
+            restored_files = tracker.restore_checkpoint(result["reset_to"])
             logger.info(
-                "Reset dialog to initial checkpoint",
+                "Reset to approved state",
                 dialog_id=dialog_id,
-                checkpoint_id=initial_checkpoint_id[:8],
+                reset_to=result["reset_to"][:8],
+                new_session=result["new_session"],
                 files_restored=len(restored_files),
             )
         except Exception as restore_err:
-            # Log but don't fail - restore is best-effort
             logger.warning(
                 "Reset completed with errors (some files may be skipped)",
                 dialog_id=dialog_id,
                 error=str(restore_err),
             )
 
-        # Reindex restored files in RAG (only those that were previously indexed)
+        # Reindex restored files in RAG
         if restored_files:
             try:
                 vector_store = project.get_vector_store()
@@ -244,24 +390,13 @@ async def reset_dialog(
                         total_restored=len(restored_files),
                     )
             except Exception as rag_err:
-                # Don't fail reset if RAG reindexing fails
                 logger.warning(
                     "Failed to reindex files in RAG after reset",
                     dialog_id=dialog_id,
                     error=str(rag_err),
                 )
 
-        # Create new checkpoint after reset
-        new_checkpoint = tracker.create_checkpoint(
-            f"Reset to initial checkpoint {initial_checkpoint_id[:8]}"
-        )
-
-        return RestoreResponse(
-            restored_to=initial_checkpoint_id,
-            new_checkpoint=new_checkpoint.commit_id,
-        )
-    except HTTPException:
-        raise
+        return ResetResponse(**result)
     except Exception as e:
-        logger.error("Failed to reset dialog", dialog_id=dialog_id, error=str(e))
+        logger.error("Failed to reset to approved", dialog_id=dialog_id, error=str(e))
         raise HTTPException(status_code=500, detail=str(e)) from e

@@ -98,10 +98,12 @@ class VersioningTracker:
     """Shadow-repo versioning isolated from project's own Git.
 
     - Each dialog has its own repo: {project_root}/.agentsmithy/dialogs/{dialog_id}/checkpoints/
+    - Uses branches: main (approved) + session_N (work sessions)
     - Uses non-bare repository to track project files
-    - Only used to create checkpoints and restore files
     - Does not touch user's main .git in the project
     """
+
+    MAIN_BRANCH = b"refs/heads/main"
 
     def __init__(self, project_root: str, dialog_id: str | None = None) -> None:
         self.project_root = Path(project_root).resolve()
@@ -156,17 +158,15 @@ class VersioningTracker:
             # Best-effort config; continue even if setting fails
             pass
 
-        # Ensure initial commit exists
+        # Ensure initial commit exists (only if no commits at all)
         try:
             _ = repo.head()
         except Exception:
-            try:
-                # Create empty initial commit
-                porcelain.commit(repo, b"Initial checkpoint")
-            except Exception:
-                pass
+            # No commits yet - this is ok, first checkpoint will create the initial commit
+            pass
 
         self._write_excludes(repo)
+        self._ensure_branches_exist(repo)
         return repo
 
     def _write_excludes(self, repo: Repo) -> None:
@@ -277,6 +277,84 @@ class VersioningTracker:
         """Check if a transaction is currently active."""
         return self._transaction_active
 
+    # ---- session management ----
+    def _get_session_ref(self, session_name: str) -> bytes:
+        """Get git ref for a session."""
+        return f"refs/heads/{session_name}".encode()
+
+    def _get_active_session_name(self) -> str:
+        """Get active session name from database."""
+        if not self.dialog_id:
+            return "session_1"
+
+        try:
+            from agentsmithy.db.sessions import get_active_session
+
+            db_path = self.shadow_root.parent / "journal.sqlite"
+            if not db_path.exists():
+                return "session_1"
+
+            session = get_active_session(db_path)
+            return session if session else "session_1"
+        except Exception:
+            return "session_1"
+
+    def _get_db_path(self) -> Path:
+        """Get path to dialog database."""
+        return self.shadow_root.parent / "journal.sqlite"
+
+    def _create_session(self, session_name: str, from_commit: bytes) -> None:
+        """Create a new session branch from a commit."""
+        repo = self.ensure_repo()
+        session_ref = self._get_session_ref(session_name)
+        repo.refs[session_ref] = from_commit
+
+        # Set HEAD to new session
+        repo.refs[b"HEAD"] = b"ref: " + session_ref
+
+    def _ensure_branches_exist(self, repo: Repo) -> None:
+        """Ensure main and active session branches exist."""
+        try:
+            head = repo.head()
+
+            # Create main branch if doesn't exist
+            if self.MAIN_BRANCH not in repo.refs:
+                repo.refs[self.MAIN_BRANCH] = head
+
+            # Get or create active session
+            active_session = self._get_active_session_name()
+            session_ref = self._get_session_ref(active_session)
+
+            # Only create session if it doesn't exist yet
+            # Check the ref file directly to avoid symref loops
+            session_ref_file = Path(repo.path) / session_ref.decode()
+
+            if not session_ref_file.exists():
+                # Create session from main
+                main_head = repo.refs[self.MAIN_BRANCH]
+                # Create session branch pointing to main HEAD (not symref, actual commit)
+                repo.refs[session_ref] = main_head
+            else:
+                # Check if it's a valid commit SHA (not a symref)
+                content = session_ref_file.read_text().strip()
+                if content.startswith("ref:"):
+                    # It's a symref (broken), recreate
+                    session_ref_file.unlink()
+                    main_head = repo.refs[self.MAIN_BRANCH]
+                    repo.refs[session_ref] = main_head
+
+            # Always ensure HEAD points to active session
+            # Write symref directly to avoid dulwich following the ref
+            head_file = Path(repo.path) / "HEAD"
+            expected_ref = f"ref: {session_ref.decode()}\n"
+            current_content = head_file.read_text() if head_file.exists() else ""
+            if current_content != expected_ref:
+                head_file.write_text(expected_ref)
+
+        except Exception:
+            # No commits yet, branches will be created on first checkpoint
+            pass
+
     # ---- checkpoints ----
     def create_checkpoint(self, message: str) -> CheckpointInfo:
         repo = self.ensure_repo()
@@ -288,9 +366,18 @@ class VersioningTracker:
 
         from dulwich.objects import Blob, Commit, Tree, parse_timezone
 
-        # Get current tree (if exists)
+        # Get current tree from active session (not HEAD which might point to wrong branch)
+        active_session = self._get_active_session_name()
+        session_ref = self._get_session_ref(active_session)
+
+        parent_commit = None
         try:
-            parent_commit = repo[repo.head()]
+            if session_ref in repo.refs:
+                session_head = repo.refs[session_ref]
+                parent_commit = repo[session_head]
+            else:
+                # Fallback to HEAD if session doesn't exist
+                parent_commit = repo[repo.head()]
         except Exception:
             parent_commit = None
 
@@ -372,16 +459,8 @@ class VersioningTracker:
                     # Skip files we can't read
                     continue
 
-        # Only create commit if tree has entries
-        if len(tree) == 0:
-            # No files to track, return current HEAD
-            try:
-                head = repo.head().decode("utf-8")
-            except Exception:
-                head = ""
-            return CheckpointInfo(commit_id=head, message=message)
-
-        # Add tree to repo
+        # Allow empty commits (needed for initial checkpoint of empty projects)
+        # Add tree to repo (even if empty)
         repo.object_store.add_object(tree)
 
         # Create commit
@@ -402,8 +481,14 @@ class VersioningTracker:
         # Add commit to repo
         repo.object_store.add_object(commit)
 
-        # Update HEAD
-        repo.refs[b"HEAD"] = commit.id
+        # Update active session branch directly (ignore HEAD which may be on wrong branch)
+        active_session = self._get_active_session_name()
+        session_ref = self._get_session_ref(active_session)
+        repo.refs[session_ref] = commit.id
+
+        # If this is first commit (no parents), also initialize main branch
+        if not commit.parents and self.MAIN_BRANCH not in repo.refs:
+            repo.refs[self.MAIN_BRANCH] = commit.id
 
         commit_id = commit.id.decode("utf-8")
         self._record_metadata(commit_id, message)
@@ -489,11 +574,164 @@ class VersioningTracker:
         data[commit_id] = {"message": message}
         meta_file.write_text(json.dumps(data, indent=2))
 
+    def approve_all(self, message: str | None = None) -> dict:
+        """Approve current session by merging into main and creating new session.
+
+        Returns:
+            Dict with approved_commit, new_session, commits_approved
+        """
+        import time
+
+        from dulwich.objects import Commit, parse_timezone
+
+        from agentsmithy.db.sessions import (
+            close_session,
+            create_new_session,
+            update_branch_head,
+        )
+
+        repo = self.ensure_repo()
+
+        # Get current session and main
+        active_session = self._get_active_session_name()
+        session_ref = self._get_session_ref(active_session)
+
+        if session_ref not in repo.refs or self.MAIN_BRANCH not in repo.refs:
+            raise ValueError("Branches not initialized")
+
+        session_head = repo.refs[session_ref]
+        main_head = repo.refs[self.MAIN_BRANCH]
+
+        # Check if already same
+        if session_head == main_head:
+            # Nothing to approve, just create new session
+            new_session_num = int(active_session.split("_")[1]) + 1
+            new_session = f"session_{new_session_num}"
+            self._create_session(new_session, main_head)
+
+            # Update database
+            db_path = self._get_db_path()
+            close_session(db_path, active_session, "merged", main_head.decode())
+            create_new_session(db_path, new_session)
+
+            return {
+                "approved_commit": main_head.decode(),
+                "new_session": new_session,
+                "commits_approved": 0,
+            }
+
+        # Create merge commit
+        session_commit = repo[session_head]
+        merge_msg = message or "✅ Approved session"
+
+        merge_commit = Commit()
+        merge_commit.tree = session_commit.tree  # type: ignore[attr-defined]
+        merge_commit.parents = [main_head, session_head]  # Two parents for merge
+        merge_commit.author = merge_commit.committer = (
+            b"AgentSmithy Versioning <versioning@agentsmithy.local>"
+        )
+        merge_commit.commit_time = merge_commit.author_time = int(time.time())
+        merge_commit.commit_timezone = merge_commit.author_timezone = parse_timezone(
+            b"+0000"
+        )[0]
+        merge_commit.message = merge_msg.encode("utf-8")
+
+        # Save merge commit
+        repo.object_store.add_object(merge_commit)
+
+        # Update main branch
+        repo.refs[self.MAIN_BRANCH] = merge_commit.id
+
+        # Update session branch to merge commit
+        repo.refs[session_ref] = merge_commit.id
+
+        # Create new session from main
+        new_session_num = int(active_session.split("_")[1]) + 1
+        new_session = f"session_{new_session_num}"
+        self._create_session(new_session, merge_commit.id)
+
+        # Count commits approved (from main to session before merge)
+        commits_approved = self._count_commits_between(repo, main_head, session_head)
+
+        merge_commit_id = merge_commit.id.decode()
+        self._record_metadata(merge_commit_id, merge_msg)
+
+        # Update database
+        db_path = self._get_db_path()
+        close_session(db_path, active_session, "merged", merge_commit_id)
+        create_new_session(db_path, new_session)
+        update_branch_head(db_path, "main", merge_commit_id)
+
+        return {
+            "approved_commit": merge_commit_id,
+            "new_session": new_session,
+            "commits_approved": commits_approved,
+        }
+
+    def reset_to_approved(self) -> dict:
+        """Reset current session to approved state (main branch).
+
+        Returns:
+            Dict with reset_to (commit), new_session
+        """
+        from agentsmithy.db.sessions import close_session, create_new_session
+
+        repo = self.ensure_repo()
+
+        # Get main branch
+        if self.MAIN_BRANCH not in repo.refs:
+            raise ValueError("Main branch not initialized")
+
+        main_head = repo.refs[self.MAIN_BRANCH]
+
+        # Get current session
+        active_session = self._get_active_session_name()
+
+        # Create new session from main
+        new_session_num = int(active_session.split("_")[1]) + 1
+        new_session = f"session_{new_session_num}"
+        self._create_session(new_session, main_head)
+
+        # Update database - mark current session as abandoned
+        db_path = self._get_db_path()
+        close_session(db_path, active_session, "abandoned")
+        create_new_session(db_path, new_session)
+
+        return {"reset_to": main_head.decode(), "new_session": new_session}
+
+    def _count_commits_between(
+        self, repo: Repo, base_sha: bytes, head_sha: bytes
+    ) -> int:
+        """Count commits between base and head (exclusive of base, inclusive of head)."""
+        if base_sha == head_sha:
+            return 0
+
+        # Collect commits from head to base
+        count = 0
+        visited = set()
+        to_visit = [head_sha]
+
+        while to_visit:
+            sha = to_visit.pop(0)
+            if sha in visited or sha == base_sha:
+                continue
+            visited.add(sha)
+            count += 1
+
+            try:
+                commit = repo[sha]
+                parents = getattr(commit, "parents", [])
+                to_visit.extend(parents)
+            except Exception:
+                continue
+
+        return count
+
     def list_checkpoints(self) -> list[CheckpointInfo]:
         """List all checkpoints in chronological order (oldest first).
 
         Returns:
-            List of CheckpointInfo objects
+            List of CheckpointInfo objects from active session
         """
         try:
             repo = self.ensure_repo()
@@ -508,9 +746,17 @@ class VersioningTracker:
                 except Exception:
                     pass
 
-            # Walk commit history from HEAD backwards
+            # Get active session branch (not HEAD which might be on different branch)
+            active_session = self._get_active_session_name()
+            session_ref = self._get_session_ref(active_session)
+
+            # Walk commit history from active session backwards
             try:
-                current_id = repo.head()
+                if session_ref in repo.refs:
+                    current_id = repo.refs[session_ref]
+                else:
+                    # Fallback to HEAD if session doesn't exist yet
+                    current_id = repo.head()
             except Exception:
                 # No commits yet
                 return []

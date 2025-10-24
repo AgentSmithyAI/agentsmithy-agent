@@ -145,3 +145,38 @@ class DialogFileEditORM(BaseORM):
     message_index: Mapped[int] = mapped_column(Integer, default=-1)
 
     __table_args__ = (Index("ix_file_edits_dialog_created", "dialog_id", "created_at"),)
+
+
+class SessionORM(BaseORM):
+    """Stores session (approval branch) information for a dialog."""
+
+    __tablename__ = "sessions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    session_name: Mapped[str] = mapped_column(String, unique=True)  # "session_1", etc.
+    ref_name: Mapped[str] = mapped_column(String)  # "refs/heads/session_1"
+    status: Mapped[str] = mapped_column(String)  # "active", "merged", "abandoned"
+    created_at: Mapped[str] = mapped_column(String)
+    closed_at: Mapped[str | None] = mapped_column(String, nullable=True)
+    approved_commit: Mapped[str | None] = mapped_column(String, nullable=True)
+    checkpoints_count: Mapped[int] = mapped_column(Integer, default=0)
+    branch_exists: Mapped[bool] = mapped_column(
+        Integer, default=1
+    )  # SQLite uses INTEGER for BOOLEAN
+
+    __table_args__ = (Index("ix_sessions_status", "status"),)
+
+
+class DialogBranchORM(BaseORM):
+    """Stores Git branch metadata for a dialog."""
+
+    __tablename__ = "dialog_branches"
+
+    branch_type: Mapped[str] = mapped_column(
+        String, primary_key=True
+    )  # "main" or "session"
+    ref_name: Mapped[str] = mapped_column(String)
+    head_commit: Mapped[str | None] = mapped_column(String, nullable=True)
+    valid: Mapped[bool] = mapped_column(
+        Integer, default=1
+    )  # SQLite uses INTEGER for BOOLEAN

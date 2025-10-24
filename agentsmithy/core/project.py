@@ -172,13 +172,28 @@ class Project:
 
         # Create initial checkpoint snapshot (best-effort)
         try:
+            from agentsmithy.db.sessions import (
+                create_initial_session,
+                ensure_sessions_tables,
+            )
+
+            # Initialize sessions table first
+            db_path = dialog_dir / "journal.sqlite"
+            ensure_sessions_tables(db_path)
+            create_initial_session(db_path, "session_1")
+
+            # Now create checkpoint (this will use session_1 branch)
             tracker = VersioningTracker(str(self.root), dialog_id)
             tracker.ensure_repo()
             initial_checkpoint = tracker.create_checkpoint(
                 f"Initial snapshot before dialog: {title or dialog_id[:8]}"
             )
-            # Store initial checkpoint ID in metadata
+
+            # Store checkpoint ID and session info in metadata
             meta["initial_checkpoint"] = initial_checkpoint.commit_id
+            meta["active_session"] = "session_1"
+            meta["last_approved_at"] = now
+
             # Update index with checkpoint info
             for i, d in enumerate(dialogs_list):
                 if d.get("id") == dialog_id:
@@ -187,9 +202,10 @@ class Project:
             index["dialogs"] = dialogs_list
             self.save_dialogs_index(index)
             logger.info(
-                "Created initial checkpoint for dialog",
+                "Created initial checkpoint and session for dialog",
                 dialog_id=dialog_id[:8],
                 checkpoint_id=initial_checkpoint.commit_id[:8],
+                session="session_1",
             )
         except Exception as e:
             logger.warning(

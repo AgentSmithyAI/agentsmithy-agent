@@ -1,28 +1,47 @@
-# Checkpoints and Transactions
+# Checkpoints and Approval Sessions
 
-AgentSmithy automatically saves snapshots of your project state while working with the AI agent. This allows you to rollback changes and restore previous versions of files.
+AgentSmithy automatically saves snapshots of your project state while working with the AI agent. Changes accumulate in work sessions that can be approved or discarded.
 
 ## Core Concepts
 
+### Sessions and Approval
+
+Each dialog manages changes through an approval workflow:
+
+- **Approved state** - stable, verified version of your project
+- **Work sessions** - accumulate changes that can be approved or discarded
+
+**Location:** `.agentsmithy/dialogs/<dialog_id>/`
+
+**Workflow:**
+```
+1. Work Session (session_1):
+   User: "Create a TODO app"
+   → Checkpoints accumulate in current session
+   → AI creates files, makes changes
+   
+2. Approve:
+   → Lock in all changes from session_1
+   → Start new session_2
+   
+3. Continue working:
+   → Checkpoints accumulate in session_2
+   → Can approve or reset at any time
+```
+
 ### Checkpoints
 
-A **checkpoint** is a Git commit that contains a complete snapshot of your project state at a specific point in time. Each dialog stores its checkpoints in an isolated Git repository.
-
-**Location:** `.agentsmithy/dialogs/<dialog_id>/checkpoints/.git`
-
-**Key principle:** Checkpoints are created BEFORE the AI processes each user message, not after. This provides clean rollback points - you can undo an entire AI response by restoring to the checkpoint from the user message that triggered it.
+A **checkpoint** is a snapshot of your project state at a specific point in time. Checkpoints are created BEFORE the AI processes each user message.
 
 **Example:**
 ```
-User: "Create a TODO app with main.py, models.py and tests.py"
-  → Checkpoint created: snapshot BEFORE AI starts work
-  
-AI executes:
-  write_to_file: main.py
-  write_to_file: models.py  
-  write_to_file: tests.py
+session_1:
+  Checkpoint: "Before user message: Create TODO app"
+  → AI creates main.py, models.py, tests.py
+  Checkpoint: "Before user message: Add tests"
+  → AI creates test files
 
-Result: All changes can be undone by restoring to the checkpoint
+Approve → lock in session_1 changes → start session_2
 ```
 
 ## Automatic Checkpoint Creation
@@ -105,35 +124,85 @@ Sent immediately when a file is modified by a tool. This is a **control signal**
 - Provides diff for display (optional)
 - Does NOT include checkpoint (checkpoint is on user message)
 
-## Checkpoint Management API
+## Session Management API
 
-### List Checkpoints
+### Get Session Status
 
 ```http
-GET /api/dialogs/{dialog_id}/checkpoints
+GET /api/dialogs/{dialog_id}/session
 ```
+
+Get current session status and approval state.
+
+**Response (with unapproved changes):**
+```json
+{
+  "active_session": "session_2",
+  "session_ref": "refs/heads/session_2",
+  "has_unapproved": true,
+  "last_approved_at": "2025-10-24T12:00:00Z"
+}
+```
+
+**Response (all approved, no active session):**
+```json
+{
+  "active_session": null,
+  "session_ref": null,
+  "has_unapproved": false,
+  "last_approved_at": "2025-10-24T12:00:00Z"
+}
+```
+
+### Approve Session
+
+```http
+POST /api/dialogs/{dialog_id}/approve
+Content-Type: application/json
+
+{
+  "message": "Feature complete"  // optional
+}
+```
+
+Approves all changes in the current session and starts a new session.
 
 **Response:**
 ```json
 {
-  "dialog_id": "abc123...",
-  "checkpoints": [
-    {
-      "commit_id": "1dd9c64b1618bcfab943c2bfc0542032fd96afd2",
-      "message": "Initial snapshot before dialog: My Feature"
-    },
-    {
-      "commit_id": "87cfd2cc7a0f1acd696fea7a73617ec700b6b919",
-      "message": "Transaction: 3 files\nwrite: main.py\nwrite: models.py\nwrite: tests.py"
-    },
-    {
-      "commit_id": "f7c93285cef5c892da0ffdf48dc929860b9e0ef2",
-      "message": "Transaction: 1 files\nreplace: main.py"
-    }
-  ],
-  "initial_checkpoint": "1dd9c64b1618bcfab943c2bfc0542032fd96afd2"
+  "approved_commit": "87cfd2cc7a0f1acd696fea7a73617ec700b6b919",
+  "new_session": "session_2",
+  "commits_approved": 5
 }
 ```
+
+**What happens:**
+- Current session changes are locked in as approved
+- Session marked as completed
+- New session created from approved state
+- Files indexed in RAG remain synced
+
+### Reset to Approved
+
+```http
+POST /api/dialogs/{dialog_id}/reset
+```
+
+Discards all unapproved changes in the current session and returns to the last approved state.
+
+**Response:**
+```json
+{
+  "reset_to": "87cfd2cc7a0f1acd696fea7a73617ec700b6b919",
+  "new_session": "session_2"
+}
+```
+
+**What happens:**
+- Current session discarded
+- New session created from approved state
+- Files restored to approved state
+- RAG reindexed with approved file versions
 
 ### Restore to Checkpoint
 
@@ -146,6 +215,8 @@ Content-Type: application/json
 }
 ```
 
+Restores files to a specific checkpoint state. Creates a new checkpoint after restore.
+
 **Response:**
 ```json
 {
@@ -155,27 +226,10 @@ Content-Type: application/json
 ```
 
 **Important:** 
-- After restoration, a new checkpoint is created, so the restore itself can be undone!
-- Files that were indexed in the RAG vector store will be automatically reindexed with their restored contents
-- This ensures the AI model gets accurate file context from RAG similarity search
+- After restoration, a new checkpoint is created, so the restore itself can be undone
+- Files indexed in RAG are automatically reindexed with restored contents
 
-### Reset Dialog to Initial State
-
-```http
-POST /api/dialogs/{dialog_id}/reset
-```
-
-Restores the project to the initial checkpoint (state before dialog started).
-
-**Response:**
-```json
-{
-  "restored_to": "1dd9c64b1618bcfab943c2bfc0542032fd96afd2",
-  "new_checkpoint": "c9d2e4a..."
-}
-```
-
-## Internal Architecture
+## Internal Architecture (Technical)
 
 ### Directory Structure
 
@@ -184,10 +238,26 @@ Restores the project to the initial checkpoint (state before dialog started).
   .agentsmithy/
     dialogs/
       <dialog_id>/
-        checkpoints/              # Git repository for checkpoints
-          .git/                   # Git objects, commits
-          metadata.json           # Additional metadata
-        journal.sqlite            # Dialog history + file_edits table
+        checkpoints/              # Internal checkpoint storage
+          .git/                   # Git repository (implementation detail)
+            refs/heads/
+              main                # Approved state
+              session_1           # Merged session (kept for recovery)
+              session_2           # Active session
+          metadata.json           # Checkpoint metadata
+        journal.sqlite            # Dialog history + sessions table
+```
+
+### Branch Structure (Internal)
+
+Git is used internally for efficient checkpoint management:
+
+```
+main          ← approved state (stable)
+  |
+  ├─ session_1  ← merged (status: merged)
+  ├─ session_2  ← merged (status: merged)
+  └─ session_3  ← current work (status: active)
 ```
 
 ### VersioningTracker API
@@ -197,19 +267,21 @@ from agentsmithy.services.versioning import VersioningTracker
 
 tracker = VersioningTracker(project_root, dialog_id)
 
-# Create checkpoint (done automatically before user messages)
+# Create checkpoint in active session (automatic before user messages)
 checkpoint = tracker.create_checkpoint("Before user message: ...")
 # → CheckpointInfo(commit_id="abc123...", message="...")
 
-# List checkpoints
-checkpoints = tracker.list_checkpoints()
-# → [CheckpointInfo(...), CheckpointInfo(...), ...]
+# Approve current session
+tracker.approve_all(message="Feature complete")
+# → Locks in changes, creates new session
 
-# Restore to checkpoint
+# Reset to approved state
+tracker.reset_to_approved()
+# → Discards current session, creates new from approved state
+
+# Restore to specific checkpoint
 tracker.restore_checkpoint("abc123...")
 ```
-
-**Note:** Transactions (`begin_transaction`, `track_file_change`, `commit_transaction`) are available in the API for advanced use cases, but the standard flow creates checkpoints only before user messages.
 
 ### Tool Integration
 
@@ -259,11 +331,35 @@ def _append_user_and_prepare_context(query, ...):
       "title": "My Feature",
       "created_at": "2025-10-23T15:00:00Z",
       "updated_at": "2025-10-23T16:30:00Z",
-      "initial_checkpoint": "1dd9c64b..."
+      "active_session": "session_2",
+      "last_approved_at": "2025-10-23T16:00:00Z"
     }
   ],
   "current_dialog_id": "abc123..."
 }
+```
+
+### Sessions Table (SQLite)
+
+```sql
+CREATE TABLE sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_name TEXT UNIQUE,     -- "session_1", "session_2", etc.
+    ref_name TEXT,                -- "refs/heads/session_1"
+    status TEXT,                  -- "active", "merged", "abandoned"
+    created_at TEXT,
+    closed_at TEXT,               -- When merged or abandoned
+    approved_commit TEXT,         -- Merge commit ID (for merged sessions)
+    checkpoints_count INTEGER,
+    branch_exists BOOLEAN DEFAULT 1
+);
+
+CREATE TABLE dialog_branches (
+    branch_type TEXT PRIMARY KEY, -- "main" or "session"
+    ref_name TEXT,
+    head_commit TEXT,
+    valid BOOLEAN
+);
 ```
 
 ### File Edits Table (SQLite)
@@ -283,34 +379,34 @@ CREATE TABLE dialog_file_edits (
 
 ## Best Practices
 
-### For UI Developers
+### For Frontend Developers
 
-1. **Show checkpoints in dialog history**
-   - Display "Restore to here" button next to each file_edit event
-   
-2. **Group changes by transactions**
-   - If multiple file_edits have the same checkpoint → it's one transaction
+1. **Show approve/reset actions**
+   - Display "Approve Session" button to merge changes into main
+   - Display "Reset to Approved" to discard current work
 
-3. **Add "Reset Dialog" button**
-   - Quick restore to initial checkpoint
+2. **Indicate approved state**
+   - Show if there are unapproved changes in current session
+   - Optionally show session history (session_1 approved, session_2 active, etc.)
+
+3. **Checkpoint visibility**
+   - Checkpoints are attached to user messages in history
+   - Use for "restore to here" functionality
 
 ### For Tool Developers
 
 1. **Use `tracker.start_edit()` / `finalize_edit()`**
    - Ensures rollback on error
 
-2. **Check `is_transaction_active()`**
-   - If transaction is active → only register changes
-   - If not → create checkpoint immediately
+2. **DON't create checkpoints in tools**
+   - Checkpoints are created automatically before user messages
+   - Tools just modify files
 
-3. **DON'T create checkpoints in `run_command`**
-   - Commands can do anything, not all changes need tracking
-
-## File Filtering and .gitignore Support
+## File Filtering
 
 ### Automatic Exclusions
 
-Checkpoints automatically respect your project's `.gitignore` file. If a `.gitignore` exists, all patterns in it are honored when creating checkpoints.
+Checkpoints automatically respect your project's `.gitignore` file. If a `.gitignore` exists, all patterns in it are excluded from checkpoints.
 
 **Example `.gitignore`:**
 ```gitignore
@@ -412,19 +508,20 @@ This two-tier approach ensures the AI always has accurate file context, regardle
 
 ## Limitations
 
-1. **Git-like behavior**
+1. **File filtering**
    - Follows `.gitignore` patterns using standard gitignore matching rules
    - Directory patterns (`dir/`) match the directory and all contents
    - Glob patterns (`*.log`) work as expected
 
-2. **Repository size**
+2. **Storage size**
    - Each checkpoint = full project snapshot
-   - Git deduplicates identical files, but storage grows
+   - Identical files are deduplicated, but storage grows
+   - Old sessions are kept for recovery (can be cleaned up)
    - Recommendation: periodically delete old dialogs
 
 3. **Dialog isolation**
-   - Each dialog has its own Git repository
-   - Checkpoints from one dialog are not visible in another
+   - Each dialog has its own checkpoint storage
+   - Sessions from one dialog are not visible in another
 
 4. **Best-effort restore**
    - Files that cannot be written during restore (e.g., in use by running process) are skipped
@@ -436,21 +533,40 @@ This two-tier approach ensures the AI always has accurate file context, regardle
    - RAG is not a complete project index
    - Reindexing on restore only updates files that were previously indexed
 
-## Debugging
+6. **Session storage**
+   - Old sessions are kept for recovery but hidden
+   - Merged/abandoned sessions marked in database
+   - Can be cleaned up manually if needed
 
-### Inspect Repository Manually
+## Debugging (Advanced)
+
+### Inspect Internal Storage
+
+The checkpoint storage uses Git internally. For advanced debugging:
 
 ```bash
 cd /path/to/project/.agentsmithy/dialogs/<dialog_id>/checkpoints/
 
-# List commits
-git log --oneline
+# List all branches
+git branch -a
 
-# Show checkpoint contents
-git show <commit_id>
+# Show commits in main (approved)
+git log main --oneline
 
-# Compare two checkpoints
-git diff <commit1> <commit2>
+# Show commits in active session
+git log session_2 --oneline
+
+# Show what's not approved yet
+git log main..session_2 --oneline
+
+# Compare approved vs current work
+git diff main session_2
+
+# Show merge commits (approvals)
+git log --merges main --oneline
+
+# Visualize branch structure
+git log --all --graph --oneline
 ```
 
 ### Logs
@@ -458,7 +574,8 @@ git diff <commit1> <commit2>
 ```python
 from agentsmithy.utils.logger import agent_logger
 
-agent_logger.info("Created transaction checkpoint",
+agent_logger.info("Created checkpoint in session",
+    session="session_2",
     checkpoint_id=checkpoint.commit_id[:8],
     message=checkpoint.message[:50]
 )
@@ -466,58 +583,75 @@ agent_logger.info("Created transaction checkpoint",
 
 ## Migration for Existing Dialogs
 
-Dialogs created before transaction implementation:
-- Will not have `initial_checkpoint` in metadata
-- Checkpoints are created from the first change after update
-
-Old checkpoints (one per file, if applicable from previous versions):
-- Remain unchanged
-- New checkpoints created using new logic (one per user message)
+Dialogs created before sessions implementation:
+- Will have all commits in a single unnamed branch
+- On first use, `main` branch will be created from HEAD
+- First session (`session_1`) will be created from `main`
+- Old checkpoints remain accessible
 
 ## Examples
 
-### Simple Conversation Flow
+### Session Workflow
 
 ```
-1. User: "Fix the bug in utils.py"
-   → Checkpoint A: "Before user message: Fix the bug..."
-   
-2. AI executes: replace_in_file: utils.py
-   → file_edit event (UI refreshes utils.py)
-   
-3. User: "Also add tests"
-   → Checkpoint B: "Before user message: Also add tests"
-   
-4. AI executes: write_to_file: tests/test_utils.py
-   → file_edit event (UI shows new test file)
+Session 1 (active):
+  User: "Create a TODO app"
+  → Checkpoint: "Before user message: Create a TODO app"
+  → AI creates main.py, models.py, tests.py
+  
+  User: "Add database"
+  → Checkpoint: "Before user message: Add database"
+  → AI adds db.py
+  
+  User approves:
+  POST /api/dialogs/{id}/approve
+  {"message": "Initial TODO app"}
+  
+  Result:
+  - session_1 changes locked in as approved
+  - session_1 status → "merged"
+  - session_2 created (active)
+
+Session 2 (active):
+  User: "Add authentication"
+  → Checkpoint: "Before user message: Add authentication"
+  → AI adds auth.py
+  
+  User decides to discard:
+  POST /api/dialogs/{id}/reset
+  
+  Result:
+  - session_2 status → "abandoned"
+  - session_3 created (back to approved state)
 ```
 
-### Restore Workflow
+### Restore to Checkpoint
 
 ```
-Dialog history:
-  Checkpoint 0: Initial snapshot (dialog creation)
-  Checkpoint 1: Before "Create REST API" → AI created 3 files
-  Checkpoint 2: Before "Add authentication" → AI modified 2 files
-  Checkpoint 3: Before "Fix bug" → AI modified 1 file
+Current state:
+  Approved: [locked in changes]
+  session_2 (active):
+    - Checkpoint A: "Before: Add feature X"
+    - Checkpoint B: "Before: Add feature Y"
+    - Checkpoint C: "Before: Fix bug"
 
-User decides to undo "Fix bug":
+User wants to undo Checkpoint C:
   POST /api/dialogs/{id}/restore
-  {"checkpoint_id": "<checkpoint_2>"}
+  {"checkpoint_id": "<checkpoint_B>"}
   
 Result:
-  - Project restored to state after "Add authentication"
-  - All changes from "Fix bug" are undone
-  - Checkpoint 4 created: "Restored to checkpoint <checkpoint_2>"
-  - Restore is reversible (can go back to checkpoint 3)
+  - Files restored to Checkpoint B state
+  - New Checkpoint D created: "Restored to <checkpoint_B>"
+  - Changes from Checkpoint C undone
+  - Still in session_2 (not approved)
 ```
 
 ## Performance Considerations
 
 ### Storage
 
-- Each checkpoint stores full project state in Git objects
-- Git's object storage deduplicates identical blobs
+- Each checkpoint stores full project state
+- Identical files are deduplicated automatically
 - Typical overhead: ~10-50MB per dialog for medium projects
 - Large projects (1000+ files): consider cleanup strategy
 
