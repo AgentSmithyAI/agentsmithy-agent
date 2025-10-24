@@ -13,7 +13,7 @@ async def test_index_empty_file(temp_project, mock_embeddings):
     empty_file.write_text("")
 
     vector_store = VectorStoreManager(temp_project)
-    
+
     # Should not raise an error, returns empty list
     ids = await vector_store.index_file("empty.txt", "")
 
@@ -28,7 +28,7 @@ async def test_index_empty_file_from_disk(temp_project, mock_embeddings):
     empty_file.write_text("")
 
     vector_store = VectorStoreManager(temp_project)
-    
+
     # Index without providing content (will read from disk)
     ids = await vector_store.index_file("empty.py")
 
@@ -67,7 +67,7 @@ async def test_search_with_empty_file_indexed(temp_project, mock_embeddings):
 
     # Search should work and return results from non-empty file
     results = await vector_store.similarity_search("content", k=5)
-    
+
     assert len(results) > 0
     assert all("empty.txt" not in r.metadata.get("source", "") for r in results)
 
@@ -79,22 +79,22 @@ async def test_file_becomes_empty_after_modification(temp_project, mock_embeddin
     test_file.write_text("Original content with text")
 
     vector_store = VectorStoreManager(temp_project)
-    
+
     # Index with content
     await vector_store.index_file("becomes_empty.txt", test_file.read_text())
-    
+
     # Verify it's indexed
     indexed = vector_store.get_indexed_files()
     assert "becomes_empty.txt" in indexed
-    
+
     # Make file empty
     test_file.write_text("")
-    
+
     # Reindex
     ids = await vector_store.index_file("becomes_empty.txt", "")
-    
+
     assert ids == []
-    
+
     # Should be removed from index (no chunks)
     indexed = vector_store.get_indexed_files()
     assert "becomes_empty.txt" not in indexed
@@ -133,7 +133,7 @@ async def test_empty_file_with_whitespace_only(temp_project, mock_embeddings):
     whitespace_file.write_text("   \n\n  \t  \n")
 
     vector_store = VectorStoreManager(temp_project)
-    
+
     # Should not raise an error
     ids = await vector_store.index_file("whitespace.txt", whitespace_file.read_text())
 
@@ -167,13 +167,13 @@ async def test_mixed_empty_and_nonempty_files(temp_project, mock_embeddings):
     # Create files
     empty1 = temp_project.root / "empty1.txt"
     empty1.write_text("")
-    
+
     content1 = temp_project.root / "content1.txt"
     content1.write_text("First file with content")
-    
+
     empty2 = temp_project.root / "empty2.txt"
     empty2.write_text("")
-    
+
     content2 = temp_project.root / "content2.txt"
     content2.write_text("Second file with content")
 
@@ -212,13 +212,12 @@ async def test_reindex_empty_file(temp_project, mock_embeddings):
     empty_file.write_text("")
 
     vector_store = VectorStoreManager(temp_project)
-    
+
     # Initial index
     await vector_store.index_file("empty.txt", "")
-    
+
     # Reindex
     ids = await vector_store.reindex_file("empty.txt")
-    
+
     assert ids == []
     assert not await vector_store.has_file("empty.txt")
-
