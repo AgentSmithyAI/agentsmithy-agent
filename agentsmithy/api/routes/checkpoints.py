@@ -156,7 +156,7 @@ async def get_session_status(
         repo = tracker.ensure_repo()
 
         has_unapproved = False
-        
+
         # Check uncommitted changes first (files on disk vs last checkpoint)
         if tracker.has_uncommitted_changes():
             has_unapproved = True
@@ -166,13 +166,13 @@ async def get_session_status(
             if session_ref in repo.refs:
                 main_head = repo.refs[tracker.MAIN_BRANCH]
                 session_head = repo.refs[session_ref]
-                
+
                 # Compare trees (file contents), not commit SHAs
                 main_commit = repo[main_head]
                 session_commit = repo[session_head]
                 main_tree = getattr(main_commit, "tree", None)
                 session_tree = getattr(session_commit, "tree", None)
-                
+
                 # If trees are different, there are committed but unapproved changes
                 has_unapproved = main_tree != session_tree
 

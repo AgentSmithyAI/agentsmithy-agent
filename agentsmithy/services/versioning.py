@@ -705,31 +705,32 @@ class VersioningTracker:
 
     def has_uncommitted_changes(self) -> bool:
         """Check if there are uncommitted changes in working directory.
-        
+
         Compares current files on disk with the latest checkpoint in active session.
         """
         repo = self.ensure_repo()
-        
+
         try:
             # Get current session HEAD
             active_session = self._get_active_session_name()
             session_ref = self._get_session_ref(active_session)
-            
+
             if session_ref not in repo.refs:
                 return False
-            
+
             session_head = repo.refs[session_ref]
             session_commit = repo[session_head]
             committed_tree_id = session_commit.tree  # type: ignore[attr-defined]
-            
+
             # Build tree from current working directory
-            from dulwich.objects import Blob, Tree
             import os
-            
+
+            from dulwich.objects import Blob, Tree
+
             current_tree = Tree()
             gitignore = self.project_root / ".gitignore"
             ignore_patterns = _load_gitignore_patterns(gitignore)
-            
+
             for root, dirs, files in os.walk(self.project_root):
                 root_path = Path(root)
                 rel_root = (
@@ -737,7 +738,7 @@ class VersioningTracker:
                     if root_path != self.project_root
                     else Path(".")
                 )
-                
+
                 # Filter directories
                 filtered_dirs = []
                 for d in dirs:
@@ -745,33 +746,43 @@ class VersioningTracker:
                     dir_path_str = str(dir_rel_path).replace("\\", "/")
                     if _is_ignored(dir_path_str, ignore_patterns):
                         continue
-                    if d.startswith(".") or d in ["node_modules", "__pycache__", "dist", "build", "target"]:
+                    if d.startswith(".") or d in [
+                        "node_modules",
+                        "__pycache__",
+                        "dist",
+                        "build",
+                        "target",
+                    ]:
                         continue
                     filtered_dirs.append(d)
-                
+
                 dirs[:] = filtered_dirs
-                
+
                 for filename in files:
-                    if filename.startswith(".") or filename.endswith((".pyc", ".pyo", ".so", ".dylib", ".dll")):
+                    if filename.startswith(".") or filename.endswith(
+                        (".pyc", ".pyo", ".so", ".dylib", ".dll")
+                    ):
                         continue
-                    
+
                     file_path = Path(root) / filename
                     file_rel_path = file_path.relative_to(self.project_root)
                     file_path_str = str(file_rel_path).replace("\\", "/")
-                    
+
                     if _is_ignored(file_path_str, ignore_patterns):
                         continue
-                    
+
                     try:
                         content = file_path.read_bytes()
                         blob = Blob.from_string(content)
-                        current_tree.add(file_path_str.encode("utf-8"), 0o100644, blob.id)
+                        current_tree.add(
+                            file_path_str.encode("utf-8"), 0o100644, blob.id
+                        )
                     except Exception:
                         continue
-            
+
             # Compare tree IDs
             return committed_tree_id != current_tree.id
-            
+
         except Exception:
             return False
 
