@@ -189,6 +189,12 @@ class Project:
                 f"Initial snapshot before dialog: {title or dialog_id[:8]}"
             )
 
+            # Sync main with session_1 for initial checkpoint
+            repo = tracker.ensure_repo()
+            session_ref = tracker._get_session_ref("session_1")
+            if session_ref in repo.refs:
+                repo.refs[tracker.MAIN_BRANCH] = repo.refs[session_ref]
+
             # Store checkpoint ID and session info in metadata
             meta["initial_checkpoint"] = initial_checkpoint.commit_id
             meta["active_session"] = "session_1"
