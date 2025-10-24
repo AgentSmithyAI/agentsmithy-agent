@@ -105,11 +105,18 @@ class ToolCallEvent(BaseEvent):
 
 
 @dataclass
+class UserEvent(BaseEvent):
+    type: Literal[EventType.USER] = EventType.USER
+    content: str = ""
+    checkpoint: str | None = None
+    session: str | None = None
+
+
+@dataclass
 class FileEditEvent(BaseEvent):
     type: Literal[EventType.FILE_EDIT] = EventType.FILE_EDIT
     file: str = ""
     diff: str | None = None
-    checkpoint: str | None = None
 
 
 @dataclass
@@ -164,6 +171,17 @@ class EventFactory:
         return SummaryEndEvent(dialog_id=dialog_id)
 
     @staticmethod
+    def user(
+        content: str,
+        checkpoint: str | None = None,
+        session: str | None = None,
+        dialog_id: str | None = None,
+    ) -> UserEvent:
+        return UserEvent(
+            content=content, checkpoint=checkpoint, session=session, dialog_id=dialog_id
+        )
+
+    @staticmethod
     def tool_call(
         name: str, args: dict[str, Any], dialog_id: str | None = None
     ) -> ToolCallEvent:
@@ -171,14 +189,9 @@ class EventFactory:
 
     @staticmethod
     def file_edit(
-        file: str,
-        diff: str | None = None,
-        checkpoint: str | None = None,
-        dialog_id: str | None = None,
+        file: str, diff: str | None = None, dialog_id: str | None = None
     ) -> FileEditEvent:
-        return FileEditEvent(
-            file=file, diff=diff, checkpoint=checkpoint, dialog_id=dialog_id
-        )
+        return FileEditEvent(file=file, diff=diff, dialog_id=dialog_id)
 
     @staticmethod
     def error(message: str, dialog_id: str | None = None) -> ErrorEvent:
@@ -197,6 +210,8 @@ class EventFactory:
         et = data.get("type")
         if dialog_id and "dialog_id" not in data:
             data["dialog_id"] = dialog_id
+        if et == EventType.USER:
+            return UserEvent(**data)
         if et == EventType.CHAT:
             return ChatEvent(**data)
         if et == EventType.REASONING:

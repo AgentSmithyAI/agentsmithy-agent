@@ -251,7 +251,7 @@ class ChatService:
                                 storage.save(
                                     file=chunk.get("file", ""),
                                     diff=chunk.get("diff"),
-                                    checkpoint=chunk.get("checkpoint"),
+                                    checkpoint=None,  # Checkpoints now on user messages
                                     message_index=message_index,
                                 )
                         except Exception as e:
@@ -264,7 +264,6 @@ class ChatService:
                 yield SSEEventFactory.file_edit(
                     file=chunk.get("file", ""),
                     diff=chunk.get("diff"),
-                    checkpoint=chunk.get("checkpoint"),
                     dialog_id=dialog_id,
                 ).to_sse()
             elif chunk["type"] == EventType.TOOL_CALL.value:
@@ -313,7 +312,6 @@ class ChatService:
                     sse = SSEEventFactory.file_edit(
                         file=tool_event.get("file", ""),
                         diff=tool_event.get("diff"),
-                        checkpoint=tool_event.get("checkpoint"),
                         dialog_id=dialog_id,
                     ).to_sse()
                 elif tool_event.get("type") == "error":
@@ -329,24 +327,67 @@ class ChatService:
 
         return sse_events
 
-    def _append_user_and_prepare_context(
+    async def _append_user_and_prepare_context(
         self,
         query: str,
         context: dict[str, Any] | None,
         dialog_id: str | None,
         project: Any | None,
-    ) -> dict[str, Any]:
-        """Append user message and enrich context with dialog history (with summary support)."""
+    ) -> tuple[dict[str, Any], str | None, str | None]:
+        """Append user message and enrich context with dialog history (with summary support).
+
+        Returns:
+            Tuple of (context_dict, checkpoint_id, session_id)
+        """
         ctx: dict[str, Any] = dict(context or {})
+        checkpoint_id = None
+        session_id = None
+
         if not project or not dialog_id:
-            return ctx
+            return ctx, None, None
 
         try:
+            # Create checkpoint BEFORE adding user message (snapshot before AI work)
+            from agentsmithy.services.versioning import VersioningTracker
+
+            tracker = VersioningTracker(str(project.root), dialog_id)
+            checkpoint = tracker.create_checkpoint(f"Before user message: {query[:50]}")
+            checkpoint_id = checkpoint.commit_id
+            session_id = tracker._get_active_session_name()
+            api_logger.info(
+                "Created checkpoint before user message",
+                dialog_id=dialog_id,
+                checkpoint_id=checkpoint_id[:8],
+                session=session_id,
+            )
+
             history = project.get_dialog_history(dialog_id)
-            history.add_user_message(query)
+            history.add_user_message(
+                query, checkpoint=checkpoint_id, session=session_id
+            )
         except Exception as e:
             api_logger.error(
                 "Failed to append user message", exc_info=True, error=str(e)
+            )
+
+        # Sync RAG with actual file state before processing (catch-all for any changes)
+        try:
+            vector_store = project.get_vector_store()
+            sync_stats = await vector_store.sync_files_if_needed()
+            if sync_stats["reindexed"] > 0 or sync_stats["removed"] > 0:
+                api_logger.info(
+                    "Synced RAG before processing user message",
+                    dialog_id=dialog_id,
+                    checked=sync_stats["checked"],
+                    reindexed=sync_stats["reindexed"],
+                    removed=sync_stats["removed"],
+                )
+        except Exception as e:
+            # Don't fail if RAG sync fails
+            api_logger.warning(
+                "Failed to sync RAG before processing",
+                dialog_id=dialog_id,
+                error=str(e),
             )
 
         # Load history; use persisted summary when present
@@ -394,7 +435,7 @@ class ChatService:
             ctx["dialog_summary"] = summary_text
         # Add project reference for tool results storage
         ctx["project"] = project
-        return ctx
+        return ctx, checkpoint_id, session_id
 
     async def stream_chat(
         self,
@@ -422,11 +463,26 @@ class ChatService:
         try:
             api_logger.debug("Processing request with orchestrator", streaming=True)
             # Centralize history: append user and inject dialog messages into context
+            user_checkpoint_id = None
+            user_session_id = None
             if project_dialog:
                 project_obj, pdialog_id = project_dialog
-                context = self._append_user_and_prepare_context(
+                (
+                    context,
+                    user_checkpoint_id,
+                    user_session_id,
+                ) = await self._append_user_and_prepare_context(
                     query, context, dialog_id or pdialog_id, project_obj
                 )
+
+                # Emit user message event with checkpoint and session
+                yield SSEEventFactory.user(
+                    content=query,
+                    checkpoint=user_checkpoint_id,
+                    session=user_session_id,
+                    dialog_id=dialog_id,
+                ).to_sse()
+
             result = await orchestrator.process_request(
                 query=query, context=context, stream=True
             )
@@ -624,7 +680,7 @@ class ChatService:
     ) -> dict[str, Any]:
         orchestrator = self._get_orchestrator()
         # Centralize history: append user and inject dialog messages into context
-        context = self._append_user_and_prepare_context(
+        context, user_checkpoint_id, _ = await self._append_user_and_prepare_context(
             query, context, dialog_id, project
         )
         result = await orchestrator.process_request(

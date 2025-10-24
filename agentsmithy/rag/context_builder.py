@@ -116,8 +116,22 @@ class ContextBuilder:
         # Search for relevant documents
         if query:
             # Keep RAG small during inspection to avoid token bloat
+            from agentsmithy.utils.logger import rag_logger
+
+            k = min(k_documents, 2)
+            rag_logger.debug("RAG similarity search", query=query[:100], k=k)
+
             relevant_docs = await self.vector_store_manager.similarity_search(
-                query, k=min(k_documents, 2)
+                query, k=k
+            )
+
+            rag_logger.debug(
+                "RAG search completed",
+                query=query[:50],
+                found=len(relevant_docs),
+                sources=[
+                    doc.metadata.get("source", "unknown") for doc in relevant_docs
+                ],
             )
 
             for doc in relevant_docs:

@@ -7,6 +7,13 @@ Welcome to the AgentSmithy documentation.
 - [SSE Protocol](./sse-protocol.md) — POST-based SSE streaming, event taxonomy
 - [Project structure and runtime files](./project-structure.md)
 - [Architecture](./architecture.md)
+- [Dialog History endpoint](./history-endpoint.md)
+- [Checkpoints and Transactions](./checkpoints-and-transactions.md)
+- [Tool results storage design](./tool-results-storage-design.md)
+- [Tool results lazy loading](./tool-results-lazy-loading.md)
+- [Provider configuration](./provider-configuration.md) and [OpenAI config](./openai-config.md)
+- [Graceful shutdown](./graceful-shutdown.md)
+- [Web search tool](./web-search-tool.md)
 
 ## Quickstart
 

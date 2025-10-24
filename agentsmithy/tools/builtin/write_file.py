@@ -24,7 +24,6 @@ class WriteFileArgsDict(TypedDict):
 class WriteFileSuccess(BaseModel):
     type: Literal["write_file_result"] = "write_file_result"
     path: str
-    checkpoint: str | None = None
 
 
 WriteFileResult = WriteFileSuccess | ToolError
@@ -42,6 +41,15 @@ class WriteFileTool(BaseTool):
     name: str = "write_to_file"
     description: str = "Write complete content to a file (create or overwrite)."
     args_schema: type[BaseModel] | dict[str, Any] | None = WriteFileArgs
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._project = None
+
+    def set_context(self, project, dialog_id):
+        """Set project and dialog context for RAG indexing."""
+        self._project = project
+        self._dialog_id = dialog_id
 
     async def _arun(self, **kwargs: Any) -> dict[str, Any]:
         # Use project root if available, fallback to cwd
@@ -62,7 +70,6 @@ class WriteFileTool(BaseTool):
         tracker.ensure_repo()
         tracker.start_edit([str(file_path)])
         file_path.parent.mkdir(parents=True, exist_ok=True)
-        checkpoint = None
         try:
             file_path.write_text(kwargs["content"], encoding="utf-8")
         except Exception:
@@ -71,20 +78,41 @@ class WriteFileTool(BaseTool):
             raise
         else:
             tracker.finalize_edit()
-            checkpoint = tracker.create_checkpoint(f"write_to_file: {str(file_path)}")
+
+        # Index file in RAG (optional, best-effort)
+        try:
+            if hasattr(self, "_project") and self._project:
+                # Get relative path for RAG indexing
+                try:
+                    rel_path = file_path.relative_to(self._project.root)
+                    index_path = str(rel_path)
+                except ValueError:
+                    # File is outside project root, use absolute path
+                    index_path = str(file_path)
+
+                # Index in vector store (async, non-blocking)
+                import asyncio
+
+                vector_store = self._project.get_vector_store()
+                # Run in background, don't wait
+                asyncio.create_task(
+                    vector_store.index_file(index_path, kwargs["content"])
+                )
+        except Exception:
+            # Silently ignore RAG indexing errors
+            pass
+
         # Emit file_edit event in simplified SSE protocol
         if self._sse_callback is not None:
             await self.emit_event(
                 {
                     "type": EventType.FILE_EDIT.value,
                     "file": str(file_path),
-                    "checkpoint": getattr(checkpoint, "commit_id", None),
                 }
             )
         return {
             "type": "write_file_result",
             "path": str(file_path),
-            "checkpoint": getattr(checkpoint, "commit_id", None),
         }
 
 

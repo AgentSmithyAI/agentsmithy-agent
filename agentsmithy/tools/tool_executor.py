@@ -405,6 +405,7 @@ class ToolExecutor:
             # Execute tools one-by-one, append ToolMessages to conversation
             # IMPORTANT: append the AI response (with tool_calls) first per OpenAI spec
             conversation.append(response)
+
             for call in tool_calls:
                 name = call.get("name") or call.get("tool", {}).get("name")
                 args = call.get("args") or call.get("tool", {}).get("args") or {}
@@ -733,14 +734,12 @@ class ToolExecutor:
                     }:
                         file_path = result.get("path") or result.get("file")
                         diff = result.get("diff")
-                        checkpoint = result.get("checkpoint")
                         if file_path:
                             # Yield file_edit directly in the chunk stream for immediate delivery
                             yield {
                                 "type": EventType.FILE_EDIT.value,
                                 "file": file_path,
                                 "diff": diff,
-                                "checkpoint": checkpoint,
                             }
 
                     # Store result and create reference (tool_id must be present)

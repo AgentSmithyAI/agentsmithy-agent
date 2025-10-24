@@ -21,11 +21,13 @@ from agentsmithy.domain.events import (
     SummaryEndEvent,
     SummaryStartEvent,
     ToolCallEvent,
+    UserEvent,
 )
 
 __all__ = [
     "EventType",
     "BaseEvent",
+    "UserEvent",
     "ChatEvent",
     "ReasoningEvent",
     "ChatStartEvent",

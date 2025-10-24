@@ -194,7 +194,6 @@ def _load_file_edits(
                         type=EventType.FILE_EDIT.value,
                         file=edit.file,
                         diff=edit.diff,
-                        checkpoint=edit.checkpoint,
                     )
                 )
     except Exception as e:
@@ -310,10 +309,21 @@ def _build_events_stream(
             if event_type in (EventType.USER.value, EventType.CHAT.value):
                 client_idx = messages_data.start_pos + non_empty_count
                 non_empty_count += 1
+
+                # Extract checkpoint and session from user message metadata
+                checkpoint_id = None
+                session_id = None
+                if event_type == EventType.USER.value:
+                    additional_kwargs = getattr(msg, "additional_kwargs", {}) or {}
+                    checkpoint_id = additional_kwargs.get("checkpoint")
+                    session_id = additional_kwargs.get("session")
+
                 message_event = HistoryEvent(
                     type=event_type,
                     content=content_str,
                     idx=client_idx,
+                    checkpoint=checkpoint_id,
+                    session=session_id,
                 )
             else:
                 # Other message types (system, tool) don't get idx
