@@ -158,6 +158,16 @@ class VectorStoreManager:
 
         # Split and add
         ids = await self.add_documents([doc], chunk_size=chunk_size)
+
+        from agentsmithy.utils.logger import rag_logger
+
+        rag_logger.debug(
+            "Indexed file in RAG",
+            file=file_path,
+            chunks=len(ids),
+            hash=content_hash[:8],
+        )
+
         return ids
 
     async def has_file(self, file_path: str) -> bool:
@@ -266,8 +276,13 @@ class VectorStoreManager:
         """
         import hashlib
 
+        from agentsmithy.utils.logger import rag_logger
+
         indexed_files = self.get_indexed_files()
         stats = {"checked": 0, "reindexed": 0, "removed": 0}
+
+        if indexed_files:
+            rag_logger.debug("RAG sync started", files_to_check=len(indexed_files))
 
         for file_path, stored_hash in indexed_files.items():
             stats["checked"] += 1
@@ -299,5 +314,13 @@ class VectorStoreManager:
             except Exception:
                 # Can't read file - skip
                 continue
+
+        if stats["reindexed"] > 0 or stats["removed"] > 0:
+            rag_logger.debug(
+                "RAG sync completed",
+                checked=stats["checked"],
+                reindexed=stats["reindexed"],
+                removed=stats["removed"],
+            )
 
         return stats

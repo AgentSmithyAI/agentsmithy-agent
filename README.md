@@ -15,13 +15,25 @@ AgentSmithy is a local server that brings an AI coding assistant to your IDE. It
 
 ## Highlights
 
-- 🤖 Intelligent agent (LangGraph) that plans multi-step actions
-- 📚 RAG context on your project (ChromaDB)
-- 🔄 Real-time streaming replies (SSE)
-- 🧰 Practical tools: file edits, search, project inspection
-- 🔌 Multiple LLM providers (OpenAI supported)
-- 💬 Conversation history and resumable sessions
-- ⏮️ Checkpoints & rollback of file changes
+- Generate and refactor code with full awareness of your repository
+- Explain unfamiliar code and trace how functions, modules, and data flow connect
+- Find things fast: semantic search across code, config, and docs
+- Make safe changes: preview edits, apply patches, and rollback if needed
+- Fix bugs and add tests step‑by‑step with guided edits
+- Answer questions about your project’s architecture and APIs
+- Keep context: conversations persist across sessions
+
+## Technical features
+
+- Orchestration: LangGraph for stateful agent workflows (branches, retries, checkpoints)
+- Tooling: LangChain tool ecosystem + custom tools for file ops, project search, and safe code edits
+- RAG over code: ChromaDB vector store, LangChain text splitters/embeddings; incremental indexing
+- API server: FastAPI with real‑time streaming via SSE; OpenAPI, Swagger (/docs), Redoc (/redoc)
+- Safety: checkpoints and transactions for multi‑step edits with rollback capability
+- Providers: multi‑LLM via LangChain (e.g., OpenAI) with environment‑based configuration
+- Web search: DDGS search with Playwright fallback for JS‑rendered pages
+- Observability: structured logs (structlog) and LangSmith compatibility
+- Performance: uvicorn + uvloop, fully async I/O
 
 ## Learn more
 
