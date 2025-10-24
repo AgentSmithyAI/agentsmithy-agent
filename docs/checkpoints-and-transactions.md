@@ -126,6 +126,48 @@ Sent immediately when a file is modified by a tool. This is a **control signal**
 - Provides diff for display (optional)
 - Does NOT include checkpoint (checkpoint is on user message)
 
+## History Endpoint
+
+The `/api/dialogs/{dialog_id}/history` endpoint returns the dialog history as a list of events. User messages include both `checkpoint` and `session` fields:
+
+```http
+GET /api/dialogs/{dialog_id}/history?limit=20
+```
+
+**Response:**
+```json
+{
+  "events": [
+    {
+      "type": "user",
+      "content": "Create a TODO app",
+      "checkpoint": "a1b2c3d4e5f6789abc",
+      "session": "session_1",
+      "idx": 0
+    },
+    {
+      "type": "chat",
+      "content": "I'll create the app...",
+      "idx": 1
+    },
+    {
+      "type": "user",
+      "content": "Add authentication",
+      "checkpoint": "b2c3d4e5f6789abc12",
+      "session": "session_2",
+      "idx": 2
+    }
+  ],
+  "has_more": false,
+  "cursor": null
+}
+```
+
+**Fields:**
+- `checkpoint` - Checkpoint ID for this user message
+- `session` - Session name when checkpoint was created (e.g., "session_1", "session_2")
+- Session changes after each approve operation
+
 ## Session Management API
 
 ### Get Session Status
