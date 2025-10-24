@@ -70,6 +70,15 @@ class ReplaceInFileTool(BaseTool):
     )
     args_schema: type[BaseModel] | dict[str, Any] | None = ReplaceArgs
 
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._project = None
+
+    def set_context(self, project, dialog_id):
+        """Set project and dialog context for RAG indexing."""
+        self._project = project
+        self._dialog_id = dialog_id
+
     async def _arun(self, **kwargs: Any) -> dict[str, Any]:
         diff_text: str = kwargs["diff"]
         # Use project root if available, fallback to cwd

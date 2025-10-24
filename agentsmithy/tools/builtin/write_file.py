@@ -42,6 +42,15 @@ class WriteFileTool(BaseTool):
     description: str = "Write complete content to a file (create or overwrite)."
     args_schema: type[BaseModel] | dict[str, Any] | None = WriteFileArgs
 
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._project = None
+
+    def set_context(self, project, dialog_id):
+        """Set project and dialog context for RAG indexing."""
+        self._project = project
+        self._dialog_id = dialog_id
+
     async def _arun(self, **kwargs: Any) -> dict[str, Any]:
         # Use project root if available, fallback to cwd
         project_root = (
