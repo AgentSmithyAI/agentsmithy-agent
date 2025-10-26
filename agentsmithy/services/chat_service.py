@@ -713,9 +713,8 @@ class ChatService:
             yield SSEEventFactory.done(dialog_id=dialog_id).to_sse()
             raise
         except Exception as e:
-            # This catches errors outside of response streaming (setup, context prep, etc)
             api_logger.error(
-                "Unexpected error in stream_chat (not from LLM streaming)",
+                "Unexpected error in stream_chat",
                 exc_info=True,
                 error=str(e),
             )
