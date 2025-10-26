@@ -10,11 +10,11 @@ import json
 from collections.abc import AsyncIterator
 from typing import Any
 
-from agentsmithy.api.sse_protocol import EventFactory as SSEEventFactory
 from agentsmithy.dialogs.storages.file_edits import DialogFileEditStorage
 from agentsmithy.dialogs.storages.reasoning import DialogReasoningStorage
 from agentsmithy.dialogs.storages.summaries import DialogSummaryStorage
 from agentsmithy.dialogs.summarization.strategy import KEEP_LAST_MESSAGES
+from agentsmithy.domain.events import EventFactory as SSEEventFactory
 from agentsmithy.domain.events import EventType
 from agentsmithy.llm.orchestration.agent_graph import AgentOrchestrator
 from agentsmithy.utils.logger import api_logger, stream_log
@@ -519,30 +519,48 @@ class ChatService:
 
                     if hasattr(state["response"], "__aiter__"):
                         chunk_count = 0
-                        async for chunk in state["response"]:
-                            chunk_count += 1
-                            try:
-                                async for sse_event in self._process_structured_chunk(
-                                    chunk,
-                                    dialog_id,
-                                    assistant_buffer,
-                                    project_dialog,
-                                    reasoning_buffer,
-                                ):
-                                    yield sse_event
-                                stream_log(
-                                    api_logger,
-                                    "processed_chunk",
-                                    None,
-                                    chunk_number=chunk_count,
-                                )
-                            except StreamAbortError:
-                                # Flush buffer before terminating
-                                self._flush_assistant_buffer(
-                                    project_dialog, dialog_id, assistant_buffer
-                                )
-                                yield SSEEventFactory.done(dialog_id=dialog_id).to_sse()
-                                return
+                        try:
+                            async for chunk in state["response"]:
+                                chunk_count += 1
+                                try:
+                                    async for (
+                                        sse_event
+                                    ) in self._process_structured_chunk(
+                                        chunk,
+                                        dialog_id,
+                                        assistant_buffer,
+                                        project_dialog,
+                                        reasoning_buffer,
+                                    ):
+                                        yield sse_event
+                                    stream_log(
+                                        api_logger,
+                                        "processed_chunk",
+                                        None,
+                                        chunk_number=chunk_count,
+                                    )
+                                except StreamAbortError:
+                                    # Flush buffer before terminating
+                                    self._flush_assistant_buffer(
+                                        project_dialog, dialog_id, assistant_buffer
+                                    )
+                                    yield SSEEventFactory.done(
+                                        dialog_id=dialog_id
+                                    ).to_sse()
+                                    return
+                        except Exception as e:
+                            # Catch streaming errors from LLM (context window, rate limits, etc)
+                            api_logger.error(
+                                "Error during response streaming",
+                                exc_info=True,
+                                error=str(e),
+                            )
+                            error_msg = f"Error processing request: {str(e)}"
+                            yield SSEEventFactory.error(
+                                message=error_msg, dialog_id=dialog_id
+                            ).to_sse()
+                            yield SSEEventFactory.done(dialog_id=dialog_id).to_sse()
+                            return
                         # Usage persisted inside ToolExecutor now; nothing to do here
                         api_logger.info(f"Finished streaming {chunk_count} chunks")
                     else:
@@ -571,36 +589,8 @@ class ChatService:
 
                             if hasattr(response, "__aiter__"):
                                 chunk_count = 0
-                                async for chunk in response:
-                                    chunk_count += 1
-                                    try:
-                                        async for (
-                                            sse_event
-                                        ) in self._process_structured_chunk(
-                                            chunk,
-                                            dialog_id,
-                                            assistant_buffer,
-                                            project_dialog,
-                                            reasoning_buffer,
-                                        ):
-                                            yield sse_event
-                                    except StreamAbortError:
-                                        # Flush buffer before terminating
-                                        self._flush_assistant_buffer(
-                                            project_dialog, dialog_id, assistant_buffer
-                                        )
-                                        yield SSEEventFactory.done(
-                                            dialog_id=dialog_id
-                                        ).to_sse()
-                                        return
-                                api_logger.info(
-                                    f"Finished streaming {chunk_count} chunks from {key}"
-                                )
-                            elif asyncio.iscoroutine(response):
-                                actual_response = await response
-                                if hasattr(actual_response, "__aiter__"):
-                                    chunk_count = 0
-                                    async for chunk in actual_response:
+                                try:
+                                    async for chunk in response:
                                         chunk_count += 1
                                         try:
                                             async for (
@@ -614,10 +604,74 @@ class ChatService:
                                             ):
                                                 yield sse_event
                                         except StreamAbortError:
+                                            # Flush buffer before terminating
+                                            self._flush_assistant_buffer(
+                                                project_dialog,
+                                                dialog_id,
+                                                assistant_buffer,
+                                            )
                                             yield SSEEventFactory.done(
                                                 dialog_id=dialog_id
                                             ).to_sse()
                                             return
+                                except Exception as e:
+                                    # Catch streaming errors from LLM
+                                    api_logger.error(
+                                        f"Error streaming from {key}",
+                                        exc_info=True,
+                                        error=str(e),
+                                    )
+                                    error_msg = f"Error processing request: {str(e)}"
+                                    yield SSEEventFactory.error(
+                                        message=error_msg, dialog_id=dialog_id
+                                    ).to_sse()
+                                    yield SSEEventFactory.done(
+                                        dialog_id=dialog_id
+                                    ).to_sse()
+                                    return
+                                api_logger.info(
+                                    f"Finished streaming {chunk_count} chunks from {key}"
+                                )
+                            elif asyncio.iscoroutine(response):
+                                actual_response = await response
+                                if hasattr(actual_response, "__aiter__"):
+                                    chunk_count = 0
+                                    try:
+                                        async for chunk in actual_response:
+                                            chunk_count += 1
+                                            try:
+                                                async for (
+                                                    sse_event
+                                                ) in self._process_structured_chunk(
+                                                    chunk,
+                                                    dialog_id,
+                                                    assistant_buffer,
+                                                    project_dialog,
+                                                    reasoning_buffer,
+                                                ):
+                                                    yield sse_event
+                                            except StreamAbortError:
+                                                yield SSEEventFactory.done(
+                                                    dialog_id=dialog_id
+                                                ).to_sse()
+                                                return
+                                    except Exception as e:
+                                        # Catch streaming errors from LLM
+                                        api_logger.error(
+                                            f"Error streaming actual_response from {key}",
+                                            exc_info=True,
+                                            error=str(e),
+                                        )
+                                        error_msg = (
+                                            f"Error processing request: {str(e)}"
+                                        )
+                                        yield SSEEventFactory.error(
+                                            message=error_msg, dialog_id=dialog_id
+                                        ).to_sse()
+                                        yield SSEEventFactory.done(
+                                            dialog_id=dialog_id
+                                        ).to_sse()
+                                        return
                                     api_logger.info(
                                         f"Finished streaming {chunk_count} chunks from {key}"
                                     )
@@ -659,11 +713,15 @@ class ChatService:
             yield SSEEventFactory.done(dialog_id=dialog_id).to_sse()
             raise
         except Exception as e:
-            api_logger.error("Error in SSE generation", exc_info=True, error=str(e))
+            # This catches errors outside of response streaming (setup, context prep, etc)
+            api_logger.error(
+                "Unexpected error in stream_chat (not from LLM streaming)",
+                exc_info=True,
+                error=str(e),
+            )
             # Flush buffer on error before signaling done
             self._flush_assistant_buffer(project_dialog, dialog_id, assistant_buffer)
             error_msg = f"Error processing request: {str(e)}"
-            api_logger.error(f"Yielding error event: {error_msg}")
             yield SSEEventFactory.error(message=error_msg, dialog_id=dialog_id).to_sse()
             yield SSEEventFactory.done(dialog_id=dialog_id).to_sse()
         finally:
