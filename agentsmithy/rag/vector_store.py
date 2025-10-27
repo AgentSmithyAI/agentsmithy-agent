@@ -135,6 +135,8 @@ class VectorStoreManager:
         self.delete_by_source(file_path)
 
         # Read content if not provided
+        file_size = 0
+        file_mtime = 0
         if content is None:
             try:
                 abs_path = (
@@ -143,19 +145,28 @@ class VectorStoreManager:
                     else self.project.root / file_path
                 )
                 content = abs_path.read_text(encoding="utf-8")
+                # Get file stats for optimization
+                stat = abs_path.stat()
+                file_size = stat.st_size
+                file_mtime = int(stat.st_mtime)
             except Exception:
                 # File doesn't exist or can't be read
                 return []
+        else:
+            # Content provided, estimate size
+            file_size = len(content.encode("utf-8"))
 
         # Calculate content hash for consistency checking
         content_hash = hashlib.md5(content.encode("utf-8")).hexdigest()
 
-        # Create document with metadata including hash
+        # Create document with metadata including hash, size, and mtime
         doc = Document(
             page_content=content,
             metadata={
                 "source": str(file_path),
                 "hash": content_hash,
+                "size": file_size,
+                "mtime": file_mtime,
                 "indexed_at": datetime.now(UTC).isoformat(),
             },
         )
@@ -229,19 +240,47 @@ class VectorStoreManager:
     async def reindex_files(self, file_paths: list[str]) -> int:
         """Reindex multiple files if they were previously indexed.
 
+        Uses concurrent processing with asyncio.gather for better performance.
+
         Args:
             file_paths: List of file paths to check and reindex
 
         Returns:
             Number of files that were reindexed
         """
-        reindexed_count = 0
+        import asyncio
+
+        # Filter files that are actually indexed
+        files_to_reindex = []
         for file_path in file_paths:
-            # Only reindex if file was previously indexed
             if await self.has_file(file_path):
-                await self.reindex_file(file_path)
-                reindexed_count += 1
-        return reindexed_count
+                files_to_reindex.append(file_path)
+
+        # Reindex all files concurrently
+        if files_to_reindex:
+            await asyncio.gather(
+                *[self.reindex_file(file_path) for file_path in files_to_reindex]
+            )
+
+        return len(files_to_reindex)
+
+    def get_file_metadata(self, file_path: str) -> dict[str, Any] | None:
+        """Get metadata for a specific indexed file.
+
+        Args:
+            file_path: Path to file
+
+        Returns:
+            Metadata dict or None if file not indexed
+        """
+        try:
+            results = self.vectorstore.get(where={"source": str(file_path)})
+            if results and "metadatas" in results and results["metadatas"]:
+                # Return first matching metadata
+                return results["metadatas"][0]
+        except Exception:
+            pass
+        return None
 
     def get_indexed_files(self) -> dict[str, str]:
         """Get all indexed files with their hashes.
@@ -272,6 +311,9 @@ class VectorStoreManager:
     async def sync_files_if_needed(self) -> dict[str, int]:
         """Check all indexed files and reindex if hash mismatch.
 
+        Optimization: Only reads files that likely changed (based on mtime/size check).
+        Avoids reading hundreds of unchanged files on every sync.
+
         Returns:
             Dictionary with sync results:
             - "checked": number of files checked
@@ -283,10 +325,13 @@ class VectorStoreManager:
         from agentsmithy.utils.logger import rag_logger
 
         indexed_files = self.get_indexed_files()
-        stats = {"checked": 0, "reindexed": 0, "removed": 0}
+        stats = {"checked": 0, "reindexed": 0, "removed": 0, "skipped": 0}
 
         if indexed_files:
             rag_logger.debug("RAG sync started", files_to_check=len(indexed_files))
+
+        # First pass: check existence and quick mtime/size check
+        files_to_read: list[tuple[str, str, Path]] = []
 
         for file_path, stored_hash in indexed_files.items():
             stats["checked"] += 1
@@ -305,7 +350,31 @@ class VectorStoreManager:
                 stats["removed"] += 1
                 continue
 
-            # Read current content and calculate hash
+            # Quick optimization: check mtime and size from metadata
+            try:
+                # Get stored metadata for this file
+                metadata = self.get_file_metadata(file_path)
+                stored_mtime = metadata.get("mtime", 0) if metadata else 0
+                stored_size = metadata.get("size", 0) if metadata else 0
+
+                # Get current file stats (fast - no file read!)
+                stat = abs_path.stat()
+                current_mtime = int(stat.st_mtime)
+                current_size = stat.st_size
+
+                # If mtime and size unchanged, skip reading file
+                if current_mtime == stored_mtime and current_size == stored_size:
+                    stats["skipped"] += 1
+                    continue
+            except Exception:
+                # Metadata not available or stat failed, need to read
+                pass
+
+            # File potentially changed, need to read and verify
+            files_to_read.append((file_path, stored_hash, abs_path))
+
+        # Second pass: read and hash only files that likely changed
+        for file_path, stored_hash, abs_path in files_to_read:
             try:
                 current_content = abs_path.read_text(encoding="utf-8")
                 current_hash = hashlib.md5(current_content.encode("utf-8")).hexdigest()
@@ -315,6 +384,8 @@ class VectorStoreManager:
                     # Hash mismatch - reindex
                     await self.index_file(file_path, current_content)
                     stats["reindexed"] += 1
+                else:
+                    stats["skipped"] += 1
             except Exception:
                 # Can't read file - skip
                 continue
@@ -325,6 +396,7 @@ class VectorStoreManager:
                 checked=stats["checked"],
                 reindexed=stats["reindexed"],
                 removed=stats["removed"],
+                skipped=stats["skipped"],
             )
 
         return stats

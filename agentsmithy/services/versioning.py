@@ -14,6 +14,9 @@ from dulwich import porcelain
 from dulwich.objects import Commit, Tree  # precise types for object store
 from dulwich.repo import Repo
 
+# Note: This module uses dulwich (pure Python git implementation) for all git operations.
+# Git binary is not required - everything works through dulwich API.
+
 # Comprehensive list of build artifacts, caches, and dependencies across languages
 DEFAULT_EXCLUDES = [
     # Version control
@@ -230,6 +233,9 @@ class VersioningTracker:
     - Uses branches: main (approved) + session_N (work sessions)
     - Uses non-bare repository to track project files
     - Does not touch user's main .git in the project
+
+    Note: Uses dulwich (pure Python) for all git operations.
+    Git binary is not required on the system.
     """
 
     MAIN_BRANCH = b"refs/heads/main"
@@ -262,6 +268,10 @@ class VersioningTracker:
 
     # ---- repo management ----
     def ensure_repo(self) -> Repo:
+        """Ensure shadow git repository exists.
+
+        Uses dulwich.porcelain.init() - pure Python, git binary not required.
+        """
         # Use a non-bare repository that can track files in project directory
         git_dir = self.shadow_root / ".git"
         if git_dir.exists():
@@ -454,6 +464,10 @@ class VersioningTracker:
     def _open_project_git(self) -> tuple[Any | None, Any | None]:
         """Try to open project git repository for blob reuse optimization.
 
+        If project is a git repository, we can reuse existing blob objects
+        for unchanged files, avoiding reading large files (images, etc.) into memory.
+        Uses pure dulwich API - git binary not required.
+
         Returns:
             Tuple of (project_git_repo, project_git_tree) or (None, None)
         """
@@ -552,14 +566,12 @@ class VersioningTracker:
         )
 
         if blob is not None:
-            repo.object_store.add_object(blob)
-            return blob, True
+            return blob, True  # Don't add to repo yet, will batch later
 
         # Create new blob by reading file
         content = file_path.read_bytes()
         blob = Blob.from_string(content)
-        repo.object_store.add_object(blob)
-        return blob, False
+        return blob, False  # Don't add to repo yet, will batch later
 
     def _build_tree_from_workdir(
         self,
@@ -569,6 +581,8 @@ class VersioningTracker:
         project_git_tree: Any,
     ) -> tuple[Any, int, int]:
         """Build git tree by scanning project working directory.
+
+        Uses parallel file processing for better performance with many files.
 
         Args:
             repo: Shadow repository
@@ -580,6 +594,7 @@ class VersioningTracker:
             Tuple of (tree, blobs_reused, blobs_created)
         """
         import os
+        from concurrent.futures import ThreadPoolExecutor, as_completed
 
         from dulwich.objects import Tree
 
@@ -587,9 +602,10 @@ class VersioningTracker:
         blobs_reused = 0
         blobs_created = 0
 
-        # Walk through project directory and add files
+        # Collect all files first
+        files_to_process: list[tuple[Path, str]] = []
+
         for root, dirs, files in os.walk(self.project_root):
-            # Convert to relative path for ignore check
             root_path = Path(root)
             rel_root = (
                 root_path.relative_to(self.project_root)
@@ -597,7 +613,7 @@ class VersioningTracker:
                 else Path(".")
             )
 
-            # Filter directories using ignore patterns
+            # Filter directories
             filtered_dirs = []
             for d in dirs:
                 dir_rel_path = (rel_root / d) if rel_root != Path(".") else Path(d)
@@ -606,26 +622,48 @@ class VersioningTracker:
                 if not _is_ignored(dir_path_str, ignore_patterns):
                     filtered_dirs.append(d)
 
-            # Update dirs in-place to control recursion
             dirs[:] = filtered_dirs
 
-            # Process files
+            # Collect files for parallel processing
             for filename in files:
                 file_path = Path(root) / filename
                 file_rel_path = file_path.relative_to(self.project_root)
                 file_path_str = str(file_rel_path).replace("\\", "/")
 
-                if _is_ignored(file_path_str, ignore_patterns):
-                    continue
+                if not _is_ignored(file_path_str, ignore_patterns):
+                    files_to_process.append((file_path, file_path_str))
 
-                try:
-                    blob, was_reused = self._create_blob_for_file(
-                        file_path,
-                        file_path_str,
-                        repo,
-                        project_git_repo,
-                        project_git_tree,
-                    )
+        # Process files in parallel with thread pool
+        blobs_to_add: list[Any] = []
+
+        def process_file(file_info: tuple[Path, str]) -> tuple[Any, str, bool] | None:
+            """Process single file and return (blob, path, was_reused)."""
+            file_path, file_path_str = file_info
+            try:
+                blob, was_reused = self._create_blob_for_file(
+                    file_path,
+                    file_path_str,
+                    repo,
+                    project_git_repo,
+                    project_git_tree,
+                )
+                return blob, file_path_str, was_reused
+            except Exception:
+                return None
+
+        # Use thread pool for I/O parallelism
+        max_workers = min(32, (len(files_to_process) or 1))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [
+                executor.submit(process_file, file_info)
+                for file_info in files_to_process
+            ]
+
+            for future in as_completed(futures):
+                result = future.result()
+                if result:
+                    blob, file_path_str, was_reused = result
+                    blobs_to_add.append(blob)
 
                     if was_reused:
                         blobs_reused += 1
@@ -636,9 +674,9 @@ class VersioningTracker:
                     tree_path = file_path_str.encode("utf-8")
                     tree.add(tree_path, 0o100644, blob.id)
 
-                except Exception:
-                    # Skip files we can't read
-                    continue
+        # Batch add all blobs to object store
+        if blobs_to_add:
+            repo.object_store.add_objects([(blob, None) for blob in blobs_to_add])
 
         return tree, blobs_reused, blobs_created
 
@@ -802,6 +840,9 @@ class VersioningTracker:
     ) -> set[str]:
         """Recursively collect all file paths from a git tree.
 
+        Uses pure dulwich API - git binary not required.
+        Replaces subprocess-based 'git ls-tree -r --name-only'.
+
         Args:
             tree_obj: Tree object to traverse
             repo: Repository object
@@ -832,19 +873,21 @@ class VersioningTracker:
         Best-effort restore: skips files that cannot be written (e.g., in use).
         Deletes files tracked by agent but not in target checkpoint.
 
+        Uses pure dulwich API for all operations - git binary not required.
+
         Returns:
             List of file paths that were restored (relative to project root)
         """
         repo = self.ensure_repo()
 
-        # Get tree from commit
+        # Get tree from commit (dulwich API)
         commit_obj = repo[commit_id.encode()]
         tree_id = getattr(commit_obj, "tree", None)
         if tree_id is None:
             return []
         tree = cast(Tree, repo[tree_id])
 
-        # Collect all files from checkpoint tree using dulwich (no git subprocess!)
+        # Collect all files from checkpoint tree (pure dulwich - no subprocess!)
         checkpoint_files = self._collect_tree_files(tree, repo)
 
         # Get files tracked by agent (from tracked_files.json metadata)
@@ -1063,6 +1106,7 @@ class VersioningTracker:
         """Check if there are uncommitted changes in working directory.
 
         Compares current files on disk with the latest checkpoint in active session.
+        Uses pure dulwich API - git binary not required.
         """
         repo = self.ensure_repo()
 
@@ -1162,6 +1206,8 @@ class VersioningTracker:
 
     def list_checkpoints(self) -> list[CheckpointInfo]:
         """List all checkpoints in chronological order (oldest first).
+
+        Uses pure dulwich API - git binary not required.
 
         Returns:
             List of CheckpointInfo objects from active session
