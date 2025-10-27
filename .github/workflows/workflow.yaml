@@ -359,7 +359,7 @@ jobs:
     if: needs.build_binaries.result == 'success' && (needs.semver.outputs.new_release_published == 'true' || startsWith(github.ref, 'refs/tags/'))
     steps:
       - name: Download artifacts
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v6
         with:
           pattern: agentsmithy-*
           merge-multiple: true
