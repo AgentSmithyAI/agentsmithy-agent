@@ -157,7 +157,7 @@ langchain-chroma==0.2.6
     # via -r requirements.in
 langchain-community==0.3.30
     # via -r requirements.in
-langchain-core==0.3.76
+langchain-core==0.3.79
     # via
     #   -r requirements.in
     #   langchain
@@ -168,7 +168,7 @@ langchain-core==0.3.76
     #   langgraph
     #   langgraph-checkpoint
     #   langgraph-prebuilt
-langchain-openai==0.3.33
+langchain-openai==0.3.35
     # via -r requirements.in
 langchain-text-splitters==0.3.11
     # via
