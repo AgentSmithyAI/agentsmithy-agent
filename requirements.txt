@@ -12,6 +12,8 @@ aiohttp==3.12.15
     #   langchain-community
 aiosignal==1.4.0
     # via aiohttp
+annotated-doc==0.0.3
+    # via fastapi
 annotated-types==0.7.0
     # via pydantic
 anyio==4.11.0
@@ -70,7 +72,7 @@ dulwich==0.24.2
     # via -r requirements.in
 durationpy==0.10
     # via kubernetes
-fastapi==0.118.0
+fastapi==0.120.0
     # via -r requirements.in
 filelock==3.19.1
     # via huggingface-hub
