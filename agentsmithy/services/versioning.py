@@ -8,10 +8,10 @@ import tempfile
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 from dulwich import porcelain
-from dulwich.objects import Blob, Commit, Tree  # precise types for object store
+from dulwich.objects import Commit, Tree  # precise types for object store
 from dulwich.repo import Repo
 
 # Comprehensive list of build artifacts, caches, and dependencies across languages
@@ -98,6 +98,10 @@ DEFAULT_EXCLUDES = [
     "*.xcworkspace",
     "Pods/",
     "*.ipa",
+    "*.xcassets/",  # Asset catalogs (images)
+    "*.app/",
+    "*.framework/",
+    "*.dSYM/",
     # Android
     ".gradle/",
     "build/",
@@ -439,6 +443,205 @@ class VersioningTracker:
         """Check if a transaction is currently active."""
         return self._transaction_active
 
+    # ---- helper methods for checkpoint creation ----
+    def _get_ignore_patterns(self) -> list[str]:
+        """Load and merge gitignore patterns with defaults."""
+        gitignore = self.project_root / ".gitignore"
+        patterns = _load_gitignore_patterns(gitignore)
+        patterns.extend(DEFAULT_EXCLUDES)
+        return patterns
+
+    def _open_project_git(self) -> tuple[Any | None, Any | None]:
+        """Try to open project git repository for blob reuse optimization.
+
+        Returns:
+            Tuple of (project_git_repo, project_git_tree) or (None, None)
+        """
+        try:
+            project_git_path = self.project_root / ".git"
+            if not project_git_path.exists() or not project_git_path.is_dir():
+                return None, None
+
+            from dulwich.repo import Repo as ProjectRepo
+
+            from agentsmithy.utils.logger import agent_logger
+
+            project_git_repo = ProjectRepo(str(self.project_root))
+
+            # Get HEAD tree for blob lookup
+            try:
+                head_commit = project_git_repo[project_git_repo.head()]
+                project_git_tree = project_git_repo[head_commit.tree]  # type: ignore[attr-defined]
+                agent_logger.debug(
+                    "Project git repo found, will reuse blobs for unchanged files"
+                )
+                return project_git_repo, project_git_tree
+            except Exception:
+                # No HEAD yet or empty repo
+                return project_git_repo, None
+        except Exception:
+            # Project is not a git repo
+            return None, None
+
+    def _try_reuse_blob(
+        self,
+        file_path: Path,
+        file_path_str: str,
+        project_git_repo: Any,
+        project_git_tree: Any,
+    ) -> Any | None:
+        """Try to reuse blob from project git if file unchanged.
+
+        Args:
+            file_path: Absolute path to file
+            file_path_str: Relative path as string
+            project_git_repo: Project git repository
+            project_git_tree: Project git HEAD tree
+
+        Returns:
+            Blob object if reused, None otherwise
+        """
+        if project_git_tree is None or project_git_repo is None:
+            return None
+
+        try:
+            # Look up file in project git tree
+            tree_entry = project_git_tree.lookup_path(
+                project_git_repo.__getitem__,
+                file_path_str.encode("utf-8"),
+            )
+            if tree_entry and len(tree_entry) == 2:
+                _mode, existing_blob_sha = tree_entry
+                # Check if file unchanged (by size for quick check)
+                existing_blob = project_git_repo[existing_blob_sha]
+                file_size = file_path.stat().st_size
+                if len(existing_blob.data) == file_size:
+                    # File likely unchanged, reuse blob (no file read!)
+                    return existing_blob
+        except (KeyError, FileNotFoundError, AttributeError):
+            # File not in project git or lookup failed
+            pass
+
+        return None
+
+    def _create_blob_for_file(
+        self,
+        file_path: Path,
+        file_path_str: str,
+        repo: Any,
+        project_git_repo: Any,
+        project_git_tree: Any,
+    ) -> tuple[Any, bool]:
+        """Create or reuse blob for a file.
+
+        Args:
+            file_path: Absolute path to file
+            file_path_str: Relative path as string
+            repo: Shadow repository
+            project_git_repo: Project git repository (or None)
+            project_git_tree: Project git HEAD tree (or None)
+
+        Returns:
+            Tuple of (blob, was_reused)
+        """
+        from dulwich.objects import Blob
+
+        # Try to reuse blob from project git
+        blob = self._try_reuse_blob(
+            file_path, file_path_str, project_git_repo, project_git_tree
+        )
+
+        if blob is not None:
+            repo.object_store.add_object(blob)
+            return blob, True
+
+        # Create new blob by reading file
+        content = file_path.read_bytes()
+        blob = Blob.from_string(content)
+        repo.object_store.add_object(blob)
+        return blob, False
+
+    def _build_tree_from_workdir(
+        self,
+        repo: Any,
+        ignore_patterns: list[str],
+        project_git_repo: Any,
+        project_git_tree: Any,
+    ) -> tuple[Any, int, int]:
+        """Build git tree by scanning project working directory.
+
+        Args:
+            repo: Shadow repository
+            ignore_patterns: List of ignore patterns
+            project_git_repo: Project git repository (or None)
+            project_git_tree: Project git HEAD tree (or None)
+
+        Returns:
+            Tuple of (tree, blobs_reused, blobs_created)
+        """
+        import os
+
+        from dulwich.objects import Tree
+
+        tree: Tree = Tree()
+        blobs_reused = 0
+        blobs_created = 0
+
+        # Walk through project directory and add files
+        for root, dirs, files in os.walk(self.project_root):
+            # Convert to relative path for ignore check
+            root_path = Path(root)
+            rel_root = (
+                root_path.relative_to(self.project_root)
+                if root_path != self.project_root
+                else Path(".")
+            )
+
+            # Filter directories using ignore patterns
+            filtered_dirs = []
+            for d in dirs:
+                dir_rel_path = (rel_root / d) if rel_root != Path(".") else Path(d)
+                dir_path_str = str(dir_rel_path).replace("\\", "/")
+
+                if not _is_ignored(dir_path_str, ignore_patterns):
+                    filtered_dirs.append(d)
+
+            # Update dirs in-place to control recursion
+            dirs[:] = filtered_dirs
+
+            # Process files
+            for filename in files:
+                file_path = Path(root) / filename
+                file_rel_path = file_path.relative_to(self.project_root)
+                file_path_str = str(file_rel_path).replace("\\", "/")
+
+                if _is_ignored(file_path_str, ignore_patterns):
+                    continue
+
+                try:
+                    blob, was_reused = self._create_blob_for_file(
+                        file_path,
+                        file_path_str,
+                        repo,
+                        project_git_repo,
+                        project_git_tree,
+                    )
+
+                    if was_reused:
+                        blobs_reused += 1
+                    else:
+                        blobs_created += 1
+
+                    # Add to tree
+                    tree_path = file_path_str.encode("utf-8")
+                    tree.add(tree_path, 0o100644, blob.id)
+
+                except Exception:
+                    # Skip files we can't read
+                    continue
+
+        return tree, blobs_reused, blobs_created
+
     # ---- session management ----
     def _get_session_ref(self, session_name: str) -> bytes:
         """Get git ref for a session."""
@@ -519,105 +722,61 @@ class VersioningTracker:
 
     # ---- checkpoints ----
     def create_checkpoint(self, message: str) -> CheckpointInfo:
-        repo = self.ensure_repo()
+        """Create a checkpoint of current project state.
 
-        # Since we have a non-bare repo, we need to add files from the project directory
-        # We'll create blob objects directly and build the tree
-        import os
+        Args:
+            message: Checkpoint message
+
+        Returns:
+            CheckpointInfo with commit ID and message
+        """
         import time
 
-        from dulwich.objects import Blob, Commit, Tree, parse_timezone
+        from dulwich.objects import Commit, parse_timezone
 
-        # Get current tree from active session (not HEAD which might point to wrong branch)
+        repo = self.ensure_repo()
+
+        # Get parent commit from active session
         active_session = self._get_active_session_name()
         session_ref = self._get_session_ref(active_session)
-
         parent_commit = None
         try:
             if session_ref in repo.refs:
-                session_head = repo.refs[session_ref]
-                parent_commit = repo[session_head]
+                parent_commit = repo[repo.refs[session_ref]]
             else:
-                # Fallback to HEAD if session doesn't exist
                 parent_commit = repo[repo.head()]
         except Exception:
             parent_commit = None
 
-        # Create new tree by scanning project directory
-        tree: Tree = Tree()
+        # Load ignore patterns
+        ignore_patterns = self._get_ignore_patterns()
 
-        # Load .gitignore patterns and merge with defaults
-        gitignore = self.project_root / ".gitignore"
-        ignore_patterns = _load_gitignore_patterns(gitignore)
-        ignore_patterns.extend(DEFAULT_EXCLUDES)
+        # Try to open project git for blob reuse optimization
+        project_git_repo, project_git_tree = self._open_project_git()
 
-        # Walk through project directory and add files
-        for root, dirs, files in os.walk(self.project_root):
-            # Convert to relative path for ignore check
-            root_path = Path(root)
-            rel_root = (
-                root_path.relative_to(self.project_root)
-                if root_path != self.project_root
-                else Path(".")
+        # Build tree by scanning working directory
+        tree, blobs_reused, blobs_created = self._build_tree_from_workdir(
+            repo, ignore_patterns, project_git_repo, project_git_tree
+        )
+
+        # Log blob statistics
+        if blobs_reused > 0 or blobs_created > 0:
+            from agentsmithy.utils.logger import agent_logger
+
+            agent_logger.info(
+                "Checkpoint blob statistics",
+                reused=blobs_reused,
+                created=blobs_created,
+                total=blobs_reused + blobs_created,
             )
 
-            # Filter directories using ignore patterns
-            filtered_dirs = []
-            for d in dirs:
-                dir_rel_path = (rel_root / d) if rel_root != Path(".") else Path(d)
-                dir_path_str = str(dir_rel_path).replace("\\", "/")
-
-                # Check if directory should be ignored (includes DEFAULT_EXCLUDES + .gitignore)
-                if _is_ignored(dir_path_str, ignore_patterns):
-                    continue
-
-                filtered_dirs.append(d)
-
-            # Update dirs in-place to control recursion
-            dirs[:] = filtered_dirs
-
-            for filename in files:
-                # Skip only specific file types (binaries, compiled artifacts)
-                # Don't skip all dot-files - they may contain important configs
-                if filename.endswith((".pyc", ".pyo", ".so", ".dylib", ".dll")):
-                    continue
-
-                file_path = Path(root) / filename
-
-                # Check if file should be ignored
-                file_rel_path = file_path.relative_to(self.project_root)
-                file_path_str = str(file_rel_path).replace("\\", "/")
-                if _is_ignored(file_path_str, ignore_patterns):
-                    continue
-
-                try:
-                    # Read file content
-                    content = file_path.read_bytes()
-
-                    # Create blob
-                    blob: Blob = Blob.from_string(content)
-                    repo.object_store.add_object(blob)
-
-                    # Add to tree with relative path
-                    tree_path = file_path_str.encode("utf-8")
-                    tree.add(tree_path, 0o100644, blob.id)
-
-                except Exception:
-                    # Skip files we can't read
-                    continue
-
-        # Allow empty commits (needed for initial checkpoint of empty projects)
-        # Add tree to repo (even if empty)
+        # Save tree to repository
         repo.object_store.add_object(tree)
 
-        # Create commit
+        # Create commit object
         commit: Commit = Commit()
         commit.tree = tree.id
-        if parent_commit:
-            commit.parents = [parent_commit.id]
-        else:
-            commit.parents = []
-
+        commit.parents = [parent_commit.id] if parent_commit else []
         commit.author = commit.committer = (
             b"AgentSmithy Versioning <versioning@agentsmithy.local>"
         )
@@ -625,21 +784,47 @@ class VersioningTracker:
         commit.commit_timezone = commit.author_timezone = parse_timezone(b"+0000")[0]
         commit.message = message.encode("utf-8")
 
-        # Add commit to repo
+        # Save commit and update session branch
         repo.object_store.add_object(commit)
-
-        # Update active session branch directly (ignore HEAD which may be on wrong branch)
-        active_session = self._get_active_session_name()
-        session_ref = self._get_session_ref(active_session)
         repo.refs[session_ref] = commit.id
 
-        # If this is first commit (no parents), also initialize main branch
+        # Initialize main branch if this is first commit
         if not commit.parents and self.MAIN_BRANCH not in repo.refs:
             repo.refs[self.MAIN_BRANCH] = commit.id
 
+        # Record metadata
         commit_id = commit.id.decode("utf-8")
         self._record_metadata(commit_id, message)
         return CheckpointInfo(commit_id=commit_id, message=message)
+
+    def _collect_tree_files(
+        self, tree_obj: Tree, repo: Any, prefix: str = ""
+    ) -> set[str]:
+        """Recursively collect all file paths from a git tree.
+
+        Args:
+            tree_obj: Tree object to traverse
+            repo: Repository object
+            prefix: Path prefix for recursion
+
+        Returns:
+            Set of file paths
+        """
+        files: set[str] = set()
+
+        for name, _mode, sha in tree_obj.items():
+            decoded_name = name.decode("utf-8")
+            full_path = f"{prefix}/{decoded_name}" if prefix else decoded_name
+
+            obj = repo[sha]
+            if isinstance(obj, Tree):
+                # Recurse into subdirectory
+                files.update(self._collect_tree_files(obj, repo, full_path))
+            else:
+                # It's a file (blob)
+                files.add(full_path)
+
+        return files
 
     def restore_checkpoint(self, commit_id: str) -> list[str]:
         """Restore project files to a specific checkpoint.
@@ -650,42 +835,17 @@ class VersioningTracker:
         Returns:
             List of file paths that were restored (relative to project root)
         """
-        import subprocess
-
         repo = self.ensure_repo()
-        # Checkout the given tree into worktree by reading blobs and writing files
-        # mypy: dulwich types use dynamic attributes; guard with isinstance checks
+
+        # Get tree from commit
         commit_obj = repo[commit_id.encode()]
         tree_id = getattr(commit_obj, "tree", None)
         if tree_id is None:
             return []
         tree = cast(Tree, repo[tree_id])
 
-        # First, collect all files from checkpoint tree using git ls-tree
-        checkpoint_files: set[str] = set()
-        git_dir = self.shadow_root / ".git"
-        try:
-            result = subprocess.run(
-                [
-                    "git",
-                    f"--git-dir={git_dir}",
-                    "ls-tree",
-                    "-r",
-                    "--name-only",
-                    commit_id,
-                ],
-                capture_output=True,
-                text=True,
-                check=True,
-            )
-            checkpoint_files = (
-                set(result.stdout.strip().split("\n"))
-                if result.stdout.strip()
-                else set()
-            )
-        except Exception:
-            # Fallback to empty if git ls-tree fails
-            checkpoint_files = set()
+        # Collect all files from checkpoint tree using dulwich (no git subprocess!)
+        checkpoint_files = self._collect_tree_files(tree, repo)
 
         # Get files tracked by agent (from tracked_files.json metadata)
         # Only delete files that agent touched
@@ -949,15 +1109,11 @@ class VersioningTracker:
                 dirs[:] = filtered_dirs
 
                 for filename in files:
-                    # Skip only specific file types (binaries, compiled artifacts)
-                    # Don't skip all dot-files - they may contain important configs
-                    if filename.endswith((".pyc", ".pyo", ".so", ".dylib", ".dll")):
-                        continue
-
                     file_path = Path(root) / filename
                     file_rel_path = file_path.relative_to(self.project_root)
                     file_path_str = str(file_rel_path).replace("\\", "/")
 
+                    # Check if file should be ignored (includes DEFAULT_EXCLUDES + .gitignore)
                     if _is_ignored(file_path_str, ignore_patterns):
                         continue
 
