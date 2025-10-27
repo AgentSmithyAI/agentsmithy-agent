@@ -18,6 +18,8 @@ class ToolManager:
     def __init__(self) -> None:
         self._tools: dict[str, BaseTool] = {}
         self._sse_callback: SseCallback | None = None
+        self._project_root: str | None = None
+        self._dialog_id: str | None = None
 
     def set_sse_callback(self, callback: SseCallback | None) -> None:
         self._sse_callback = callback
@@ -26,11 +28,13 @@ class ToolManager:
 
     def set_dialog_id(self, dialog_id: str | None) -> None:
         """Set dialog_id for all registered tools."""
+        self._dialog_id = dialog_id
         for tool in self._tools.values():
             tool.set_dialog_id(dialog_id)
 
     def set_project_root(self, project_root: str | None) -> None:
         """Set project_root for all registered tools."""
+        self._project_root = project_root
         for tool in self._tools.values():
             if hasattr(tool, "set_project_root"):
                 tool.set_project_root(project_root)

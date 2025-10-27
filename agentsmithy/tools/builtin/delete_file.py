@@ -83,6 +83,13 @@ class DeleteFileTool(BaseTool):
         else:
             tracker.finalize_edit()
 
+            # Stage file deletion for checkpoint tracking (agent deleted this file)
+            try:
+                rel_path_obj = file_path.relative_to(project_root)
+                tracker.stage_file(str(rel_path_obj))
+            except Exception:
+                pass  # Best effort
+
         # Remove file from RAG (optional, best-effort)
         try:
             if hasattr(self, "_project") and self._project:

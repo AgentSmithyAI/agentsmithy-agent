@@ -79,6 +79,13 @@ class WriteFileTool(BaseTool):
         else:
             tracker.finalize_edit()
 
+            # Stage file for checkpoint tracking (agent created/modified this file)
+            try:
+                rel_path_obj = file_path.relative_to(project_root)
+                tracker.stage_file(str(rel_path_obj))
+            except Exception:
+                pass  # Best effort
+
         # Index file in RAG (optional, best-effort)
         try:
             if hasattr(self, "_project") and self._project:

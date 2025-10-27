@@ -14,22 +14,115 @@ from dulwich import porcelain
 from dulwich.objects import Blob, Commit, Tree  # precise types for object store
 from dulwich.repo import Repo
 
+# Comprehensive list of build artifacts, caches, and dependencies across languages
 DEFAULT_EXCLUDES = [
+    # Version control
     ".git/",
+    ".svn/",
+    ".hg/",
+    # Agent state
+    ".agentsmithy/",
+    "chroma_db/",
+    # Python
     ".venv/",
     "venv/",
+    "env/",
+    ".env/",
     "__pycache__/",
-    "node_modules/",
-    "chroma_db/",
-    ".agentsmithy/",
-    "dist/",
-    "build/",
-    "target/",
     "*.pyc",
     "*.pyo",
+    "*.pyd",
+    ".pytest_cache/",
+    ".mypy_cache/",
+    ".ruff_cache/",
+    ".tox/",
+    ".coverage",
+    "htmlcov/",
+    "*.egg-info/",
+    "dist/",
+    "build/",
+    ".eggs/",
+    # Node.js / JavaScript / TypeScript
+    "node_modules/",
+    ".npm/",
+    ".yarn/",
+    "npm-debug.log*",
+    "yarn-error.log*",
+    ".next/",
+    ".nuxt/",
+    "out/",
+    ".cache/",
+    # Java / Kotlin / Scala
+    "target/",
+    ".gradle/",
+    ".m2/",
+    "*.class",
+    "*.jar",
+    "*.war",
+    "*.ear",
+    # C / C++
+    "*.o",
+    "*.obj",
+    "*.exe",
+    "*.out",
+    "*.a",
+    "*.lib",
     "*.so",
     "*.dylib",
     "*.dll",
+    "cmake-build-*/",
+    "CMakeFiles/",
+    "CMakeCache.txt",
+    # Rust
+    "target/",
+    "Cargo.lock",  # often auto-generated
+    # Go
+    "vendor/",
+    "*.test",
+    # .NET / C#
+    "bin/",
+    "obj/",
+    "*.dll",
+    "*.exe",
+    "*.pdb",
+    # Ruby
+    ".bundle/",
+    "vendor/bundle/",
+    "*.gem",
+    # PHP
+    "vendor/",
+    "composer.lock",  # often auto-generated
+    # Swift / iOS
+    ".build/",
+    "DerivedData/",
+    "*.xcworkspace",
+    "Pods/",
+    "*.ipa",
+    # Android
+    ".gradle/",
+    "build/",
+    "*.apk",
+    "*.aab",
+    "local.properties",
+    # Databases
+    "*.db",
+    "*.sqlite",
+    "*.sqlite3",
+    # IDEs and editors (user-specific, often in .gitignore)
+    ".DS_Store",
+    "Thumbs.db",
+    "desktop.ini",
+    # Logs
+    "*.log",
+    "logs/",
+    # Temporary files
+    "tmp/",
+    "temp/",
+    "*.tmp",
+    "*.bak",
+    "*.swp",
+    "*.swo",
+    "*~",
 ]
 
 
@@ -66,6 +159,10 @@ def _is_ignored(path_str: str, patterns: list[str]) -> bool:
     Returns:
         True if path should be ignored
     """
+    # Split path into parts for matching
+    path_parts = path_str.split("/")
+    filename = path_parts[-1] if path_parts else path_str
+
     for pattern in patterns:
         # Directory patterns (ending with /)
         if pattern.endswith("/"):
@@ -73,16 +170,44 @@ def _is_ignored(path_str: str, patterns: list[str]) -> bool:
             # Match if path starts with directory or IS the directory
             if path_str == dir_pattern or path_str.startswith(dir_pattern + "/"):
                 return True
+            # Also check if directory name appears anywhere in path
+            if dir_pattern in path_parts:
+                return True
+
         # Glob patterns (with * or ?)
         elif "*" in pattern or "?" in pattern:
-            if fnmatch.fnmatch(path_str, pattern):
-                return True
-            # Also check with leading **/
-            if fnmatch.fnmatch(path_str, f"**/{pattern}"):
-                return True
+            # Extension patterns like *.pyc
+            if pattern.startswith("*."):
+                if fnmatch.fnmatch(filename, pattern):
+                    return True
+            # Patterns with ** (match anywhere)
+            elif "**/" in pattern:
+                suffix = pattern.replace("**/", "")
+                if fnmatch.fnmatch(path_str, f"*/{suffix}") or fnmatch.fnmatch(
+                    path_str, suffix
+                ):
+                    return True
+            # cmake-build-* style patterns
+            elif pattern.endswith("*") or pattern.endswith("*/"):
+                base_pattern = pattern.rstrip("*/")
+                # Check each path component
+                for part in path_parts:
+                    if fnmatch.fnmatch(part, base_pattern + "*"):
+                        return True
+            # Regular glob
+            else:
+                if fnmatch.fnmatch(path_str, pattern):
+                    return True
+                # Also check filename only
+                if fnmatch.fnmatch(filename, pattern):
+                    return True
+
         # Exact match
         else:
             if path_str == pattern or path_str.startswith(pattern + "/"):
+                return True
+            # Check if exact name appears as directory in path
+            if pattern in path_parts:
                 return True
 
     return False
@@ -218,6 +343,43 @@ class VersioningTracker:
         self._transaction_active = True
         self._transaction_files = []
         self._transaction_message_parts = []
+
+    def _get_tracked_files_path(self) -> Path:
+        """Get path to tracked files metadata."""
+        return self.shadow_root.parent / "tracked_files.json"
+
+    def _load_tracked_files(self) -> set[str]:
+        """Load set of files tracked by agent."""
+        tracked_path = self._get_tracked_files_path()
+        if not tracked_path.exists():
+            return set()
+        try:
+            data = json.loads(tracked_path.read_text())
+            return set(data.get("files", []))
+        except Exception:
+            return set()
+
+    def _save_tracked_files(self, files: set[str]) -> None:
+        """Save set of tracked files."""
+        tracked_path = self._get_tracked_files_path()
+        tracked_path.parent.mkdir(parents=True, exist_ok=True)
+        tracked_path.write_text(json.dumps({"files": sorted(files)}, indent=2))
+
+    def stage_file(self, file_path: str) -> None:
+        """Mark file as tracked by agent (will be deleted on restore if not in target).
+
+        Args:
+            file_path: Path to file relative to project root
+        """
+        try:
+            tracked = self._load_tracked_files()
+            tracked.add(file_path)
+            self._save_tracked_files(tracked)
+        except Exception as e:
+            # Best effort - don't fail if tracking fails
+            from agentsmithy.utils.logger import agent_logger
+
+            agent_logger.debug("Failed to track file", file=file_path, error=str(e))
 
     def track_file_change(self, file_path: str, operation: str) -> None:
         """Track a file change within the current transaction.
@@ -384,9 +546,10 @@ class VersioningTracker:
         # Create new tree by scanning project directory
         tree: Tree = Tree()
 
-        # Load .gitignore patterns
+        # Load .gitignore patterns and merge with defaults
         gitignore = self.project_root / ".gitignore"
         ignore_patterns = _load_gitignore_patterns(gitignore)
+        ignore_patterns.extend(DEFAULT_EXCLUDES)
 
         # Walk through project directory and add files
         for root, dirs, files in os.walk(self.project_root):
@@ -404,18 +567,8 @@ class VersioningTracker:
                 dir_rel_path = (rel_root / d) if rel_root != Path(".") else Path(d)
                 dir_path_str = str(dir_rel_path).replace("\\", "/")
 
-                # Check if directory should be ignored
+                # Check if directory should be ignored (includes DEFAULT_EXCLUDES + .gitignore)
                 if _is_ignored(dir_path_str, ignore_patterns):
-                    continue
-
-                # Also apply hardcoded excludes
-                if d.startswith(".") or d in [
-                    "node_modules",
-                    "__pycache__",
-                    "dist",
-                    "build",
-                    "target",
-                ]:
                     continue
 
                 filtered_dirs.append(d)
@@ -424,15 +577,9 @@ class VersioningTracker:
             dirs[:] = filtered_dirs
 
             for filename in files:
-                # Skip hidden files and common artifacts
-                if (
-                    filename.startswith(".")
-                    or filename.endswith(".pyc")
-                    or filename.endswith(".pyo")
-                    or filename.endswith(".so")
-                    or filename.endswith(".dylib")
-                    or filename.endswith(".dll")
-                ):
+                # Skip only specific file types (binaries, compiled artifacts)
+                # Don't skip all dot-files - they may contain important configs
+                if filename.endswith((".pyc", ".pyo", ".so", ".dylib", ".dll")):
                     continue
 
                 file_path = Path(root) / filename
@@ -498,10 +645,13 @@ class VersioningTracker:
         """Restore project files to a specific checkpoint.
 
         Best-effort restore: skips files that cannot be written (e.g., in use).
+        Deletes files tracked by agent but not in target checkpoint.
 
         Returns:
             List of file paths that were restored (relative to project root)
         """
+        import subprocess
+
         repo = self.ensure_repo()
         # Checkout the given tree into worktree by reading blobs and writing files
         # mypy: dulwich types use dynamic attributes; guard with isinstance checks
@@ -511,7 +661,52 @@ class VersioningTracker:
             return []
         tree = cast(Tree, repo[tree_id])
 
-        # Recursively walk tree and restore files
+        # First, collect all files from checkpoint tree using git ls-tree
+        checkpoint_files: set[str] = set()
+        git_dir = self.shadow_root / ".git"
+        try:
+            result = subprocess.run(
+                [
+                    "git",
+                    f"--git-dir={git_dir}",
+                    "ls-tree",
+                    "-r",
+                    "--name-only",
+                    commit_id,
+                ],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            checkpoint_files = (
+                set(result.stdout.strip().split("\n"))
+                if result.stdout.strip()
+                else set()
+            )
+        except Exception:
+            # Fallback to empty if git ls-tree fails
+            checkpoint_files = set()
+
+        # Get files tracked by agent (from tracked_files.json metadata)
+        # Only delete files that agent touched
+        tracked_files = self._load_tracked_files()
+
+        # Delete only files that were tracked in HEAD but not in target checkpoint
+        # This way we don't delete user's manually created files
+        deleted_count = 0
+        files_to_delete = tracked_files - checkpoint_files
+
+        for file_path_str in files_to_delete:
+            target = self.project_root / file_path_str
+            try:
+                if target.exists():
+                    target.unlink()
+                    deleted_count += 1
+            except (OSError, PermissionError):
+                # Skip files that cannot be deleted
+                pass
+
+        # Now restore files from checkpoint
         restored_count = 0
         skipped_count = 0
         restored_files: list[str] = []
@@ -558,6 +753,7 @@ class VersioningTracker:
             "Checkpoint restore completed",
             commit_id=commit_id[:8],
             restored=restored_count,
+            deleted=deleted_count,
             skipped=skipped_count,
         )
 
@@ -730,6 +926,7 @@ class VersioningTracker:
             current_tree = Tree()
             gitignore = self.project_root / ".gitignore"
             ignore_patterns = _load_gitignore_patterns(gitignore)
+            ignore_patterns.extend(DEFAULT_EXCLUDES)
 
             for root, dirs, files in os.walk(self.project_root):
                 root_path = Path(root)
@@ -744,24 +941,17 @@ class VersioningTracker:
                 for d in dirs:
                     dir_rel_path = (rel_root / d) if rel_root != Path(".") else Path(d)
                     dir_path_str = str(dir_rel_path).replace("\\", "/")
+                    # Check if directory should be ignored (includes DEFAULT_EXCLUDES + .gitignore)
                     if _is_ignored(dir_path_str, ignore_patterns):
-                        continue
-                    if d.startswith(".") or d in [
-                        "node_modules",
-                        "__pycache__",
-                        "dist",
-                        "build",
-                        "target",
-                    ]:
                         continue
                     filtered_dirs.append(d)
 
                 dirs[:] = filtered_dirs
 
                 for filename in files:
-                    if filename.startswith(".") or filename.endswith(
-                        (".pyc", ".pyo", ".so", ".dylib", ".dll")
-                    ):
+                    # Skip only specific file types (binaries, compiled artifacts)
+                    # Don't skip all dot-files - they may contain important configs
+                    if filename.endswith((".pyc", ".pyo", ".so", ".dylib", ".dll")):
                         continue
 
                     file_path = Path(root) / filename
