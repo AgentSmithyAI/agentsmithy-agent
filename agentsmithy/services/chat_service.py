@@ -360,7 +360,9 @@ class ChatService:
             from agentsmithy.services.versioning import VersioningTracker
 
             tracker = VersioningTracker(str(project.root), dialog_id)
-            checkpoint = tracker.create_checkpoint(f"Before user message: {query[:50]}")
+            checkpoint = tracker.create_checkpoint(
+                f"Before user message: {query[:50]}{"..." if len(query) > 50 else ""}"
+            )
             checkpoint_id = checkpoint.commit_id
             session_id = tracker._get_active_session_name()
             api_logger.info(
