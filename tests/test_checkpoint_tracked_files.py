@@ -255,17 +255,22 @@ def test_mixed_scenario_user_and_agent_files(temp_project):
     # Now restore to checkpoint 2
     tracker.restore_checkpoint(cp2.commit_id)
 
-    # Expectations:
+    # Expectations (standard git semantics):
     # - base.py: exists (was in cp2)
     # - agent1.py: exists (was in cp2)
-    # - agent2.py: DELETED (created after cp2, tracked)
-    # - user_notes.txt: EXISTS (user created, not tracked)
+    # - agent2.py: DELETED (in cp3, not in cp2)
+    # - user_notes.txt: DELETED (in cp3, not in cp2)
+    #
+    # Note: user_notes.txt is deleted because it was included in cp3 via automatic scan.
+    # Standard git restore semantics: diff HEAD vs target, delete files in HEAD but not in target.
+    # If user wants to keep manual files, they should not checkpoint after creating them.
 
     assert base_file.exists()
     assert (temp_project.root / "agent1.py").exists()
     assert not (temp_project.root / "agent2.py").exists(), "agent2.py should be deleted"
-    assert user_file.exists(), "User file should be preserved"
-    assert user_file.read_text() == "my notes"
+    assert (
+        not user_file.exists()
+    ), "User file should be deleted (was in cp3, not in cp2)"
 
 
 def test_restore_with_no_staged_changes(temp_project):

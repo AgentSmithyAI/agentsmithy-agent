@@ -4,6 +4,7 @@ Persistency is project-scoped: vectors are stored inside the selected
 project's hidden state directory.
 """
 
+import asyncio
 import os
 from pathlib import Path
 from typing import Any
@@ -308,20 +309,64 @@ class VectorStoreManager:
         except Exception:
             return {}
 
+    async def _check_and_reindex_file(
+        self,
+        file_path: str,
+        stored_hash: str,
+        abs_path: Path,
+        semaphore: asyncio.Semaphore,
+    ) -> tuple[str, bool]:
+        """Check and reindex a single file if needed.
+
+        Args:
+            file_path: Relative file path
+            stored_hash: Previously stored hash
+            abs_path: Absolute path to file
+            semaphore: Semaphore for concurrency control
+
+        Returns:
+            Tuple of (status, content) where status is "reindexed", "skipped", or "error"
+        """
+        import hashlib
+
+        async with semaphore:
+            try:
+                # Read file in thread pool to avoid blocking
+                loop = asyncio.get_event_loop()
+                current_content = await loop.run_in_executor(
+                    None, abs_path.read_text, "utf-8"
+                )
+
+                # Compute hash in thread pool (can be CPU intensive for large files)
+                current_hash = await loop.run_in_executor(
+                    None,
+                    lambda: hashlib.md5(current_content.encode("utf-8")).hexdigest(),
+                )
+
+                # Compare hashes
+                if current_hash != stored_hash:
+                    # Hash mismatch - reindex
+                    await self.index_file(file_path, current_content)
+                    return ("reindexed", True)
+                else:
+                    return ("skipped", False)
+            except Exception:
+                # Can't read file - skip
+                return ("error", False)
+
     async def sync_files_if_needed(self) -> dict[str, int]:
         """Check all indexed files and reindex if hash mismatch.
 
         Optimization: Only reads files that likely changed (based on mtime/size check).
-        Avoids reading hundreds of unchanged files on every sync.
+        Uses parallel processing with concurrency limits for efficient batch processing.
 
         Returns:
             Dictionary with sync results:
             - "checked": number of files checked
             - "reindexed": number of files reindexed
             - "removed": number of files removed (deleted from disk)
+            - "skipped": number of files skipped (unchanged)
         """
-        import hashlib
-
         from agentsmithy.utils.logger import rag_logger
 
         indexed_files = self.get_indexed_files()
@@ -373,22 +418,35 @@ class VectorStoreManager:
             # File potentially changed, need to read and verify
             files_to_read.append((file_path, stored_hash, abs_path))
 
-        # Second pass: read and hash only files that likely changed
-        for file_path, stored_hash, abs_path in files_to_read:
-            try:
-                current_content = abs_path.read_text(encoding="utf-8")
-                current_hash = hashlib.md5(current_content.encode("utf-8")).hexdigest()
+        # Second pass: read and hash files in parallel with concurrency limit
+        if files_to_read:
+            # Limit concurrent file operations to avoid overwhelming the system
+            # 10 concurrent operations is a good balance for most systems
+            semaphore = asyncio.Semaphore(10)
 
-                # Compare hashes
-                if current_hash != stored_hash:
-                    # Hash mismatch - reindex
-                    await self.index_file(file_path, current_content)
+            # Create tasks for all files
+            tasks = [
+                self._check_and_reindex_file(
+                    file_path, stored_hash, abs_path, semaphore
+                )
+                for file_path, stored_hash, abs_path in files_to_read
+            ]
+
+            # Process all tasks in parallel (with semaphore limiting concurrency)
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            # Aggregate results
+            for result in results:
+                if isinstance(result, BaseException):
+                    # Skip exceptions (errors during file processing)
+                    continue
+                # Now result is guaranteed to be tuple[str, bool]
+                status, _ = result
+                if status == "reindexed":
                     stats["reindexed"] += 1
-                else:
+                elif status == "skipped":
                     stats["skipped"] += 1
-            except Exception:
-                # Can't read file - skip
-                continue
+                # Errors are silently ignored (already counted as not reindexed)
 
         if stats["reindexed"] > 0 or stats["removed"] > 0:
             rag_logger.debug(

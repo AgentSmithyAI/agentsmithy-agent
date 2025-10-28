@@ -15,6 +15,9 @@ class OSAdapter(Protocol):
     def shlex_split(self, command: str) -> list[str]: ...
     def make_shell_exec(self, command: str) -> tuple[list[str], dict[str, Any]]: ...
     def terminate_process(self, proc: Any) -> None: ...
+    def normalize_path(self, path: str) -> str:
+        """Normalize path to use forward slashes (for storage in git/DB)."""
+        ...
 
 
 class BaseOSAdapter:
@@ -61,3 +64,11 @@ class BaseOSAdapter:
             proc.kill()
         except Exception:
             pass
+
+    def normalize_path(self, path: str) -> str:
+        """Normalize path to use forward slashes (for storage in git/DB).
+
+        Default implementation: no transformation (POSIX-like systems).
+        Windows adapter should override to replace backslashes.
+        """
+        return path

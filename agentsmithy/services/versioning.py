@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
 import tempfile
 from collections import deque
@@ -17,6 +18,86 @@ from dulwich.repo import Repo
 
 # Note: This module uses dulwich (pure Python git implementation) for all git operations.
 # Git binary is not required - everything works through dulwich API.
+
+"""
+File Include/Exclude Logic
+===========================
+
+This module implements a comprehensive file tracking and exclusion system for checkpoints:
+
+1. DEFAULT_EXCLUDES (defined below):
+   - Hardcoded list of patterns that are ALWAYS excluded from automatic checkpoint scans
+   - Includes build artifacts, caches, dependencies, virtual environments, etc.
+   - Uses gitignore-style patterns (via pathspec library): directories (dir/), globs (*.pyc), etc.
+   - Examples: .venv/, node_modules/, __pycache__/, *.pyc, dist/, build/
+
+2. Project .gitignore:
+   - If project has .gitignore file, patterns are loaded and combined with DEFAULT_EXCLUDES
+   - Uses full gitignore specification (via pathspec library):
+     * Directory patterns: .venv/ - matches directory and all its contents
+     * Wildcards: *.log - matches all .log files
+     * Negation: !important.log - includes file even if matched by earlier pattern
+     * Anchored patterns: /config.json - only matches at root
+     * Double-star: **/test/** - matches test directory anywhere
+
+3. Git Staging Area (Index):
+   - Files created or modified by agent tools (write_file, edit_file) are staged immediately
+   - Each tool calls tracker.stage_file(path) which adds file to git index (staging area)
+   - This is equivalent to "git add -f" - stages file even if it matches ignore patterns
+   - Staged files persist in .agentsmithy/<dialog_id>/checkpoints/.git/index
+   - Purpose: Force-add intentionally created files even if they match ignore patterns
+   
+4. Checkpoint Creation:
+   - Step 1: Scan working directory, add all files EXCEPT those matching ignore patterns
+   - Step 2: Merge staging area (index) into tree - adds staged files even if ignored
+   - Step 3: Commit tree and clear staging area
+   - Rationale: If agent explicitly calls write_file(".venv/config.py"), it's staged immediately,
+     then force-added to checkpoint despite matching DEFAULT_EXCLUDES
+   - Uses standard git staging workflow instead of custom tracking file
+
+5. Checkpoint Restoration (restore_checkpoint):
+   - Uses standard git semantics: diff HEAD vs target checkpoint
+   - Collects files to delete from TWO sources:
+     * Files in HEAD checkpoint tree
+     * Files in staging area (index) - uncommitted but agent-created
+   - Deletes files in (HEAD_files ∪ staged_files - target_files)
+   - Restores files from target checkpoint tree
+   - Clears staging area after restore
+   - Cleans up empty directories left after file deletion
+   - Example scenario (non-ignored files):
+     * Checkpoint 1: main.py, README.md
+     * Agent creates: .github/workflows/ci.yaml (via write_file → staged to git index immediately)
+     * Checkpoint 2: scans workdir + merges staging → includes .github/workflows/ci.yaml
+     * Reset to checkpoint 1: .github/workflows/ci.yaml deleted (in checkpoint 2, not in checkpoint 1)
+     * User manually creates: .local/myfile (not staged, not in checkpoint) → NOT deleted
+   - Example scenario (ignored files):
+     * Checkpoint 1: main.py
+     * Agent creates: .venv/config.py (via write_file → staged to git index despite .venv/ in DEFAULT_EXCLUDES)
+     * Checkpoint 2: scans workdir (skips .venv/) + merges staging → includes .venv/config.py (force-added from staging)
+     * Staging cleared after checkpoint 2
+     * Reset to checkpoint 1: .venv/config.py deleted (was in checkpoint 2)
+     * User creates: .venv/lib/package.py (not staged) → NOT deleted (not in any checkpoint)
+   - Example scenario (staged but not committed):
+     * Checkpoint 1: main.py
+     * Agent creates: .github/workflows/ci.yaml (via write_file → staged, but NO checkpoint created yet)
+     * Reset to checkpoint 1: .github/workflows/ci.yaml deleted (staged but not in checkpoint 1)
+     * Staging cleared after restore
+
+6. Uncommitted Changes Detection (has_uncommitted_changes):
+   - Compares current working directory against HEAD checkpoint
+   - Uses CURRENT ignore spec (from .gitignore + DEFAULT_EXCLUDES)
+   - Filters committed files by current ignore spec before comparison
+   - Prevents false positives when files become ignored after being committed
+   - Example: .xcassets/ files committed before DEFAULT_EXCLUDES update → now ignored → not counted as "deleted"
+
+Key Design Principles:
+- Respect ignore patterns for automatic scans: Don't include artifacts/caches by default
+- Trust explicit actions: If agent explicitly creates a file, stage it immediately (git add -f)
+- Use standard git workflow: Staging area (index) for force-adds, not custom tracking files
+- Standard git semantics: Restore = diff and apply, staging = force-add mechanism
+- Handle pattern changes gracefully: Files can become ignored after being committed
+- Clean up after ourselves: Clear staging after checkpoint, delete outdated files on restore
+"""
 
 # Comprehensive list of build artifacts, caches, and dependencies across languages
 DEFAULT_EXCLUDES = [
@@ -332,42 +413,60 @@ class VersioningTracker:
         self._transaction_files = []
         self._transaction_message_parts = []
 
-    def _get_tracked_files_path(self) -> Path:
-        """Get path to tracked files metadata."""
-        return self.shadow_root.parent / "tracked_files.json"
-
-    def _load_tracked_files(self) -> set[str]:
-        """Load set of files tracked by agent."""
-        tracked_path = self._get_tracked_files_path()
-        if not tracked_path.exists():
-            return set()
-        try:
-            data = json.loads(tracked_path.read_text())
-            return set(data.get("files", []))
-        except Exception:
-            return set()
-
-    def _save_tracked_files(self, files: set[str]) -> None:
-        """Save set of tracked files."""
-        tracked_path = self._get_tracked_files_path()
-        tracked_path.parent.mkdir(parents=True, exist_ok=True)
-        tracked_path.write_text(json.dumps({"files": sorted(files)}, indent=2))
-
     def stage_file(self, file_path: str) -> None:
-        """Mark file as tracked by agent (will be deleted on restore if not in target).
+        """Stage file in git index for force-add to next checkpoint.
+
+        This is equivalent to 'git add -f' - adds file to staging even if ignored.
+        Staged files will be included in next checkpoint regardless of ignore patterns.
 
         Args:
             file_path: Path to file relative to project root
         """
         try:
-            tracked = self._load_tracked_files()
-            tracked.add(file_path)
-            self._save_tracked_files(tracked)
+            repo = self.ensure_repo()
+            abs_path = self.project_root / file_path
+
+            if not abs_path.exists():
+                return
+
+            # Read file content and create blob
+            from dulwich.objects import Blob
+
+            content = abs_path.read_bytes()
+            blob = Blob.from_string(content)
+            repo.object_store.add_object(blob)
+
+            # Add to git index (staging area)
+            from dulwich.index import IndexEntry
+
+            index = repo.open_index()
+
+            # Get file stats for index entry
+            stat = abs_path.stat()
+
+            # Create index entry
+            entry = IndexEntry(
+                ctime=(int(stat.st_ctime), 0),
+                mtime=(int(stat.st_mtime), 0),
+                dev=stat.st_dev,
+                ino=stat.st_ino,
+                mode=stat.st_mode,
+                uid=stat.st_uid,
+                gid=stat.st_gid,
+                size=stat.st_size,
+                sha=blob.id,
+                flags=0,
+            )
+
+            # Add entry to index
+            index[file_path.encode("utf-8")] = entry
+            index.write()
+
         except Exception as e:
-            # Best effort - don't fail if tracking fails
+            # Best effort - don't fail if staging fails
             from agentsmithy.utils.logger import agent_logger
 
-            agent_logger.debug("Failed to track file", file=file_path, error=str(e))
+            agent_logger.debug("Failed to stage file", file=file_path, error=str(e))
 
     def track_file_change(self, file_path: str, operation: str) -> None:
         """Track a file change within the current transaction.
@@ -699,6 +798,49 @@ class VersioningTracker:
 
         return tree, blobs_reused, blobs_created
 
+    def _merge_staging_into_tree(self, tree: Any, repo: Any) -> int:
+        """Merge staging area (index) into tree.
+
+        Files in staging area were explicitly added via stage_file() (git add -f).
+        Add them to tree even if they would be ignored by normal scan.
+
+        Args:
+            tree: Tree to merge staged files into
+            repo: Repository object
+
+        Returns:
+            Number of files merged from staging
+        """
+        try:
+            index = repo.open_index()
+        except (FileNotFoundError, OSError) as e:
+            # No index file - nothing to merge
+            from agentsmithy.utils.logger import agent_logger
+
+            agent_logger.debug("No index file to merge", error=str(e))
+            return 0
+
+        forced_count = 0
+
+        for path, entry in index.items():
+            try:
+                # IndexEntry has attributes, not tuple indexing
+                blob_id = entry.sha
+                mode = entry.mode
+
+                # Add to tree (overwrites if already exists)
+                tree.add(path, mode, blob_id)
+                forced_count += 1
+            except Exception as e:
+                # Best effort - skip entries that can't be processed
+                from agentsmithy.utils.logger import agent_logger
+
+                agent_logger.debug(
+                    "Failed to merge staging entry", path=path, error=str(e)
+                )
+
+        return forced_count
+
     # ---- session management ----
     def _get_session_ref(self, session_name: str) -> bytes:
         """Get git ref for a session."""
@@ -816,6 +958,13 @@ class VersioningTracker:
             repo, ignore_spec, project_git_repo, project_git_tree
         )
 
+        # Merge staging area (index) into tree
+        # Files in staging were explicitly added via stage_file() (git add -f equivalent)
+        # Include them even if they match ignore patterns
+        forced_count = self._merge_staging_into_tree(tree, repo)
+        if forced_count > 0:
+            blobs_created += forced_count
+
         # Log blob statistics
         if blobs_reused > 0 or blobs_created > 0:
             from agentsmithy.utils.logger import agent_logger
@@ -852,6 +1001,17 @@ class VersioningTracker:
         # Record metadata
         commit_id = commit.id.decode("utf-8")
         self._record_metadata(commit_id, message)
+
+        # Clear staging area after successful commit
+        # Staged files are now in the checkpoint, no need to keep them in index
+        try:
+            index_path = Path(repo.path) / "index"
+            if index_path.exists():
+                index_path.unlink()
+        except Exception:
+            # Best effort - don't fail checkpoint if index cleanup fails
+            pass
+
         return CheckpointInfo(commit_id=commit_id, message=message)
 
     def _collect_tree_files(
@@ -890,7 +1050,9 @@ class VersioningTracker:
         """Restore project files to a specific checkpoint.
 
         Best-effort restore: skips files that cannot be written (e.g., in use).
-        Deletes files tracked by agent but not in target checkpoint.
+        Deletes files that exist in HEAD checkpoint but not in target checkpoint.
+
+        Uses standard git semantics: diff HEAD vs target, delete added files.
 
         Uses pure dulwich API for all operations - git binary not required.
 
@@ -899,24 +1061,45 @@ class VersioningTracker:
         """
         repo = self.ensure_repo()
 
-        # Get tree from commit (dulwich API)
-        commit_obj = repo[commit_id.encode()]
-        tree_id = getattr(commit_obj, "tree", None)
-        if tree_id is None:
+        # Get target checkpoint tree
+        target_commit = repo[commit_id.encode()]
+        target_tree_id = getattr(target_commit, "tree", None)
+        if target_tree_id is None:
             return []
-        tree = cast(Tree, repo[tree_id])
+        target_tree = cast(Tree, repo[target_tree_id])
+        target_files = self._collect_tree_files(target_tree, repo)
 
-        # Collect all files from checkpoint tree (pure dulwich - no subprocess!)
-        checkpoint_files = self._collect_tree_files(tree, repo)
+        # Get HEAD checkpoint tree (current state)
+        head_files: set[str] = set()
+        try:
+            active_session = self._get_active_session_name()
+            session_ref = self._get_session_ref(active_session)
+            if session_ref in repo.refs:
+                head_commit = repo[repo.refs[session_ref]]
+            else:
+                head_commit = repo[repo.head()]
 
-        # Get files tracked by agent (from tracked_files.json metadata)
-        # Only delete files that agent touched
-        tracked_files = self._load_tracked_files()
+            head_tree_id = getattr(head_commit, "tree", None)
+            if head_tree_id:
+                head_tree = cast(Tree, repo[head_tree_id])
+                head_files = self._collect_tree_files(head_tree, repo)
+        except Exception:
+            # No HEAD commit yet or error - nothing to delete
+            head_files = set()
 
-        # Delete only files that were tracked in HEAD but not in target checkpoint
-        # This way we don't delete user's manually created files
+        # Also include staged files (in index) - these are uncommitted but agent-created
+        # They should be deleted if not in target checkpoint
+        try:
+            index = repo.open_index()
+            for path, _entry in index.items():
+                head_files.add(path.decode("utf-8"))
+        except (FileNotFoundError, OSError):
+            # No index - nothing staged
+            pass
+
+        # Standard git diff: files in HEAD (+ staged) but not in target = files to delete
         deleted_count = 0
-        files_to_delete = tracked_files - checkpoint_files
+        files_to_delete = head_files - target_files
 
         for file_path_str in files_to_delete:
             target = self.project_root / file_path_str
@@ -927,6 +1110,19 @@ class VersioningTracker:
             except (OSError, PermissionError):
                 # Skip files that cannot be deleted
                 pass
+
+        # Clean up empty directories left after file deletion
+        # Walk bottom-up so we delete child dirs before parents
+        for root, dirs, _files in os.walk(self.project_root, topdown=False):
+            for dir_name in dirs:
+                dir_path = Path(root) / dir_name
+                try:
+                    # Only delete if empty (no files, no subdirs)
+                    if not any(dir_path.iterdir()):
+                        dir_path.rmdir()
+                except (OSError, PermissionError, ValueError):
+                    # Skip dirs that cannot be deleted or are outside project root
+                    pass
 
         # Now restore files from checkpoint
         restored_count = 0
@@ -967,7 +1163,17 @@ class VersioningTracker:
                                 error=str(e),
                             )
 
-        restore_tree(tree)
+        restore_tree(target_tree)
+
+        # Clear staging area after restore
+        # Staged files were either deleted (not in target) or will be committed later
+        try:
+            index_path = Path(repo.path) / "index"
+            if index_path.exists():
+                index_path.unlink()
+        except Exception:
+            # Best effort - don't fail restore if index cleanup fails
+            pass
 
         from agentsmithy.utils.logger import agent_logger
 

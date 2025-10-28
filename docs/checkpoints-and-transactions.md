@@ -329,7 +329,7 @@ tracker.restore_checkpoint("abc123...")
 
 ### Tool Integration
 
-Tools use `start_edit()` / `finalize_edit()` for rollback protection:
+Tools use `start_edit()` / `finalize_edit()` for rollback protection and `stage_file()` to track agent-created files:
 
 ```python
 # write_file.py (simplified)
@@ -338,6 +338,10 @@ tracker.start_edit([file_path])
 
 try:
     file_path.write_text(content)
+    
+    # Stage file immediately - force-add to staging area
+    # This ensures file is included in next checkpoint even if ignored
+    tracker.stage_file(file_path)
 except:
     tracker.abort_edit()  # Restore file on error
     raise
@@ -346,6 +350,12 @@ else:
     
     # Note: Checkpoints are created before user messages, not by tools
 ```
+
+**What `stage_file()` does:**
+- Adds file to Git staging area (index)
+- Equivalent to `git add -f` - force-adds even if file matches ignore patterns
+- Staged files are included in next checkpoint
+- Staging area is cleared after checkpoint creation
 
 ### ChatService Creates Checkpoints
 
@@ -479,6 +489,75 @@ In addition to `.gitignore`, the following are always excluded:
 - **Faster operations:** Less files to scan and track
 - **No conflicts:** Avoids tracking files that shouldn't be in version control
 - **Respect project conventions:** Uses your existing `.gitignore` rules
+
+## Staging Area and Force-Add
+
+### How Agent-Created Files Are Tracked
+
+When the AI agent explicitly creates or modifies files using tools like `write_file` or `replace_in_file`, these files are **staged immediately** to Git's staging area (index), even if they match ignore patterns.
+
+**Example:**
+```python
+# Agent creates a file in an ignored directory
+write_file(".venv/config.py", content)
+→ File is staged to .git/index immediately (equivalent to git add -f)
+→ Will be included in next checkpoint even though .venv/ is in DEFAULT_EXCLUDES
+```
+
+### Checkpoint Creation with Staging
+
+When a checkpoint is created:
+
+1. **Scan working directory** - Add all files EXCEPT those matching ignore patterns
+2. **Merge staging area** - Add staged files even if they match ignore patterns
+3. **Commit tree** - Create checkpoint with all files
+4. **Clear staging area** - Remove staged entries after successful commit
+
+**Storage:** `.agentsmithy/dialogs/<dialog_id>/checkpoints/.git/index`
+
+### Restore and Staging Cleanup
+
+When restoring to a checkpoint:
+
+1. **Collect files to delete from two sources:**
+   - Files in HEAD checkpoint tree
+   - Files in staging area (uncommitted but agent-created)
+
+2. **Delete files** in `(HEAD_files ∪ staged_files - target_files)`
+
+3. **Restore files** from target checkpoint tree
+
+4. **Clear staging area** - Remove all staged entries after restore
+
+5. **Clean up empty directories**
+
+**Example scenario:**
+```
+Checkpoint 1: main.py, README.md
+
+Agent creates: .github/workflows/ci.yaml
+→ File staged to index (but no checkpoint created yet)
+
+User resets to Checkpoint 1:
+→ .github/workflows/ci.yaml deleted (staged but not in checkpoint 1)
+→ Staging area cleared
+→ has_unapproved: false ✅
+```
+
+### Why Staging Area?
+
+**Before (tracked_files.json):**
+- Custom JSON file tracked agent-created files
+- Required manual sync logic
+- Non-standard approach
+
+**After (Git staging area):**
+- Uses standard Git index mechanism
+- Equivalent to `git add -f` for force-adding ignored files
+- Consistent with Git semantics
+- Automatically cleared after checkpoint/restore
+
+**Rationale:** If agent explicitly calls `write_file(".venv/config.py")`, it's intentional (not an artifact), so it should be included in checkpoints despite matching ignore patterns.
 
 ## RAG Integration
 

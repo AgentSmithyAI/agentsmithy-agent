@@ -456,170 +456,196 @@ class ToolExecutor:
             )()
             stream_iter = bound_llm.astream(conversation, **stream_kwargs)
 
-            async for chunk in stream_iter:
-                # Capture usage tokens if provider exposes them on chunks
-                try:
-                    add = getattr(chunk, "additional_kwargs", {}) or {}
-                    if isinstance(add, dict) and add.get("usage"):
-                        maybeu = add.get("usage")
-                        if isinstance(maybeu, dict):
-                            last_usage = maybeu
-                    meta = getattr(chunk, "response_metadata", {}) or {}
-                    if isinstance(meta, dict) and meta.get("token_usage"):
-                        maybeu2 = meta.get("token_usage")
-                        if isinstance(maybeu2, dict):
-                            last_usage = maybeu2
-                    # Prefer direct usage_metadata if LC provides it (final chunk)
-                    um = getattr(chunk, "usage_metadata", None)
-                    if isinstance(um, dict) and um:
-                        last_usage = um
-                except Exception:
-                    pass
-                # Try to extract reasoning from provider-specific metadata (minimal and robust)
-                try:
-                    # First, check if reasoning_content is directly in the chunk (OpenAI o1/gpt-5)
-                    reasoning_content = getattr(chunk, "reasoning_content", None)
-                    additional_kwargs = getattr(chunk, "additional_kwargs", {}) or {}
-                    response_metadata = getattr(chunk, "response_metadata", {}) or {}
+            try:
+                async for chunk in stream_iter:
+                    # Capture usage tokens if provider exposes them on chunks
+                    try:
+                        add = getattr(chunk, "additional_kwargs", {}) or {}
+                        if isinstance(add, dict) and add.get("usage"):
+                            maybeu = add.get("usage")
+                            if isinstance(maybeu, dict):
+                                last_usage = maybeu
+                        meta = getattr(chunk, "response_metadata", {}) or {}
+                        if isinstance(meta, dict) and meta.get("token_usage"):
+                            maybeu2 = meta.get("token_usage")
+                            if isinstance(maybeu2, dict):
+                                last_usage = maybeu2
+                        # Prefer direct usage_metadata if LC provides it (final chunk)
+                        um = getattr(chunk, "usage_metadata", None)
+                        if isinstance(um, dict) and um:
+                            last_usage = um
+                    except Exception:
+                        pass
+                    # Try to extract reasoning from provider-specific metadata (minimal and robust)
+                    try:
+                        # First, check if reasoning_content is directly in the chunk (OpenAI o1/gpt-5)
+                        reasoning_content = getattr(chunk, "reasoning_content", None)
+                        additional_kwargs = (
+                            getattr(chunk, "additional_kwargs", {}) or {}
+                        )
+                        response_metadata = (
+                            getattr(chunk, "response_metadata", {}) or {}
+                        )
 
-                    reasoning = None
-                    # Check reasoning_content first (new OpenAI format)
-                    if reasoning_content and isinstance(reasoning_content, str):
-                        reasoning = reasoning_content
-                    # Fallback to additional_kwargs.reasoning
-                    elif isinstance(additional_kwargs, dict):
-                        reasoning = additional_kwargs.get("reasoning")
-                    # Fallback to response_metadata.reasoning
-                    if reasoning is None and isinstance(response_metadata, dict):
-                        reasoning = response_metadata.get("reasoning")
+                        reasoning = None
+                        # Check reasoning_content first (new OpenAI format)
+                        if reasoning_content and isinstance(reasoning_content, str):
+                            reasoning = reasoning_content
+                        # Fallback to additional_kwargs.reasoning
+                        elif isinstance(additional_kwargs, dict):
+                            reasoning = additional_kwargs.get("reasoning")
+                        # Fallback to response_metadata.reasoning
+                        if reasoning is None and isinstance(response_metadata, dict):
+                            reasoning = response_metadata.get("reasoning")
 
-                    reasoning_text = None
-                    if isinstance(reasoning, str):
-                        reasoning_text = reasoning
-                    elif isinstance(reasoning, dict):
-                        summary = reasoning.get("summary")
-                        if isinstance(summary, str):
-                            reasoning_text = summary
-                        elif isinstance(summary, list) and summary:
-                            parts: list[str] = []
-                            for item in summary:
-                                if isinstance(item, dict):
-                                    text_value = item.get("text")
-                                    if isinstance(text_value, str):
-                                        parts.append(text_value)
-                                    content_value = item.get("content")
-                                    if isinstance(content_value, list):
-                                        for sub in content_value:
-                                            if isinstance(sub, dict):
-                                                text_value = sub.get("text")
-                                                if isinstance(text_value, str):
-                                                    parts.append(text_value)
-                            if parts:
-                                reasoning_text = "".join(parts)
-                        elif isinstance(summary, dict):
-                            text_value = summary.get("text")
-                            if isinstance(text_value, str):
-                                reasoning_text = text_value
-                            content_value = summary.get("content")
-                            if isinstance(content_value, list):
-                                parts2: list[str] = []
-                                for sub in content_value:
-                                    if isinstance(sub, dict):
-                                        text_value = sub.get("text")
+                        reasoning_text = None
+                        if isinstance(reasoning, str):
+                            reasoning_text = reasoning
+                        elif isinstance(reasoning, dict):
+                            summary = reasoning.get("summary")
+                            if isinstance(summary, str):
+                                reasoning_text = summary
+                            elif isinstance(summary, list) and summary:
+                                parts: list[str] = []
+                                for item in summary:
+                                    if isinstance(item, dict):
+                                        text_value = item.get("text")
                                         if isinstance(text_value, str):
-                                            parts2.append(text_value)
-                                if parts2:
-                                    reasoning_text = "".join(parts2)
-                        if not reasoning_text and isinstance(
-                            reasoning.get("content"), str
-                        ):
-                            reasoning_text = reasoning.get("content")
+                                            parts.append(text_value)
+                                        content_value = item.get("content")
+                                        if isinstance(content_value, list):
+                                            for sub in content_value:
+                                                if isinstance(sub, dict):
+                                                    text_value = sub.get("text")
+                                                    if isinstance(text_value, str):
+                                                        parts.append(text_value)
+                                if parts:
+                                    reasoning_text = "".join(parts)
+                            elif isinstance(summary, dict):
+                                text_value = summary.get("text")
+                                if isinstance(text_value, str):
+                                    reasoning_text = text_value
+                                content_value = summary.get("content")
+                                if isinstance(content_value, list):
+                                    parts2: list[str] = []
+                                    for sub in content_value:
+                                        if isinstance(sub, dict):
+                                            text_value = sub.get("text")
+                                            if isinstance(text_value, str):
+                                                parts2.append(text_value)
+                                    if parts2:
+                                        reasoning_text = "".join(parts2)
+                            if not reasoning_text and isinstance(
+                                reasoning.get("content"), str
+                            ):
+                                reasoning_text = reasoning.get("content")
 
-                    if reasoning_text:
-                        if not reasoning_started:
-                            reasoning_started = True
-                            yield {"type": EventType.REASONING_START.value}
-                        yield {
-                            "type": EventType.REASONING.value,
-                            "content": reasoning_text,
-                        }
-                except Exception:
-                    pass
+                        if reasoning_text:
+                            if not reasoning_started:
+                                reasoning_started = True
+                                yield {"type": EventType.REASONING_START.value}
+                            yield {
+                                "type": EventType.REASONING.value,
+                                "content": reasoning_text,
+                            }
+                    except Exception:
+                        pass
 
-                # Handle content chunks
-                content = getattr(chunk, "content", None)
-                if content:
-                    # Only process actual text content
-                    if isinstance(content, str):
-                        if not chat_started:
-                            chat_started = True
-                            yield {"type": "chat_start"}
-                        accumulated_content += content
-                        yield {"type": EventType.CHAT.value, "content": content}
-                    elif isinstance(content, list):
-                        # LangChain may return content as list of dicts for newer models
-                        text_parts = []
-                        for item in content:
-                            if isinstance(item, dict) and "text" in item:
-                                text_parts.append(item["text"])
-                            elif isinstance(item, str):
-                                text_parts.append(item)
-                        if text_parts:
+                    # Handle content chunks
+                    content = getattr(chunk, "content", None)
+                    if content:
+                        # Only process actual text content
+                        if isinstance(content, str):
                             if not chat_started:
                                 chat_started = True
                                 yield {"type": "chat_start"}
-                            text = "".join(text_parts)
-                            accumulated_content += text
-                            yield {"type": EventType.CHAT.value, "content": text}
+                            accumulated_content += content
+                            yield {"type": EventType.CHAT.value, "content": content}
+                        elif isinstance(content, list):
+                            # LangChain may return content as list of dicts for newer models
+                            text_parts = []
+                            for item in content:
+                                if isinstance(item, dict) and "text" in item:
+                                    text_parts.append(item["text"])
+                                elif isinstance(item, str):
+                                    text_parts.append(item)
+                            if text_parts:
+                                if not chat_started:
+                                    chat_started = True
+                                    yield {"type": "chat_start"}
+                                text = "".join(text_parts)
+                                accumulated_content += text
+                                yield {"type": EventType.CHAT.value, "content": text}
 
-                # Handle tool call chunks
-                tool_call_chunks = getattr(chunk, "tool_call_chunks", [])
-                for tc_chunk in tool_call_chunks:
-                    # Check if we need to start a new tool call or continue existing one
-                    chunk_index = tc_chunk.get("index")
-                    if chunk_index is not None:
-                        # Check if this is a continuation of current tool call
-                        if (
-                            current_tool_call
-                            and current_tool_call.get("index") == chunk_index
-                        ):
-                            # Continue accumulating the same tool call
-                            if tc_chunk.get("id") and not current_tool_call.get("id"):
-                                current_tool_call["id"] = tc_chunk["id"]
+                    # Handle tool call chunks
+                    tool_call_chunks = getattr(chunk, "tool_call_chunks", [])
+                    for tc_chunk in tool_call_chunks:
+                        # Check if we need to start a new tool call or continue existing one
+                        chunk_index = tc_chunk.get("index")
+                        if chunk_index is not None:
+                            # Check if this is a continuation of current tool call
+                            if (
+                                current_tool_call
+                                and current_tool_call.get("index") == chunk_index
+                            ):
+                                # Continue accumulating the same tool call
+                                if tc_chunk.get("id") and not current_tool_call.get(
+                                    "id"
+                                ):
+                                    current_tool_call["id"] = tc_chunk["id"]
+                                if tc_chunk.get("name"):
+                                    current_tool_call["name"] += tc_chunk["name"]
+                                if tc_chunk.get("args"):
+                                    current_tool_call["args"] += tc_chunk["args"]
+                            else:
+                                # New tool call
+                                if current_tool_call and "name" in current_tool_call:
+                                    accumulated_tool_calls.append(current_tool_call)
+                                current_tool_call = {
+                                    "index": chunk_index,
+                                    "id": tc_chunk.get("id", ""),
+                                    "name": tc_chunk.get("name", ""),
+                                    "args": tc_chunk.get("args", ""),
+                                }
+                        # Accumulate tool call data (for chunks without index)
+                        elif current_tool_call:
                             if tc_chunk.get("name"):
                                 current_tool_call["name"] += tc_chunk["name"]
                             if tc_chunk.get("args"):
                                 current_tool_call["args"] += tc_chunk["args"]
-                        else:
-                            # New tool call
-                            if current_tool_call and "name" in current_tool_call:
-                                accumulated_tool_calls.append(current_tool_call)
-                            current_tool_call = {
-                                "index": chunk_index,
-                                "id": tc_chunk.get("id", ""),
-                                "name": tc_chunk.get("name", ""),
-                                "args": tc_chunk.get("args", ""),
-                            }
-                    # Accumulate tool call data (for chunks without index)
-                    elif current_tool_call:
-                        if tc_chunk.get("name"):
-                            current_tool_call["name"] += tc_chunk["name"]
-                        if tc_chunk.get("args"):
-                            current_tool_call["args"] += tc_chunk["args"]
 
-            # Close boundary markers at the end of this streaming chunk
-            if reasoning_started:
-                yield {"type": EventType.REASONING_END.value}
-            if chat_started and accumulated_content:
-                yield {"type": EventType.CHAT_END.value}
+                # Close boundary markers at the end of this streaming chunk
+                if reasoning_started:
+                    yield {"type": EventType.REASONING_END.value}
+                if chat_started and accumulated_content:
+                    yield {"type": EventType.CHAT_END.value}
 
-            # Add the last tool call if exists
-            if (
-                current_tool_call
-                and "name" in current_tool_call
-                and current_tool_call["name"]
-            ):
-                accumulated_tool_calls.append(current_tool_call)
+                # Add the last tool call if exists
+                if (
+                    current_tool_call
+                    and "name" in current_tool_call
+                    and current_tool_call["name"]
+                ):
+                    accumulated_tool_calls.append(current_tool_call)
+
+            except Exception as stream_error:
+                # LLM streaming failed (e.g., context window exceeded)
+                agent_logger.error(
+                    "LLM streaming failed",
+                    exc_info=True,
+                    error=str(stream_error),
+                )
+                # Close any open boundaries
+                if reasoning_started:
+                    yield {"type": EventType.REASONING_END.value}
+                if chat_started:
+                    yield {"type": EventType.CHAT_END.value}
+                # Yield error event that chat_service will forward to client
+                yield {
+                    "type": EventType.ERROR.value,
+                    "error": f"LLM error: {str(stream_error)}",
+                }
+                return  # Stop processing
 
             # If no tool calls, we're done
             if not accumulated_tool_calls:

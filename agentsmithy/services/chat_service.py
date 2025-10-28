@@ -272,6 +272,15 @@ class ChatService:
                     args=chunk.get("args", {}),
                     dialog_id=dialog_id,
                 ).to_sse()
+            elif chunk["type"] == EventType.ERROR.value:
+                # Error from tool_executor (e.g., LLM streaming failed)
+                error_msg = chunk.get("error", "Unknown error")
+                api_logger.error("Error from tool_executor", error=error_msg)
+                yield SSEEventFactory.error(
+                    message=error_msg, dialog_id=dialog_id
+                ).to_sse()
+                # Don't raise StreamAbortError - just let generator return
+                # tool_executor already handled cleanup
             else:
                 # Emit error and signal abort
                 yield SSEEventFactory.error(
@@ -616,6 +625,8 @@ class ChatService:
                                             return
                                 except Exception as e:
                                     # Catch streaming errors from LLM
+                                    # Note: Most LLM errors (context window, etc) are now caught
+                                    # in tool_executor and yield ERROR event. This is fallback.
                                     api_logger.error(
                                         f"Error streaming from {key}",
                                         exc_info=True,
