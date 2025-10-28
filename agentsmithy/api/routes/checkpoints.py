@@ -12,6 +12,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from agentsmithy.api.deps import get_project
+from agentsmithy.core.background_tasks import get_background_manager
 from agentsmithy.core.project import Project
 from agentsmithy.services.versioning import VersioningTracker
 from agentsmithy.utils.logger import get_logger
@@ -19,6 +20,36 @@ from agentsmithy.utils.logger import get_logger
 logger = get_logger("api.checkpoints")
 
 router = APIRouter(prefix="/api/dialogs", tags=["checkpoints"])
+
+
+async def _reindex_files_background(
+    project: Project, dialog_id: str, restored_files: list[str]
+) -> None:
+    """Background task to reindex restored files in RAG.
+
+    Args:
+        project: Project instance
+        dialog_id: Dialog ID for logging
+        restored_files: List of file paths to reindex
+    """
+    try:
+        vector_store = project.get_vector_store()
+        reindexed_count = await vector_store.reindex_files(restored_files)
+
+        if reindexed_count > 0:
+            logger.info(
+                "Reindexed restored files in RAG (background)",
+                dialog_id=dialog_id,
+                reindexed=reindexed_count,
+                total_restored=len(restored_files),
+            )
+    except Exception as rag_err:
+        # Log but don't fail - this is best-effort background operation
+        logger.warning(
+            "Failed to reindex files in RAG (background)",
+            dialog_id=dialog_id,
+            error=str(rag_err),
+        )
 
 
 class CheckpointResponse(BaseModel):
@@ -218,6 +249,7 @@ async def restore_checkpoint(
     This will:
     1. Restore all files to the state they were in at the checkpoint
     2. Create a new checkpoint after the restore (so restore itself is reversible)
+    3. Schedule RAG reindexing in the background (non-blocking)
 
     Args:
         dialog_id: Dialog ID
@@ -256,26 +288,18 @@ async def restore_checkpoint(
                 error=str(restore_err),
             )
 
-        # Reindex restored files in RAG (only those that were previously indexed)
+        # Schedule RAG reindexing in background (tracked by manager for graceful shutdown)
         if restored_files:
-            try:
-                vector_store = project.get_vector_store()
-                reindexed_count = await vector_store.reindex_files(restored_files)
-
-                if reindexed_count > 0:
-                    logger.info(
-                        "Reindexed restored files in RAG",
-                        dialog_id=dialog_id,
-                        reindexed=reindexed_count,
-                        total_restored=len(restored_files),
-                    )
-            except Exception as rag_err:
-                # Don't fail restore if RAG reindexing fails
-                logger.warning(
-                    "Failed to reindex files in RAG after restore",
-                    dialog_id=dialog_id,
-                    error=str(rag_err),
-                )
+            bg_manager = get_background_manager()
+            bg_manager.create_thread_task(
+                _reindex_files_background(project, dialog_id, restored_files),
+                name=f"reindex_restore_{dialog_id[:8]}",
+            )
+            logger.debug(
+                "Scheduled RAG reindexing in background",
+                dialog_id=dialog_id,
+                files_count=len(restored_files),
+            )
 
         # Create new checkpoint after restore (makes restore reversible)
         new_checkpoint = tracker.create_checkpoint(
@@ -354,6 +378,7 @@ async def reset_to_approved(
     1. Discard current session (mark as 'abandoned' in database)
     2. Create new session from approved state
     3. Restore files to approved state
+    4. Schedule RAG reindexing in the background (non-blocking)
 
     Args:
         dialog_id: Dialog ID
@@ -391,26 +416,18 @@ async def reset_to_approved(
                 error=str(restore_err),
             )
 
-        # Reindex restored files in RAG
+        # Schedule RAG reindexing in background (tracked by manager for graceful shutdown)
         if restored_files:
-            try:
-                vector_store = project.get_vector_store()
-                reindexed_count = await vector_store.reindex_files(restored_files)
-
-                if reindexed_count > 0:
-                    logger.info(
-                        "Reindexed restored files in RAG after reset",
-                        dialog_id=dialog_id,
-                        reindexed=reindexed_count,
-                        total_restored=len(restored_files),
-                    )
-            except Exception as rag_err:
-                logger.warning(
-                    "Failed to reindex files in RAG after reset",
-                    dialog_id=dialog_id,
-                    error=str(rag_err),
-                )
-
+            bg_manager = get_background_manager()
+            bg_manager.create_thread_task(
+                _reindex_files_background(project, dialog_id, restored_files),
+                name=f"reindex_reset_{dialog_id[:8]}",
+            )
+            logger.debug(
+                "Scheduled RAG reindexing after reset in background",
+                dialog_id=dialog_id,
+                files_count=len(restored_files),
+            )
         return ResetResponse(**result)
     except Exception as e:
         logger.error("Failed to reset to approved", dialog_id=dialog_id, error=str(e))

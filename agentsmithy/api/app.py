@@ -61,6 +61,7 @@ async def lifespan(app: FastAPI):
     try:
         api_logger.info("Starting shutdown cleanup")
         from agentsmithy.api.deps import dispose_db_engine, get_chat_service
+        from agentsmithy.core.background_tasks import get_background_manager
 
         # Stop config watcher
         if hasattr(app.state, "config_manager"):
@@ -71,6 +72,14 @@ async def lifespan(app: FastAPI):
                 # Shutdown was cancelled, but continue with other cleanup
                 api_logger.debug("Config watcher stop cancelled, continuing cleanup")
 
+        # Shutdown background tasks (RAG reindexing, etc.)
+        bg_manager = get_background_manager()
+        try:
+            await bg_manager.shutdown(timeout=10.0)
+        except asyncio.CancelledError:
+            api_logger.debug("Background tasks shutdown cancelled, continuing cleanup")
+
+        # Shutdown chat service
         chat_service = get_chat_service()
         try:
             await chat_service.shutdown()
@@ -80,7 +89,7 @@ async def lifespan(app: FastAPI):
 
         # DB engine disposal is synchronous, always safe
         dispose_db_engine()
-        api_logger.info("Chat service shutdown completed")
+        api_logger.info("Shutdown completed")
     except Exception as e:
         api_logger.error("Shutdown cleanup failed", exc_info=True, error=str(e))
 
