@@ -134,13 +134,24 @@ DEFAULT_EXCLUDES = [
 
 
 def stable_hash(text: str) -> str:
+    """Generate stable 13-character SHA1 hash of text.
+
+    Args:
+        text: Text to hash
+
+    Returns:
+        First 13 characters of SHA1 hex digest
+    """
     return hashlib.sha1(text.encode("utf-8")).hexdigest()[:13]
 
 
 def _load_gitignore_patterns(gitignore_path: Path) -> list[str]:
     """Load and parse .gitignore patterns.
 
-    Returns list of patterns suitable for fnmatch.
+    Returns:
+        List of patterns as read from .gitignore (with comments and empty lines removed).
+        These patterns are returned as-is and will be processed using gitignore-style
+        matching rules (including directory, glob, and exact match logic), not just fnmatch.
     """
     if not gitignore_path.exists():
         return []
@@ -309,6 +320,13 @@ class VersioningTracker:
         return repo
 
     def _write_excludes(self, repo: Repo) -> None:
+        """Write exclude patterns to shadow repository's info/exclude file.
+
+        Merges project's .gitignore patterns with DEFAULT_EXCLUDES.
+
+        Args:
+            repo: Shadow repository
+        """
         info_dir = Path(repo.path) / "info"
         info_dir.mkdir(parents=True, exist_ok=True)
         exclude_file = info_dir / "exclude"
@@ -328,6 +346,11 @@ class VersioningTracker:
 
     # ---- edit attempt snapshots ----
     def start_edit(self, paths: Iterable[str]) -> None:
+        """Snapshot files before editing to allow rollback on failure.
+
+        Args:
+            paths: Relative paths to files to snapshot
+        """
         self._preedit_snapshots.clear()
         for p in paths:
             abs_path = (self.project_root / p).resolve()
@@ -337,12 +360,14 @@ class VersioningTracker:
             self._tmp_dir = Path(tempfile.mkdtemp(prefix="asm_preedit_"))
 
     def abort_edit(self) -> None:
+        """Restore files from pre-edit snapshots and clean up."""
         for abs_path, content in self._preedit_snapshots.items():
             abs_path.parent.mkdir(parents=True, exist_ok=True)
             abs_path.write_bytes(content)
         self._cleanup_edit()
 
     def finalize_edit(self) -> None:
+        """Finalize edit without restoring snapshots (changes are kept)."""
         self._cleanup_edit()
 
     def _cleanup_edit(self) -> None:
@@ -526,11 +551,13 @@ class VersioningTracker:
             )
             if tree_entry and len(tree_entry) == 2:
                 _mode, existing_blob_sha = tree_entry
-                # Check if file unchanged (by size for quick check)
+                # Quick heuristic: check if file size matches blob size
+                # Note: this is not a guarantee of equality (size collision possible),
+                # but it's a fast optimization to avoid reading large files
                 existing_blob = project_git_repo[existing_blob_sha]
                 file_size = file_path.stat().st_size
                 if len(existing_blob.data) == file_size:
-                    # File likely unchanged, reuse blob (no file read!)
+                    # File likely unchanged based on size, reuse blob (no file read!)
                     return existing_blob
         except (KeyError, FileNotFoundError, AttributeError):
             # File not in project git or lookup failed
@@ -1004,6 +1031,12 @@ class VersioningTracker:
         return restored_files
 
     def _record_metadata(self, commit_id: str, message: str) -> None:
+        """Record checkpoint metadata (commit ID and message) to metadata.json.
+
+        Args:
+            commit_id: Git commit SHA
+            message: Checkpoint message
+        """
         meta_file = self.shadow_root / "metadata.json"
         data: dict[str, dict] = {}
         if meta_file.exists():
