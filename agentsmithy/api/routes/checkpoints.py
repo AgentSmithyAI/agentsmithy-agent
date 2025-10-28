@@ -8,6 +8,8 @@ Provides endpoints to:
 
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, Body, Depends, HTTPException
 from pydantic import BaseModel, Field
 
@@ -273,7 +275,9 @@ async def restore_checkpoint(
         # Restore to checkpoint (best-effort, skips locked files)
         restored_files = []
         try:
-            restored_files = tracker.restore_checkpoint(request.checkpoint_id)
+            restored_files = await asyncio.to_thread(
+                tracker.restore_checkpoint, request.checkpoint_id
+            )
             logger.info(
                 "Restored to checkpoint",
                 dialog_id=dialog_id,
@@ -302,8 +306,9 @@ async def restore_checkpoint(
             )
 
         # Create new checkpoint after restore (makes restore reversible)
-        new_checkpoint = tracker.create_checkpoint(
-            f"Restored to checkpoint {request.checkpoint_id[:8]}"
+        new_checkpoint = await asyncio.to_thread(
+            tracker.create_checkpoint,
+            f"Restored to checkpoint {request.checkpoint_id[:8]}",
         )
 
         return RestoreResponse(
@@ -390,7 +395,7 @@ async def reset_to_approved(
         tracker = VersioningTracker(str(project.root), dialog_id)
 
         # Reset to approved
-        result = tracker.reset_to_approved()
+        result = await asyncio.to_thread(tracker.reset_to_approved)
 
         # Update dialog metadata with new session
         project.upsert_dialog_meta(
@@ -401,7 +406,9 @@ async def reset_to_approved(
         # Restore files to approved state
         restored_files = []
         try:
-            restored_files = tracker.restore_checkpoint(result["reset_to"])
+            restored_files = await asyncio.to_thread(
+                tracker.restore_checkpoint, result["reset_to"]
+            )
             logger.info(
                 "Reset to approved state",
                 dialog_id=dialog_id,
