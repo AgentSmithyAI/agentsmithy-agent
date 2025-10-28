@@ -43,6 +43,10 @@ class FileRestrictions:
         """Initialize FileRestrictions with a workspace root."""
         self.workspace_root = Path(workspace_root).resolve()
 
+    def _is_dir_name_ignored(self, dir_name: str) -> bool:
+        """Check if a directory name (not full path) should be ignored."""
+        return dir_name in self.DEFAULT_IGNORE_DIRS
+
     def is_ignored_directory(self, path: Path) -> bool:
         """Check if a directory should be ignored based on default patterns."""
         try:
@@ -102,6 +106,37 @@ class FileRestrictions:
 
         return False
 
+    def is_ignored_relative_to(self, path: Path, base: Path) -> bool:
+        """
+        Check if a path should be ignored relative to a base directory.
+
+        This is used when listing contents of an explicitly requested directory.
+        Only checks for ignored directories between base and path, not above base.
+
+        Args:
+            path: The path to check
+            base: The base directory (explicitly requested by user)
+
+        Returns:
+            True if the path should be ignored, False otherwise
+        """
+        # Check if any parent directory between base and path is ignored
+        try:
+            rel_path = path.relative_to(base)
+            # Check each part of the relative path
+            for part in rel_path.parts:
+                if self._is_dir_name_ignored(part):
+                    return True
+        except ValueError:
+            # Path is not relative to base
+            pass
+
+        # Check if the path itself is an ignored directory (by name)
+        if path.is_dir() and self._is_dir_name_ignored(path.name):
+            return True
+
+        return False
+
     def filter_paths(
         self, paths: list[Path | str], include_hidden: bool = False
     ) -> list[Path]:
@@ -133,6 +168,36 @@ class FileRestrictions:
             # Check if any part of the path is hidden
             try:
                 rel_path = path.relative_to(self.workspace_root)
+                if any(part.startswith(".") for part in rel_path.parts):
+                    return False
+            except ValueError:
+                # For absolute paths, just check the name
+                if path.name.startswith("."):
+                    return False
+
+        return True
+
+    def should_include_hidden_relative_to(
+        self, path: Path, base: Path, include_hidden_requested: bool
+    ) -> bool:
+        """
+        Determine if a hidden file/directory should be included relative to base.
+
+        This is used when listing contents of an explicitly requested directory.
+        Only checks for hidden parts between base and path, not above base.
+
+        Args:
+            path: The path to check
+            base: The base directory (explicitly requested by user)
+            include_hidden_requested: Whether user explicitly requested hidden files
+
+        Returns:
+            True if the path should be included, False otherwise
+        """
+        if not include_hidden_requested:
+            # Check if any part of the path relative to base is hidden
+            try:
+                rel_path = path.relative_to(base)
                 if any(part.startswith(".") for part in rel_path.parts):
                     return False
             except ValueError:

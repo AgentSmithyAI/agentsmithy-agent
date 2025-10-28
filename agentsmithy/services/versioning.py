@@ -535,6 +535,9 @@ class VersioningTracker:
         except (KeyError, FileNotFoundError, AttributeError):
             # File not in project git or lookup failed
             pass
+        except Exception:
+            # Any other error (decompression, corruption, etc.) - fallback to reading file
+            pass
 
         return None
 
@@ -635,9 +638,17 @@ class VersioningTracker:
 
         # Process files in parallel with thread pool
         blobs_to_add: list[Any] = []
+        failed_files: list[tuple[str, str]] = []  # (file_path, error_msg)
 
-        def process_file(file_info: tuple[Path, str]) -> tuple[Any, str, bool] | None:
-            """Process single file and return (blob, path, was_reused)."""
+        def process_file(
+            file_info: tuple[Path, str],
+        ) -> tuple[Any, str, bool | str]:
+            """Process single file and return (blob, path, was_reused_or_error).
+
+            Returns:
+                - (blob, path, True/False) on success (was_reused is bool)
+                - (None, path, error_msg) on failure (error_msg is str)
+            """
             file_path, file_path_str = file_info
             try:
                 blob, was_reused = self._create_blob_for_file(
@@ -648,8 +659,8 @@ class VersioningTracker:
                     project_git_tree,
                 )
                 return blob, file_path_str, was_reused
-            except Exception:
-                return None
+            except Exception as e:
+                return None, file_path_str, str(e)
 
         # Use thread pool for I/O parallelism
         max_workers = min(32, (len(files_to_process) or 1))
@@ -661,11 +672,13 @@ class VersioningTracker:
 
             for future in as_completed(futures):
                 result = future.result()
-                if result:
-                    blob, file_path_str, was_reused = result
+                blob, file_path_str, third = result
+
+                if blob is not None:
+                    # Success case: third is bool (was_reused)
                     blobs_to_add.append(blob)
 
-                    if was_reused:
+                    if third:  # was_reused is True
                         blobs_reused += 1
                     else:
                         blobs_created += 1
@@ -673,6 +686,34 @@ class VersioningTracker:
                     # Add to tree
                     tree_path = file_path_str.encode("utf-8")
                     tree.add(tree_path, 0o100644, blob.id)
+                else:
+                    # Failure case: third is str (error_msg)
+                    error_msg = str(third)
+                    failed_files.append((file_path_str, error_msg))
+
+        # Check if any files failed to process
+        if failed_files:
+            from agentsmithy.utils.logger import agent_logger
+
+            agent_logger.error(
+                "Failed to process files during checkpoint creation",
+                failed_count=len(failed_files),
+                total_files=len(files_to_process),
+            )
+            # Show first few failures in error message
+            sample_failures = failed_files[:5]
+            failure_details = "\n".join(
+                f"  - {path}: {err}" for path, err in sample_failures
+            )
+            more_info = (
+                f"\n  ... and {len(failed_files) - 5} more"
+                if len(failed_files) > 5
+                else ""
+            )
+            raise RuntimeError(
+                f"Failed to process {len(failed_files)} file(s) during checkpoint creation:\n"
+                f"{failure_details}{more_info}"
+            )
 
         # Batch add all blobs to object store
         if blobs_to_add:

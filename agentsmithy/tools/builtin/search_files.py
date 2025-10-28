@@ -127,13 +127,15 @@ class SearchFilesTool(BaseTool):
                 if not file_path.is_file():
                     continue
 
-                # Check if file should be ignored by restrictions
-                if restrictions.is_ignored(file_path):
+                # Check if file should be ignored relative to base (not workspace)
+                # This allows searching .github contents when explicitly requested
+                if restrictions.is_ignored_relative_to(file_path, base):
                     continue
 
                 # Skip hidden files unless they match the glob pattern explicitly
-                if not restrictions.should_include_hidden(
-                    file_path, ".*" in file_glob or "/." in file_glob
+                # Check relative to base to allow searching in explicitly requested dirs
+                if not restrictions.should_include_hidden_relative_to(
+                    file_path, base, ".*" in file_glob or "/." in file_glob
                 ):
                     continue
 

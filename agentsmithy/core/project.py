@@ -170,7 +170,8 @@ class Project:
             index["current_dialog_id"] = dialog_id
         self.save_dialogs_index(index)
 
-        # Create initial checkpoint snapshot (best-effort)
+        # Create initial checkpoint snapshot
+        # If this fails, rollback dialog creation and propagate error
         try:
             from agentsmithy.db.sessions import (
                 create_initial_session,
@@ -214,11 +215,25 @@ class Project:
                 session="session_1",
             )
         except Exception as e:
-            logger.warning(
-                "Failed to create initial checkpoint (non-fatal)",
+            # Rollback dialog creation
+            logger.error(
+                "Failed to create initial checkpoint, rolling back dialog creation",
                 dialog_id=dialog_id[:8],
                 error=str(e),
             )
+            # Remove from index
+            index = self.load_dialogs_index()
+            dialogs_list = index.get("dialogs", [])
+            dialogs_list = [d for d in dialogs_list if d.get("id") != dialog_id]
+            index["dialogs"] = dialogs_list
+            if index.get("current_dialog_id") == dialog_id:
+                index["current_dialog_id"] = None
+            self.save_dialogs_index(index)
+            # Remove dialog directory
+            if dialog_dir.exists():
+                shutil.rmtree(dialog_dir, ignore_errors=True)
+            # Re-raise exception to propagate to API layer
+            raise RuntimeError(f"Failed to create dialog: {str(e)}") from e
 
         return dialog_id
 
