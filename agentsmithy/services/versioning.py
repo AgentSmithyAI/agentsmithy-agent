@@ -247,7 +247,33 @@ DEFAULT_EXCLUDES = [
     "*.sqlite3",
     # IDEs and editors (user-specific, often in .gitignore)
     ".idea/",
-    ".vscode/",
+    # Keep most of .idea/ ignored, but allow project-level text settings
+    "!.idea/codeStyles/**",
+    "!.idea/inspectionProfiles/**",
+    "!.idea/runConfigurations/**",
+    "!.idea/dictionaries/**",
+    "!.idea/workspace.xml",
+    # CI/CD and VCS text configs should be tracked
+    "!.github/",
+    "!.github/workflows/**",
+    "!.github/ISSUE_TEMPLATE/**",
+    "!.github/PULL_REQUEST_TEMPLATE/**",
+    "!.github/dependabot.yml",
+    "!.github/CODEOWNERS",
+    "!.gitlab-ci.yml",
+    "!.circleci/config.yml",
+    # Common repo-level config files
+    "!.editorconfig",
+    "!.gitattributes",
+    "!.gitignore",
+    "!.dockerignore",
+    "!.pre-commit-config.yaml",
+    "!.prettier*",
+    "!.eslintrc*",
+    "!.stylelintrc*",
+    # VS Code project settings are useful to track
+    # (settings.json, tasks.json, launch.json, extensions.json, etc.)
+    # So we do NOT exclude .vscode/ by default.
     ".fleet/",
     ".history/",
     ".vs/",
@@ -785,12 +811,10 @@ class VersioningTracker:
 
         def process_file(
             file_info: tuple[Path, str],
-        ) -> tuple[Any, str, bool | str]:
-            """Process single file and return (blob, path, was_reused_or_error).
-
-            Returns:
-                - (blob, path, True/False) on success (was_reused is bool)
-                - (None, path, error_msg) on failure (error_msg is str)
+        ) -> tuple[Any, str, bool] | tuple[None, str, str]:
+            """Process single file and return a tagged union:
+            - (blob, path, was_reused: bool) on success
+            - (None, path, error_msg: str) on failure
             """
             file_path, file_path_str = file_info
             try:
