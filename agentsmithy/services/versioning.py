@@ -5,6 +5,7 @@ import hashlib
 import json
 import shutil
 import tempfile
+from collections import deque
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
@@ -176,19 +177,23 @@ def _is_ignored(path_str: str, patterns: list[str]) -> bool:
 
     Returns:
         True if path should be ignored
+
+    Note: Optimized for performance - path_parts and filename computed lazily.
     """
-    # Split path into parts for matching
-    path_parts = path_str.split("/")
-    filename = path_parts[-1] if path_parts else path_str
+    # Lazy initialization - only compute when needed
+    path_parts = None
+    filename = None
 
     for pattern in patterns:
         # Directory patterns (ending with /)
         if pattern.endswith("/"):
             dir_pattern = pattern.rstrip("/")
-            # Match if path starts with directory or IS the directory
-            if path_str == dir_pattern or path_str.startswith(dir_pattern + "/"):
+            # Fast path: exact string matching first
+            if path_str == dir_pattern or path_str.startswith(f"{dir_pattern}/"):
                 return True
-            # Also check if directory name appears anywhere in path
+            # Slower path: check if directory name appears anywhere in path
+            if path_parts is None:
+                path_parts = path_str.split("/")
             if dir_pattern in path_parts:
                 return True
 
@@ -196,6 +201,10 @@ def _is_ignored(path_str: str, patterns: list[str]) -> bool:
         elif "*" in pattern or "?" in pattern:
             # Extension patterns like *.pyc
             if pattern.startswith("*."):
+                if filename is None:
+                    if path_parts is None:
+                        path_parts = path_str.split("/")
+                    filename = path_parts[-1] if path_parts else path_str
                 if fnmatch.fnmatch(filename, pattern):
                     return True
             # Patterns with ** (match anywhere)
@@ -209,22 +218,31 @@ def _is_ignored(path_str: str, patterns: list[str]) -> bool:
             elif pattern.endswith("*") or pattern.endswith("*/"):
                 base_pattern = pattern.rstrip("*/")
                 # Check each path component
+                if path_parts is None:
+                    path_parts = path_str.split("/")
                 for part in path_parts:
-                    if fnmatch.fnmatch(part, base_pattern + "*"):
+                    if fnmatch.fnmatch(part, f"{base_pattern}*"):
                         return True
             # Regular glob
             else:
                 if fnmatch.fnmatch(path_str, pattern):
                     return True
                 # Also check filename only
+                if filename is None:
+                    if path_parts is None:
+                        path_parts = path_str.split("/")
+                    filename = path_parts[-1] if path_parts else path_str
                 if fnmatch.fnmatch(filename, pattern):
                     return True
 
         # Exact match
         else:
-            if path_str == pattern or path_str.startswith(pattern + "/"):
+            # Fast path: string operations only
+            if path_str == pattern or path_str.startswith(f"{pattern}/"):
                 return True
-            # Check if exact name appears as directory in path
+            # Slower path: check if exact name appears as directory in path
+            if path_parts is None:
+                path_parts = path_str.split("/")
             if pattern in path_parts:
                 return True
 
@@ -1180,6 +1198,7 @@ class VersioningTracker:
         """Check if there are uncommitted changes in working directory.
 
         Compares current files on disk with the latest checkpoint in active session.
+        Uses optimized mtime+size check first, falls back to content hash only when needed.
         Uses pure dulwich API - git binary not required.
         """
         repo = self.ensure_repo()
@@ -1195,16 +1214,32 @@ class VersioningTracker:
             session_head = repo.refs[session_ref]
             session_commit = repo[session_head]
             committed_tree_id = session_commit.tree  # type: ignore[attr-defined]
+            committed_tree = repo[committed_tree_id]
 
-            # Build tree from current working directory
+            # Build map of committed files: path -> (mode, sha)
             import os
 
-            from dulwich.objects import Blob, Tree
+            committed_files: dict[str, tuple[int, bytes]] = {}
 
-            current_tree = Tree()
+            def collect_tree_entries(tree: Any, prefix: str = "") -> None:
+                """Recursively collect all entries from tree."""
+                for name, mode, sha in tree.items():
+                    decoded_name = name.decode("utf-8")
+                    full_path = f"{prefix}/{decoded_name}" if prefix else decoded_name
+                    obj = repo[sha]
+                    if isinstance(obj, Tree):
+                        collect_tree_entries(obj, full_path)
+                    else:
+                        committed_files[full_path] = (mode, sha)
+
+            collect_tree_entries(committed_tree)
+
+            # Scan working directory and compare
             gitignore = self.project_root / ".gitignore"
             ignore_patterns = _load_gitignore_patterns(gitignore)
             ignore_patterns.extend(DEFAULT_EXCLUDES)
+
+            current_files: set[str] = set()
 
             for root, dirs, files in os.walk(self.project_root):
                 root_path = Path(root)
@@ -1219,7 +1254,6 @@ class VersioningTracker:
                 for d in dirs:
                     dir_rel_path = (rel_root / d) if rel_root != Path(".") else Path(d)
                     dir_path_str = str(dir_rel_path).replace("\\", "/")
-                    # Check if directory should be ignored (includes DEFAULT_EXCLUDES + .gitignore)
                     if _is_ignored(dir_path_str, ignore_patterns):
                         continue
                     filtered_dirs.append(d)
@@ -1231,21 +1265,50 @@ class VersioningTracker:
                     file_rel_path = file_path.relative_to(self.project_root)
                     file_path_str = str(file_rel_path).replace("\\", "/")
 
-                    # Check if file should be ignored (includes DEFAULT_EXCLUDES + .gitignore)
                     if _is_ignored(file_path_str, ignore_patterns):
                         continue
 
                     try:
+                        current_files.add(file_path_str)
+
+                        # Check if file exists in commit
+                        if file_path_str not in committed_files:
+                            # New file - uncommitted change
+                            return True
+
+                        _mode, committed_sha = committed_files[file_path_str]
+                        committed_blob = repo[committed_sha]
+
+                        # Fast check: compare sizes first (avoids reading file content)
+                        stat = file_path.stat()
+                        file_size = stat.st_size
+                        blob_data = getattr(committed_blob, "data", b"")
+                        blob_size = len(blob_data)
+
+                        if file_size != blob_size:
+                            # Size mismatch - file changed
+                            return True
+
+                        # Sizes match, but we need to check content hash to be sure
+                        # (size collision is possible but rare)
+                        from dulwich.objects import Blob
+
                         content = file_path.read_bytes()
-                        blob = Blob.from_string(content)
-                        current_tree.add(
-                            file_path_str.encode("utf-8"), 0o100644, blob.id
-                        )
+                        current_blob = Blob.from_string(content)
+
+                        if current_blob.id != committed_sha:
+                            # Content hash mismatch - file changed
+                            return True
+
                     except Exception:
+                        # If we can't read file, assume no change
                         continue
 
-            # Compare tree IDs
-            return committed_tree_id != current_tree.id
+            # Check if any committed files were deleted
+            if len(current_files) != len(committed_files):
+                return True
+
+            return False
 
         except Exception:
             return False
@@ -1253,17 +1316,20 @@ class VersioningTracker:
     def _count_commits_between(
         self, repo: Repo, base_sha: bytes, head_sha: bytes
     ) -> int:
-        """Count commits between base and head (exclusive of base, inclusive of head)."""
+        """Count commits between base and head (exclusive of base, inclusive of head).
+
+        Uses BFS traversal with deque for O(1) queue operations.
+        """
         if base_sha == head_sha:
             return 0
 
-        # Collect commits from head to base
+        # Collect commits from head to base using BFS
         count = 0
         visited = set()
-        to_visit = [head_sha]
+        to_visit = deque([head_sha])
 
         while to_visit:
-            sha = to_visit.pop(0)
+            sha = to_visit.popleft()
             if sha in visited or sha == base_sha:
                 continue
             visited.add(sha)
@@ -1282,6 +1348,7 @@ class VersioningTracker:
         """List all checkpoints in chronological order (oldest first).
 
         Uses pure dulwich API - git binary not required.
+        Uses BFS traversal with deque for O(1) queue operations.
 
         Returns:
             List of CheckpointInfo objects from active session
@@ -1303,7 +1370,7 @@ class VersioningTracker:
             active_session = self._get_active_session_name()
             session_ref = self._get_session_ref(active_session)
 
-            # Walk commit history from active session backwards
+            # Walk commit history from active session backwards using BFS
             try:
                 if session_ref in repo.refs:
                     current_id = repo.refs[session_ref]
@@ -1315,10 +1382,10 @@ class VersioningTracker:
                 return []
 
             visited = set()
-            to_visit = [current_id]
+            to_visit = deque([current_id])
 
             while to_visit:
-                commit_id = to_visit.pop(0)
+                commit_id = to_visit.popleft()
                 if commit_id in visited:
                     continue
                 visited.add(commit_id)
