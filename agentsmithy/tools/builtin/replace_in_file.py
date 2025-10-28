@@ -161,11 +161,14 @@ class ReplaceInFileTool(BaseTool):
                     index_path = str(file_path)
 
                 # Index in vector store (async, non-blocking)
-                import asyncio
+                from agentsmithy.core.background_tasks import get_background_manager
 
                 vector_store = self._project.get_vector_store()
-                # Run in background, don't wait
-                asyncio.create_task(vector_store.index_file(index_path, new_text))
+                # Run in background with proper task tracking
+                get_background_manager().create_task(
+                    vector_store.index_file(index_path, new_text),
+                    name=f"rag_index:{index_path}",
+                )
         except Exception:
             # Silently ignore RAG indexing errors
             pass
