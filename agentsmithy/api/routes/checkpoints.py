@@ -349,9 +349,9 @@ async def approve_session(
         result = tracker.approve_all(message=request.message)
 
         # Update dialog metadata with new session and approval timestamp
-        from datetime import datetime
+        from datetime import UTC, datetime
 
-        now = datetime.utcnow().isoformat()
+        now = datetime.now(UTC).isoformat()
         project.upsert_dialog_meta(
             dialog_id,
             active_session=result["new_session"],

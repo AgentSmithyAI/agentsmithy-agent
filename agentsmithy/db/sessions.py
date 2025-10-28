@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -79,7 +79,7 @@ def create_initial_session(db_path: Path, session_name: str = "session_1") -> No
             return
 
         # Insert initial session
-        now = datetime.utcnow().isoformat()
+        now = datetime.now(UTC).isoformat()
         conn.execute(
             """
             INSERT INTO sessions 
@@ -140,7 +140,7 @@ def close_session(
         status: New status ("merged" or "abandoned")
         approved_commit: Merge commit ID (for merged sessions)
     """
-    now = datetime.utcnow().isoformat()
+    now = datetime.now(UTC).isoformat()
 
     with sqlite3.connect(str(db_path)) as conn:
         conn.execute(
@@ -161,7 +161,7 @@ def create_new_session(db_path: Path, session_name: str) -> None:
         db_path: Path to the SQLite database file
         session_name: Name of the new session
     """
-    now = datetime.utcnow().isoformat()
+    now = datetime.now(UTC).isoformat()
 
     with sqlite3.connect(str(db_path)) as conn:
         conn.execute(
