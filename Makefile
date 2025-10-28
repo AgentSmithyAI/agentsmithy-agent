@@ -15,7 +15,7 @@ endif
 
 .DEFAULT_GOAL := build
 
-.PHONY: venv install install-dev update-reqs lint format typecheck test run clean pyinstall build smoke-test licenses
+.PHONY: venv install install-dev update-reqs lint format typecheck test run clean pyinstall build smoke-test
 
 venv:
 	$(PYTHON) -m venv $(VENV)
@@ -54,7 +54,7 @@ run:
 	$(PY) main.py
 
 clean:
-	rm -rf $(VENV) .mypy_cache .pytest_cache .ruff_cache __pycache__ **/__pycache__ dist build THIRD_PARTY_LICENSES.md THIRD_PARTY_NOTICES.txt
+	rm -rf $(VENV) .mypy_cache .pytest_cache .ruff_cache __pycache__ **/__pycache__ dist build
 
 pyinstall: install-dev
 	@echo "Building with PyInstaller using spec file..."
@@ -73,9 +73,5 @@ build:
 	$(MAKE) test || exit 1
 	$(MAKE) pyinstall || exit 1
 
-licenses: install
-	$(PIP) install pip-licenses
-	$(VENV)/bin/pip-licenses --from=mixed --with-authors --with-urls --format=markdown > THIRD_PARTY_LICENSES.md
-	$(PY) scripts/collect_notices.py > THIRD_PARTY_NOTICES.txt
-	@echo "Generated THIRD_PARTY_LICENSES.md and THIRD_PARTY_NOTICES.txt"
+
 
