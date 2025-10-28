@@ -1222,9 +1222,13 @@ class VersioningTracker:
 
         repo = self.ensure_repo()
 
-        # First, commit any uncommitted changes before approving
-        if self.has_uncommitted_changes():
+        # First, commit any pending changes before approving
+        # - Uncommitted changes in working directory
+        # - Or staged entries in the index (force-added files)
+        if self.has_uncommitted_changes() or self.has_staged_changes():
             self.create_checkpoint("Auto-commit before approval")
+            # Defensive: ensure staging is clear in case of index leftovers
+            self.clear_staging()
 
         # Get current session and main
         active_session = self._get_active_session_name()
@@ -1296,6 +1300,14 @@ class VersioningTracker:
         create_new_session(db_path, new_session)
         update_branch_head(db_path, "main", merge_commit_id)
 
+        # Safety: ensure staging area is cleared after approval
+        try:
+            index_path = Path(repo.path) / "index"
+            if index_path.exists():
+                index_path.unlink()
+        except Exception:
+            pass
+
         return {
             "approved_commit": merge_commit_id,
             "new_session": new_session,
@@ -1332,6 +1344,57 @@ class VersioningTracker:
         create_new_session(db_path, new_session)
 
         return {"reset_to": main_head.decode(), "new_session": new_session}
+
+    def has_staged_changes(self) -> bool:
+        """Return True if there are entries in the staging area (index).
+
+        Semantics:
+        - stage_file() adds entries to the index
+        - create_checkpoint() and restore_checkpoint() clear the index
+        Therefore, non-empty index means there are explicit, pending changes
+        prepared for the next checkpoint.
+        """
+        repo = self.ensure_repo()
+        try:
+            index = repo.open_index()
+            # Any entry indicates staged changes
+            for _ in index.items():
+                return True
+            return False
+        except (FileNotFoundError, OSError):
+            return False
+
+    def clear_staging(self) -> None:
+        """Clear staging area (index) entries and remove index file if present."""
+        repo = self.ensure_repo()
+        try:
+            # Try to clear via dulwich API first
+            try:
+                index = repo.open_index()
+                # Remove all entries
+                for key in list(index._byname.keys()):
+                    try:
+                        del index._byname[key]
+                    except Exception:
+                        pass
+                # Rebuild and write empty index safely
+                try:
+                    index.write()
+                except Exception:
+                    pass
+            except Exception:
+                pass
+
+            # Ensure index files are removed
+            index_path = Path(repo.path) / "index"
+            lock_path = Path(repo.path) / "index.lock"
+            if lock_path.exists():
+                lock_path.unlink()
+            if index_path.exists():
+                index_path.unlink()
+        except Exception:
+            # Best-effort cleanup
+            pass
 
     def has_uncommitted_changes(self) -> bool:
         """Check if there are uncommitted changes in working directory.

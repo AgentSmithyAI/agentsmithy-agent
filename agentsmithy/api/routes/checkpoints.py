@@ -190,8 +190,8 @@ async def get_session_status(
 
         has_unapproved = False
 
-        # Check uncommitted changes first (files on disk vs last checkpoint)
-        if tracker.has_uncommitted_changes():
+        # Check staged (prepared) changes first
+        if tracker.has_staged_changes():
             has_unapproved = True
         # Check committed but unapproved changes (session vs main)
         elif tracker.MAIN_BRANCH in repo.refs:
@@ -347,6 +347,12 @@ async def approve_session(
 
         # Approve session
         result = tracker.approve_all(message=request.message)
+
+        # After approval, ensure staging area is clean (UX: no lingering has_unapproved)
+        try:
+            tracker.clear_staging()
+        except Exception:
+            pass
 
         # Update dialog metadata with new session and approval timestamp
         from datetime import UTC, datetime

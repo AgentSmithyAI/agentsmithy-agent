@@ -192,20 +192,20 @@ def test_get_session_status_with_file_changes(client, temp_project):
 
 
 def test_get_session_status_with_uncommitted_changes(client, temp_project):
-    """Test that session shows unapproved when there are uncommitted file changes."""
+    """Unstaged changes should NOT count as unapproved."""
     # Create dialog
     dialog_id = temp_project.create_dialog(title="Test Uncommitted", set_current=True)
 
-    # Change files WITHOUT creating checkpoint (uncommitted)
+    # Change files WITHOUT creating checkpoint (uncommitted, unstaged)
     test_file = temp_project.root / "uncommitted.txt"
     test_file.write_text("Uncommitted content")
 
-    # Session status should show unapproved (uncommitted changes)
+    # Session status should NOT show unapproved (only staged or committed count)
     response = client.get(f"/api/dialogs/{dialog_id}/session")
     assert response.status_code == 200
     data = response.json()
-    assert data["active_session"] == "session_1"  # Has uncommitted changes
-    assert data["has_unapproved"]
+    assert data["active_session"] is None
+    assert not data["has_unapproved"]
 
 
 def test_approve_commits_uncommitted_changes(client, temp_project):
@@ -229,6 +229,42 @@ def test_approve_commits_uncommitted_changes(client, temp_project):
     response = client.get(f"/api/dialogs/{dialog_id}/session")
     data = response.json()
     assert not data["has_unapproved"]
+
+
+def test_approve_commits_staged_changes(client, temp_project):
+    """Approve should also commit staged-only changes before merging."""
+    # Create dialog
+    dialog_id = temp_project.create_dialog(
+        title="Test Auto Commit Staged", set_current=True
+    )
+
+    tracker = VersioningTracker(str(temp_project.root), dialog_id)
+
+    # Create a file that would normally be ignored and stage it explicitly
+    staged_file = temp_project.root / ".venv" / "internal.txt"
+    staged_file.parent.mkdir(parents=True, exist_ok=True)
+    staged_file.write_text("staged content")
+
+    # Stage without creating a checkpoint
+    tracker.stage_file(str(staged_file.relative_to(temp_project.root)))
+
+    # Sanity: before approve, status should report has_unapproved due to staged
+    resp_before = client.get(f"/api/dialogs/{dialog_id}/session")
+    assert resp_before.status_code == 200
+    assert resp_before.json()["has_unapproved"]
+
+    # Approve should auto-commit staged before merging
+    response = client.post(f"/api/dialogs/{dialog_id}/approve")
+    assert response.status_code == 200
+
+    # File should remain and be part of approved state
+    assert staged_file.exists()
+    assert staged_file.read_text() == "staged content"
+
+    # After approve, no unapproved changes
+    resp_after = client.get(f"/api/dialogs/{dialog_id}/session")
+    assert resp_after.status_code == 200
+    assert not resp_after.json()["has_unapproved"]
 
 
 def test_get_session_status(client, temp_project):
