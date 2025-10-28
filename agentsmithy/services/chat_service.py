@@ -748,12 +748,22 @@ class ChatService:
     ) -> dict[str, Any]:
         orchestrator = self._get_orchestrator()
         # Centralize history: append user and inject dialog messages into context
-        context, user_checkpoint_id, _ = await self._append_user_and_prepare_context(
-            query, context, dialog_id, project
+        context, user_checkpoint_id, user_session_id = (
+            await self._append_user_and_prepare_context(
+                query, context, dialog_id, project
+            )
         )
         result = await orchestrator.process_request(
             query=query, context=context, stream=False
         )
+
+        # Include checkpoint and session in response metadata
+        if user_checkpoint_id or user_session_id:
+            result.setdefault("metadata", {})
+            if user_checkpoint_id:
+                result["metadata"]["checkpoint"] = user_checkpoint_id
+            if user_session_id:
+                result["metadata"]["session"] = user_session_id
 
         # Persist non-streaming assistant/tool messages
         try:
