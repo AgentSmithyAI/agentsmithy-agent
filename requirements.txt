@@ -176,13 +176,13 @@ langchain-text-splitters==0.3.11
     # via
     #   -r requirements.in
     #   langchain
-langgraph==0.6.8
+langgraph==1.0.1
     # via -r requirements.in
 langgraph-checkpoint==2.1.1
     # via
     #   langgraph
     #   langgraph-prebuilt
-langgraph-prebuilt==0.6.4
+langgraph-prebuilt==1.0.1
     # via langgraph
 langgraph-sdk==0.2.9
     # via langgraph
