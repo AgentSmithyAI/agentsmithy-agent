@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import fnmatch
 import hashlib
 import json
 import shutil
@@ -11,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
+import pathspec
 from dulwich import porcelain
 from dulwich.objects import Commit, Tree  # precise types for object store
 from dulwich.repo import Repo
@@ -146,107 +146,38 @@ def stable_hash(text: str) -> str:
     return hashlib.sha1(text.encode("utf-8")).hexdigest()[:13]
 
 
-def _load_gitignore_patterns(gitignore_path: Path) -> list[str]:
-    """Load and parse .gitignore patterns.
+def _build_gitignore_spec(gitignore_path: Path) -> pathspec.PathSpec:
+    """Build PathSpec from .gitignore file and DEFAULT_EXCLUDES.
 
-    Returns:
-        List of patterns as read from .gitignore (with comments and empty lines removed).
-        These patterns are returned as-is and will be processed using gitignore-style
-        matching rules (including directory, glob, and exact match logic), not just fnmatch.
-    """
-    if not gitignore_path.exists():
-        return []
-
-    patterns = []
-    for line in gitignore_path.read_text().splitlines():
-        line = line.strip()
-        # Skip comments and empty lines
-        if not line or line.startswith("#"):
-            continue
-        patterns.append(line)
-
-    return patterns
-
-
-def _is_ignored(path_str: str, patterns: list[str]) -> bool:
-    """Check if a path matches any gitignore pattern.
+    Uses pathspec library for full gitignore specification support including:
+    - Negation patterns (!pattern)
+    - Anchored patterns (/pattern)
+    - Directory patterns (foo/)
+    - Wildcards and globs (*, ?, **)
+    - All standard gitignore matching rules
 
     Args:
-        path_str: Relative path as string (e.g., "src/main.py" or "dist")
-        patterns: List of gitignore patterns
+        gitignore_path: Path to .gitignore file
 
     Returns:
-        True if path should be ignored
-
-    Note: Optimized for performance - path_parts and filename computed lazily.
+        PathSpec object that can match paths against gitignore patterns
     """
-    # Lazy initialization - only compute when needed
-    path_parts = None
-    filename = None
+    patterns = []
 
-    for pattern in patterns:
-        # Directory patterns (ending with /)
-        if pattern.endswith("/"):
-            dir_pattern = pattern.rstrip("/")
-            # Fast path: exact string matching first
-            if path_str == dir_pattern or path_str.startswith(f"{dir_pattern}/"):
-                return True
-            # Slower path: check if directory name appears anywhere in path
-            if path_parts is None:
-                path_parts = path_str.split("/")
-            if dir_pattern in path_parts:
-                return True
+    # Load patterns from .gitignore if exists
+    if gitignore_path.exists():
+        for line in gitignore_path.read_text().splitlines():
+            line = line.strip()
+            # Skip comments and empty lines
+            if not line or line.startswith("#"):
+                continue
+            patterns.append(line)
 
-        # Glob patterns (with * or ?)
-        elif "*" in pattern or "?" in pattern:
-            # Extension patterns like *.pyc
-            if pattern.startswith("*."):
-                if filename is None:
-                    if path_parts is None:
-                        path_parts = path_str.split("/")
-                    filename = path_parts[-1] if path_parts else path_str
-                if fnmatch.fnmatch(filename, pattern):
-                    return True
-            # Patterns with ** (match anywhere)
-            elif "**/" in pattern:
-                suffix = pattern.replace("**/", "")
-                if fnmatch.fnmatch(path_str, f"*/{suffix}") or fnmatch.fnmatch(
-                    path_str, suffix
-                ):
-                    return True
-            # cmake-build-* style patterns
-            elif pattern.endswith("*") or pattern.endswith("*/"):
-                base_pattern = pattern.rstrip("*/")
-                # Check each path component
-                if path_parts is None:
-                    path_parts = path_str.split("/")
-                for part in path_parts:
-                    if fnmatch.fnmatch(part, f"{base_pattern}*"):
-                        return True
-            # Regular glob
-            else:
-                if fnmatch.fnmatch(path_str, pattern):
-                    return True
-                # Also check filename only
-                if filename is None:
-                    if path_parts is None:
-                        path_parts = path_str.split("/")
-                    filename = path_parts[-1] if path_parts else path_str
-                if fnmatch.fnmatch(filename, pattern):
-                    return True
+    # Add default excludes
+    patterns.extend(DEFAULT_EXCLUDES)
 
-        # Exact match
-        else:
-            # Fast path: string operations only
-            if path_str == pattern or path_str.startswith(f"{pattern}/"):
-                return True
-            # Slower path: check if exact name appears as directory in path
-            if path_parts is None:
-                path_parts = path_str.split("/")
-            if pattern in path_parts:
-                return True
-
-    return False
+    # Build PathSpec using gitwildmatch pattern (standard gitignore)
+    return pathspec.PathSpec.from_lines("gitwildmatch", patterns)
 
 
 @dataclass
@@ -497,12 +428,14 @@ class VersioningTracker:
         return self._transaction_active
 
     # ---- helper methods for checkpoint creation ----
-    def _get_ignore_patterns(self) -> list[str]:
-        """Load and merge gitignore patterns with defaults."""
+    def _get_ignore_spec(self) -> pathspec.PathSpec:
+        """Load and build PathSpec from gitignore patterns and defaults.
+
+        Returns:
+            PathSpec object for matching paths against gitignore patterns
+        """
         gitignore = self.project_root / ".gitignore"
-        patterns = _load_gitignore_patterns(gitignore)
-        patterns.extend(DEFAULT_EXCLUDES)
-        return patterns
+        return _build_gitignore_spec(gitignore)
 
     def _open_project_git(self) -> tuple[Any | None, Any | None]:
         """Try to open project git repository for blob reuse optimization.
@@ -624,7 +557,7 @@ class VersioningTracker:
     def _build_tree_from_workdir(
         self,
         repo: Any,
-        ignore_patterns: list[str],
+        ignore_spec: pathspec.PathSpec,
         project_git_repo: Any,
         project_git_tree: Any,
     ) -> tuple[Any, int, int]:
@@ -634,7 +567,7 @@ class VersioningTracker:
 
         Args:
             repo: Shadow repository
-            ignore_patterns: List of ignore patterns
+            ignore_spec: PathSpec object for gitignore pattern matching
             project_git_repo: Project git repository (or None)
             project_git_tree: Project git HEAD tree (or None)
 
@@ -667,7 +600,7 @@ class VersioningTracker:
                 dir_rel_path = (rel_root / d) if rel_root != Path(".") else Path(d)
                 dir_path_str = str(dir_rel_path).replace("\\", "/")
 
-                if not _is_ignored(dir_path_str, ignore_patterns):
+                if not ignore_spec.match_file(dir_path_str):
                     filtered_dirs.append(d)
 
             dirs[:] = filtered_dirs
@@ -678,7 +611,7 @@ class VersioningTracker:
                 file_rel_path = file_path.relative_to(self.project_root)
                 file_path_str = str(file_rel_path).replace("\\", "/")
 
-                if not _is_ignored(file_path_str, ignore_patterns):
+                if not ignore_spec.match_file(file_path_str):
                     files_to_process.append((file_path, file_path_str))
 
         # Process files in parallel with thread pool
@@ -872,15 +805,15 @@ class VersioningTracker:
         except Exception:
             parent_commit = None
 
-        # Load ignore patterns
-        ignore_patterns = self._get_ignore_patterns()
+        # Load ignore spec
+        ignore_spec = self._get_ignore_spec()
 
         # Try to open project git for blob reuse optimization
         project_git_repo, project_git_tree = self._open_project_git()
 
         # Build tree by scanning working directory
         tree, blobs_reused, blobs_created = self._build_tree_from_workdir(
-            repo, ignore_patterns, project_git_repo, project_git_tree
+            repo, ignore_spec, project_git_repo, project_git_tree
         )
 
         # Log blob statistics
@@ -1235,9 +1168,15 @@ class VersioningTracker:
             collect_tree_entries(committed_tree)
 
             # Scan working directory and compare
-            gitignore = self.project_root / ".gitignore"
-            ignore_patterns = _load_gitignore_patterns(gitignore)
-            ignore_patterns.extend(DEFAULT_EXCLUDES)
+            ignore_spec = self._get_ignore_spec()
+
+            # Filter out committed files that are NOW ignored
+            # (to handle case where ignore patterns changed after checkpoint)
+            non_ignored_committed = {
+                path
+                for path in committed_files.keys()
+                if not ignore_spec.match_file(path)
+            }
 
             current_files: set[str] = set()
 
@@ -1254,7 +1193,7 @@ class VersioningTracker:
                 for d in dirs:
                     dir_rel_path = (rel_root / d) if rel_root != Path(".") else Path(d)
                     dir_path_str = str(dir_rel_path).replace("\\", "/")
-                    if _is_ignored(dir_path_str, ignore_patterns):
+                    if ignore_spec.match_file(dir_path_str):
                         continue
                     filtered_dirs.append(d)
 
@@ -1265,14 +1204,14 @@ class VersioningTracker:
                     file_rel_path = file_path.relative_to(self.project_root)
                     file_path_str = str(file_rel_path).replace("\\", "/")
 
-                    if _is_ignored(file_path_str, ignore_patterns):
+                    if ignore_spec.match_file(file_path_str):
                         continue
 
                     try:
                         current_files.add(file_path_str)
 
-                        # Check if file exists in commit
-                        if file_path_str not in committed_files:
+                        # Check if file exists in commit (among non-ignored files)
+                        if file_path_str not in non_ignored_committed:
                             # New file - uncommitted change
                             return True
 
@@ -1304,8 +1243,10 @@ class VersioningTracker:
                         # If we can't read file, assume no change
                         continue
 
-            # Check if any committed files were deleted
-            if len(current_files) != len(committed_files):
+            # Check if any non-ignored committed files were deleted
+            # (only check files that are not now ignored by current patterns)
+            deleted_files = non_ignored_committed - current_files
+            if deleted_files:
                 return True
 
             return False
