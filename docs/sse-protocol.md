@@ -4,7 +4,22 @@ This document describes the simplified Server-Sent Events (SSE) protocol used by
 
 ## Overview
 
-AgentSmithy streams events: `user`, `chat_start`, `chat`, `chat_end`, `reasoning_start`, `reasoning`, `reasoning_end`, `summary_start`, `summary_end`, `tool_call`, `file_edit`, `error`. A final `done` event signals end of stream. Each SSE message is a single JSON object. If an `error` event is emitted, it is immediately followed by a `done` event so clients can reliably finalize the stream.
+AgentSmithy streams these event types:
+
+- `user`
+- `chat_start`
+- `chat`
+- `chat_end`
+- `reasoning_start`
+- `reasoning`
+- `reasoning_end`
+- `summary_start`
+- `summary_end`
+- `tool_call`
+- `file_edit`
+- `error`
+
+A final `done` event signals end of stream. Each SSE message is a single JSON object. If an `error` event is emitted, it is immediately followed by a `done` event so clients can reliably finalize the stream.
 
 ## Connection
 
