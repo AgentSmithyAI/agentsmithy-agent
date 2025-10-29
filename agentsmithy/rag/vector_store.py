@@ -278,11 +278,11 @@ class VectorStoreManager:
             if results and "metadatas" in results and results["metadatas"]:
                 # Return first matching metadata
                 return results["metadatas"][0]
+            return None
         except Exception:
             # Non-critical: failure to retrieve metadata just means the file is
             # not indexed or the store is unavailable; treat as missing.
             return None
-        return None
 
     def get_indexed_files(self) -> dict[str, str]:
         """Get all indexed files with their hashes.

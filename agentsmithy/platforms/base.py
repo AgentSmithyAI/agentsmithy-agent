@@ -17,7 +17,6 @@ class OSAdapter(Protocol):
     def terminate_process(self, proc: Any) -> None: ...
     def normalize_path(self, path: str) -> str:
         """Normalize path to use forward slashes (for storage in git/DB)."""
-        ...
 
 
 class BaseOSAdapter:

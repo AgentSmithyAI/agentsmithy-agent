@@ -246,8 +246,16 @@ class SearchFilesTool(BaseTool):
                         except (PermissionError, OSError):
                             continue
 
-            except (PermissionError, OSError):
-                pass
+            except (PermissionError, OSError) as e:
+                # Log and skip directories that cannot be accessed
+                agent_logger.debug(
+                    "Skipped directory during search due to error",
+                    path=str(directory),
+                    error_type=type(e).__name__,
+                    error=str(e),
+                )
+                # Best-effort: continue walking other directories
+                return
 
         try:
             _walk_directory(base)

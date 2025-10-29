@@ -96,8 +96,9 @@ async def test_error_event_delivered_on_llm_streaming_failure(temp_project):
             if event_data.get("type") == "done" or event_data.get("done"):
                 done_found = True
     except Exception:
-        # Stream might raise; we only assert that error/done events were emitted before failure.
-        # Swallowing is intentional here to avoid masking the delivery check.
+        # Stream may raise after emitting events; swallow exception to verify that
+        # error/done events were properly delivered before the failure occurred.
+        # Intentionally ignore to assert on collected SSE events below.
         pass
 
     # Verify error and done events were delivered
@@ -165,7 +166,9 @@ async def test_error_event_on_immediate_failure(temp_project):
             if event_data.get("type") == "error":
                 error_found = True
     except Exception:
-        # Stream may raise after emitting error; swallowing is intentional to assert delivery.
+        # Stream may raise after emitting error event; swallow exception to verify
+        # that the error event was properly delivered before the failure occurred.
+        # Intentionally ignored in test to continue assertions.
         pass
 
     assert (
@@ -229,6 +232,8 @@ async def test_multiple_response_sources_error_handling(temp_project):
                 error_found = True
                 assert "Agent processing failed" in event_data.get("error", "")
     except Exception:
+        # Stream may raise after emitting error event; swallow exception to verify
+        # that the error event was properly delivered before the failure occurred.
         pass
 
     assert error_found, "Error from agent response not delivered"

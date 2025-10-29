@@ -1399,6 +1399,7 @@ class VersioningTracker:
             if index_path.exists():
                 index_path.unlink()
         except Exception:
+            # Non-critical: failure to remove index file does not affect approval process
             pass
 
         return {
@@ -1469,11 +1470,13 @@ class VersioningTracker:
                     try:
                         del index._byname[key]
                     except Exception:
+                        # Best-effort: if an index entry cannot be removed, continue clearing others
                         pass
                 # Rebuild and write empty index safely
                 try:
                     index.write()
                 except Exception:
+                    # Non-critical: failure to write empty index is acceptable; fallback cleanup follows
                     pass
             except Exception:
                 pass
@@ -1667,7 +1670,8 @@ class VersioningTracker:
                 try:
                     metadata = json.loads(meta_file.read_text())
                 except Exception:
-                    # Non-critical: corrupted or unreadable metadata; continue without it
+                    # Non-critical: corrupted or unreadable metadata file is treated as empty.
+                    # This allows recovery from malformed JSON without blocking checkpoint restore.
                     metadata = {}
 
             # Get active session branch (not HEAD which might be on different branch)
