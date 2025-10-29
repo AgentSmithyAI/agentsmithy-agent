@@ -1,0 +1,310 @@
+"""Tests for approve/reset API endpoints."""
+
+import tempfile
+from pathlib import Path
+
+import pytest
+from fastapi.testclient import TestClient
+
+from agentsmithy.api.app import create_app
+from agentsmithy.core.project import set_workspace
+from agentsmithy.services.versioning import VersioningTracker
+
+
+@pytest.fixture
+def temp_project():
+    """Create a temporary project for testing."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        project_root = Path(tmpdir)
+        workspace = set_workspace(project_root)
+        project = workspace.get_project("test")
+        project.ensure_state_dir()
+        project.ensure_dialogs_dir()
+        yield project
+
+
+@pytest.fixture
+def client(temp_project):
+    """Create test client with project dependency override."""
+    from agentsmithy.api.deps import get_project
+
+    app = create_app()
+
+    # Override get_project dependency
+    def override_get_project():
+        return temp_project
+
+    app.dependency_overrides[get_project] = override_get_project
+
+    return TestClient(app)
+
+
+def test_approve_endpoint(client, temp_project):
+    """Test POST /dialogs/{id}/approve endpoint."""
+    # Create dialog
+    dialog_id = temp_project.create_dialog(title="Test Approve", set_current=True)
+
+    # Create some checkpoints
+    tracker = VersioningTracker(str(temp_project.root), dialog_id)
+    test_file = temp_project.root / "test.txt"
+    test_file.write_text("Content 1")
+    tracker.create_checkpoint("Checkpoint 1")
+    test_file.write_text("Content 2")
+    tracker.create_checkpoint("Checkpoint 2")
+
+    # Approve session
+    response = client.post(
+        f"/api/dialogs/{dialog_id}/approve", json={"message": "Test approval"}
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+
+    assert "approved_commit" in data
+    assert "new_session" in data
+    assert "commits_approved" in data
+    assert data["new_session"] == "session_2"
+    assert data["commits_approved"] > 0
+
+
+def test_reset_endpoint(client, temp_project):
+    """Test POST /dialogs/{id}/reset endpoint."""
+    # Create dialog
+    dialog_id = temp_project.create_dialog(title="Test Reset", set_current=True)
+
+    # Create and approve session
+    tracker = VersioningTracker(str(temp_project.root), dialog_id)
+    test_file = temp_project.root / "test.txt"
+    test_file.write_text("Approved")
+    tracker.create_checkpoint("Checkpoint 1")
+    tracker.approve_all()
+
+    # Make changes in new session
+    test_file.write_text("Unapproved")
+    tracker.create_checkpoint("Checkpoint 2")
+
+    # Reset to approved
+    response = client.post(f"/api/dialogs/{dialog_id}/reset")
+
+    assert response.status_code == 200
+    data = response.json()
+
+    assert "reset_to" in data
+    assert "new_session" in data
+    assert data["new_session"] == "session_3"
+
+    # Verify file was restored
+    assert test_file.read_text() == "Approved"
+
+
+def test_approve_empty_session(client, temp_project):
+    """Test approving session with no changes."""
+    # Create dialog (empty)
+    dialog_id = temp_project.create_dialog(title="Empty", set_current=True)
+
+    # Approve immediately
+    response = client.post(
+        f"/api/dialogs/{dialog_id}/approve", json={"message": "Empty approval"}
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+
+    assert data["commits_approved"] == 0
+    assert data["new_session"] == "session_2"
+
+
+def test_multiple_approve_reset_cycles(client, temp_project):
+    """Test multiple approve/reset cycles."""
+    dialog_id = temp_project.create_dialog(title="Cycles", set_current=True)
+    tracker = VersioningTracker(str(temp_project.root), dialog_id)
+    test_file = temp_project.root / "test.txt"
+
+    # Cycle 1: work -> approve
+    test_file.write_text("V1")
+    tracker.create_checkpoint("V1")
+    response = client.post(f"/api/dialogs/{dialog_id}/approve")
+    assert response.status_code == 200
+    assert response.json()["new_session"] == "session_2"
+
+    # Cycle 2: work -> reset
+    test_file.write_text("V2")
+    tracker.create_checkpoint("V2")
+    response = client.post(f"/api/dialogs/{dialog_id}/reset")
+    assert response.status_code == 200
+    assert response.json()["new_session"] == "session_3"
+    assert test_file.read_text() == "V1"  # Reset to approved
+
+    # Cycle 3: work -> approve
+    test_file.write_text("V3")
+    tracker.create_checkpoint("V3")
+    response = client.post(f"/api/dialogs/{dialog_id}/approve")
+    assert response.status_code == 200
+    assert response.json()["new_session"] == "session_4"
+    assert test_file.read_text() == "V3"  # Approved stays
+
+
+def test_get_session_status_no_file_changes(client, temp_project):
+    """Test that session status shows no unapproved when files unchanged."""
+    from agentsmithy.services.versioning import VersioningTracker
+
+    # Create dialog
+    dialog_id = temp_project.create_dialog(title="Test No Changes", set_current=True)
+
+    # Get initial status - should be no unapproved
+    response = client.get(f"/api/dialogs/{dialog_id}/session")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["active_session"] is None
+    assert not data["has_unapproved"]
+
+    # Create checkpoint WITHOUT changing files (just checkpoint creation)
+    tracker = VersioningTracker(str(temp_project.root), dialog_id)
+    tracker.create_checkpoint("Checkpoint without file changes")
+
+    # Session status should STILL show no unapproved (trees are same)
+    response = client.get(f"/api/dialogs/{dialog_id}/session")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["active_session"] is None  # No real changes
+    assert not data["has_unapproved"]  # Trees are identical
+
+
+def test_get_session_status_with_file_changes(client, temp_project):
+    """Test that session status shows unapproved when files changed."""
+    from agentsmithy.services.versioning import VersioningTracker
+
+    # Create dialog
+    dialog_id = temp_project.create_dialog(title="Test With Changes", set_current=True)
+
+    # Create checkpoint WITH file changes
+    tracker = VersioningTracker(str(temp_project.root), dialog_id)
+    test_file = temp_project.root / "changed.txt"
+    test_file.write_text("New content")
+    tracker.create_checkpoint("Checkpoint with file changes")
+
+    # Session status should show unapproved (trees differ)
+    response = client.get(f"/api/dialogs/{dialog_id}/session")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["active_session"] == "session_1"  # Has changes
+    assert data["has_unapproved"]  # Trees are different
+
+
+def test_get_session_status_with_uncommitted_changes(client, temp_project):
+    """Unstaged changes should NOT count as unapproved."""
+    # Create dialog
+    dialog_id = temp_project.create_dialog(title="Test Uncommitted", set_current=True)
+
+    # Change files WITHOUT creating checkpoint (uncommitted, unstaged)
+    test_file = temp_project.root / "uncommitted.txt"
+    test_file.write_text("Uncommitted content")
+
+    # Session status should NOT show unapproved (only staged or committed count)
+    response = client.get(f"/api/dialogs/{dialog_id}/session")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["active_session"] is None
+    assert not data["has_unapproved"]
+
+
+def test_approve_commits_uncommitted_changes(client, temp_project):
+    """Test that approve auto-commits uncommitted changes before merging."""
+    # Create dialog
+    dialog_id = temp_project.create_dialog(title="Test Auto Commit", set_current=True)
+
+    # Make uncommitted changes
+    test_file = temp_project.root / "uncommitted.txt"
+    test_file.write_text("Content")
+
+    # Approve should auto-commit before merging
+    response = client.post(f"/api/dialogs/{dialog_id}/approve")
+    assert response.status_code == 200
+
+    # After approve, files should still exist and be approved
+    assert test_file.exists()
+    assert test_file.read_text() == "Content"
+
+    # Session status should show no unapproved
+    response = client.get(f"/api/dialogs/{dialog_id}/session")
+    data = response.json()
+    assert not data["has_unapproved"]
+
+
+def test_approve_commits_staged_changes(client, temp_project):
+    """Approve should also commit staged-only changes before merging."""
+    # Create dialog
+    dialog_id = temp_project.create_dialog(
+        title="Test Auto Commit Staged", set_current=True
+    )
+
+    tracker = VersioningTracker(str(temp_project.root), dialog_id)
+
+    # Create a file that would normally be ignored and stage it explicitly
+    staged_file = temp_project.root / ".venv" / "internal.txt"
+    staged_file.parent.mkdir(parents=True, exist_ok=True)
+    staged_file.write_text("staged content")
+
+    # Stage without creating a checkpoint
+    tracker.stage_file(str(staged_file.relative_to(temp_project.root)))
+
+    # Sanity: before approve, status should report has_unapproved due to staged
+    resp_before = client.get(f"/api/dialogs/{dialog_id}/session")
+    assert resp_before.status_code == 200
+    assert resp_before.json()["has_unapproved"]
+
+    # Approve should auto-commit staged before merging
+    response = client.post(f"/api/dialogs/{dialog_id}/approve")
+    assert response.status_code == 200
+
+    # File should remain and be part of approved state
+    assert staged_file.exists()
+    assert staged_file.read_text() == "staged content"
+
+    # After approve, no unapproved changes
+    resp_after = client.get(f"/api/dialogs/{dialog_id}/session")
+    assert resp_after.status_code == 200
+    assert not resp_after.json()["has_unapproved"]
+
+
+def test_get_session_status(client, temp_project):
+    """Test GET /dialogs/{id}/session endpoint."""
+    # Create dialog
+    dialog_id = temp_project.create_dialog(title="Test Session", set_current=True)
+
+    # Get initial session status (no unapproved changes)
+    response = client.get(f"/api/dialogs/{dialog_id}/session")
+    assert response.status_code == 200
+    data = response.json()
+
+    assert data["active_session"] is None  # No active session when nothing unapproved
+    assert data["session_ref"] is None
+    assert not data["has_unapproved"]
+    assert "last_approved_at" in data
+
+    # Create checkpoint (makes session unapproved)
+    tracker = VersioningTracker(str(temp_project.root), dialog_id)
+    test_file = temp_project.root / "test.txt"
+    test_file.write_text("New content")
+    tracker.create_checkpoint("Change")
+
+    # Check session status again (now has active session)
+    response = client.get(f"/api/dialogs/{dialog_id}/session")
+    assert response.status_code == 200
+    data = response.json()
+
+    assert data["active_session"] == "session_1"
+    assert data["session_ref"] == "refs/heads/session_1"
+    assert data["has_unapproved"]  # Now has unapproved changes
+
+    # Approve
+    client.post(f"/api/dialogs/{dialog_id}/approve")
+
+    # Check session status after approve (no unapproved again)
+    response = client.get(f"/api/dialogs/{dialog_id}/session")
+    assert response.status_code == 200
+    data = response.json()
+
+    assert data["active_session"] is None  # No active session after approve
+    assert data["session_ref"] is None
+    assert not data["has_unapproved"]

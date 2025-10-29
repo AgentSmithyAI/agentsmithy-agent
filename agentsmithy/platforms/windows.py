@@ -64,3 +64,11 @@ class WindowsAdapter(BaseOSAdapter):
             proc.kill()
         except Exception:
             pass
+
+    def normalize_path(self, path: str) -> str:
+        """Normalize Windows path to use forward slashes.
+
+        Replaces backslashes with forward slashes for consistent storage
+        in git/database regardless of OS.
+        """
+        return path.replace("\\", "/")

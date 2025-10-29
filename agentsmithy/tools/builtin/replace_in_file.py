@@ -28,7 +28,6 @@ class ReplaceInFileSuccess(BaseModel):
     type: Literal["replace_file_result"] = "replace_file_result"
     path: str
     diff: str | None = None
-    checkpoint: str | None = None
 
 
 ReplaceInFileResult = ReplaceInFileSuccess | ToolError
@@ -71,6 +70,15 @@ class ReplaceInFileTool(BaseTool):
     )
     args_schema: type[BaseModel] | dict[str, Any] | None = ReplaceArgs
 
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._project = None
+
+    def set_context(self, project, dialog_id):
+        """Set project and dialog context for RAG indexing."""
+        self._project = project
+        self._dialog_id = dialog_id
+
     async def _arun(self, **kwargs: Any) -> dict[str, Any]:
         diff_text: str = kwargs["diff"]
         # Use project root if available, fallback to cwd
@@ -91,7 +99,6 @@ class ReplaceInFileTool(BaseTool):
         tracker.ensure_repo()
         tracker.start_edit([str(file_path)])
 
-        checkpoint = None
         try:
             agent_logger.info("replace_in_file start", path=str(file_path))
             original_text = (
@@ -134,7 +141,37 @@ class ReplaceInFileTool(BaseTool):
             raise
         else:
             tracker.finalize_edit()
-            checkpoint = tracker.create_checkpoint(f"replace_in_file: {str(file_path)}")
+
+            # Stage file for checkpoint tracking (agent modified this file)
+            try:
+                rel_path_obj = file_path.relative_to(project_root)
+                tracker.stage_file(str(rel_path_obj))
+            except Exception:
+                pass  # Best effort
+
+        # Index file in RAG (optional, best-effort)
+        try:
+            if hasattr(self, "_project") and self._project:
+                # Get relative path for RAG indexing
+                try:
+                    rel_path = file_path.relative_to(self._project.root)
+                    index_path = str(rel_path)
+                except ValueError:
+                    # File is outside project root, use absolute path
+                    index_path = str(file_path)
+
+                # Index in vector store (async, non-blocking)
+                from agentsmithy.core.background_tasks import get_background_manager
+
+                vector_store = self._project.get_vector_store()
+                # Run in background with proper task tracking
+                get_background_manager().create_task(
+                    vector_store.index_file(index_path, new_text),
+                    name=f"rag_index:{index_path}",
+                )
+        except Exception:
+            # Silently ignore RAG indexing errors
+            pass
 
         diff_str: str | None = None
         if self._sse_callback is not None:
@@ -158,7 +195,6 @@ class ReplaceInFileTool(BaseTool):
                     "type": EventType.FILE_EDIT.value,
                     "file": str(file_path),
                     "diff": diff_str,
-                    "checkpoint": getattr(checkpoint, "commit_id", None),
                 }
             )
 
@@ -166,7 +202,6 @@ class ReplaceInFileTool(BaseTool):
             "type": "replace_file_result",
             "path": str(file_path),
             "diff": diff_str,
-            "checkpoint": getattr(checkpoint, "commit_id", None),
         }
 
 

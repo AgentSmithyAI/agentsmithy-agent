@@ -36,6 +36,15 @@ class ReadFileTool(BaseTool):
     description: str = "Read the contents of a file at the specified path."
     args_schema: type[BaseModel] | dict[str, Any] | None = ReadFileArgs
 
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._project = None
+
+    def set_context(self, project, dialog_id):
+        """Set project and dialog context for RAG indexing."""
+        self._project = project
+        self._dialog_id = dialog_id
+
     async def _arun(self, **kwargs: Any) -> dict[str, Any]:
         # Use project root if available, fallback to cwd
         import os
@@ -73,6 +82,31 @@ class ReadFileTool(BaseTool):
                 )
 
             content = file_path.read_text(encoding="utf-8")
+
+            # Index file in RAG (optional, best-effort)
+            try:
+                if hasattr(self, "_project") and self._project:
+                    # Get relative path for RAG indexing
+                    try:
+                        rel_path = file_path.relative_to(self._project.root)
+                        index_path = str(rel_path)
+                    except ValueError:
+                        # File is outside project root, use absolute path
+                        index_path = str(file_path)
+
+                    # Index in vector store (async, non-blocking)
+                    from agentsmithy.core.background_tasks import get_background_manager
+
+                    vector_store = self._project.get_vector_store()
+                    # Run in background with proper task tracking
+                    get_background_manager().create_task(
+                        vector_store.index_file(index_path, content),
+                        name=f"rag_index:{index_path}",
+                    )
+            except Exception:
+                # Silently ignore RAG indexing errors
+                pass
+
             return ReadFileSuccess(
                 path=str(file_path),
                 content=content,

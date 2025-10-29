@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from agentsmithy.dialogs.history import DialogHistory
+from agentsmithy.services.versioning import VersioningTracker
 from agentsmithy.utils.logger import get_logger
 
 logger = get_logger("project")
@@ -146,6 +147,7 @@ class Project:
 
         Creates the directory `.agentsmithy/dialogs/<dialog_id>/` and updates
         `.agentsmithy/dialogs/index.json` with metadata.
+        Also creates an initial checkpoint snapshot of the project state.
         """
         self.ensure_dialogs_dir()
         dialog_id = uuid.uuid4().hex  # simple unique id; can switch to ULID later
@@ -167,6 +169,72 @@ class Project:
         if set_current:
             index["current_dialog_id"] = dialog_id
         self.save_dialogs_index(index)
+
+        # Create initial checkpoint snapshot
+        # If this fails, rollback dialog creation and propagate error
+        try:
+            from agentsmithy.db.sessions import (
+                create_initial_session,
+                ensure_sessions_tables,
+            )
+
+            # Initialize sessions table first
+            db_path = dialog_dir / "journal.sqlite"
+            ensure_sessions_tables(db_path)
+            create_initial_session(db_path, "session_1")
+
+            # Now create checkpoint (this will use session_1 branch)
+            tracker = VersioningTracker(str(self.root), dialog_id)
+            tracker.ensure_repo()
+            initial_checkpoint = tracker.create_checkpoint(
+                f"Initial snapshot before dialog: {title or dialog_id[:8]}"
+            )
+
+            # Sync main with session_1 for initial checkpoint
+            repo = tracker.ensure_repo()
+            session_ref = tracker._get_session_ref("session_1")
+            if session_ref in repo.refs:
+                repo.refs[tracker.MAIN_BRANCH] = repo.refs[session_ref]
+
+            # Store checkpoint ID and session info in metadata
+            meta["initial_checkpoint"] = initial_checkpoint.commit_id
+            meta["active_session"] = "session_1"
+            meta["last_approved_at"] = now
+
+            # Update index with checkpoint info
+            for i, d in enumerate(dialogs_list):
+                if d.get("id") == dialog_id:
+                    dialogs_list[i] = meta
+                    break
+            index["dialogs"] = dialogs_list
+            self.save_dialogs_index(index)
+            logger.info(
+                "Created initial checkpoint and session for dialog",
+                dialog_id=dialog_id[:8],
+                checkpoint_id=initial_checkpoint.commit_id[:8],
+                session="session_1",
+            )
+        except Exception as e:
+            # Rollback dialog creation
+            logger.error(
+                "Failed to create initial checkpoint, rolling back dialog creation",
+                dialog_id=dialog_id[:8],
+                error=str(e),
+            )
+            # Remove from index
+            index = self.load_dialogs_index()
+            dialogs_list = index.get("dialogs", [])
+            dialogs_list = [d for d in dialogs_list if d.get("id") != dialog_id]
+            index["dialogs"] = dialogs_list
+            if index.get("current_dialog_id") == dialog_id:
+                index["current_dialog_id"] = None
+            self.save_dialogs_index(index)
+            # Remove dialog directory
+            if dialog_dir.exists():
+                shutil.rmtree(dialog_dir, ignore_errors=True)
+            # Re-raise exception to propagate to API layer
+            raise RuntimeError(f"Failed to create dialog: {str(e)}") from e
+
         return dialog_id
 
     def list_dialogs(

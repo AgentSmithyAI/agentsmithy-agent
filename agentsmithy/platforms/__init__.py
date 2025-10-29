@@ -16,3 +16,18 @@ def get_os_adapter() -> OSAdapter:
     if os.name == "nt":
         return WindowsAdapter()
     return PosixAdapter()
+
+
+# Global adapter instance for convenience
+_adapter = get_os_adapter()
+
+
+def normalize_path(path: str) -> str:
+    """Normalize path to use forward slashes (for storage in git/DB).
+
+    On Windows: converts backslashes to forward slashes
+    On POSIX: returns path as-is
+
+    This ensures consistent path storage regardless of OS.
+    """
+    return _adapter.normalize_path(path)

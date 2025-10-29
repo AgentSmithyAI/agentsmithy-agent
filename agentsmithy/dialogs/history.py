@@ -89,9 +89,30 @@ class DialogHistory:
         return self._history
 
     @_touch_metadata
-    def add_user_message(self, content: str) -> None:
-        """Add a user message to the history."""
-        self.history.add_user_message(content)
+    def add_user_message(
+        self, content: str, checkpoint: str | None = None, session: str | None = None
+    ) -> None:
+        """Add a user message to the history.
+
+        Args:
+            content: Message content
+            checkpoint: Optional checkpoint ID (snapshot before AI response)
+            session: Optional session ID
+        """
+        if checkpoint or session:
+            # Use BaseMessage with metadata to include checkpoint and session
+            from langchain_core.messages import HumanMessage
+
+            message = HumanMessage(content=content)
+            metadata = {}
+            if checkpoint:
+                metadata["checkpoint"] = checkpoint
+            if session:
+                metadata["session"] = session
+            message.additional_kwargs = metadata
+            self.history.add_message(message)
+        else:
+            self.history.add_user_message(content)
         self._cached_messages = None  # Invalidate cache
 
     @_touch_metadata

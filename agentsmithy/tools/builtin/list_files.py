@@ -98,20 +98,28 @@ class ListFilesTool(BaseTool):
 
             if recursive:
                 for p in base.rglob("*"):
-                    # Check if path should be ignored by restrictions
-                    if restrictions.is_ignored(p):
+                    # Check if path should be ignored relative to base (not workspace)
+                    # This allows listing .github contents when explicitly requested
+                    if restrictions.is_ignored_relative_to(p, base):
                         continue
-                    # Check if hidden files should be included
-                    if not restrictions.should_include_hidden(p, include_hidden):
+                    # Check if hidden files should be included relative to base
+                    # This allows listing .github contents when explicitly requested
+                    if not restrictions.should_include_hidden_relative_to(
+                        p, base, include_hidden
+                    ):
                         continue
                     items.append(str(p))
             else:
                 for p in base.glob("*"):
-                    # Check if path should be ignored by restrictions
-                    if restrictions.is_ignored(p):
+                    # Check if path should be ignored relative to base (not workspace)
+                    # This allows listing .github contents when explicitly requested
+                    if restrictions.is_ignored_relative_to(p, base):
                         continue
-                    # Check if hidden files should be included
-                    if not restrictions.should_include_hidden(p, include_hidden):
+                    # Check if hidden files should be included relative to base
+                    # This allows listing .github contents when explicitly requested
+                    if not restrictions.should_include_hidden_relative_to(
+                        p, base, include_hidden
+                    ):
                         continue
                     items.append(str(p))
 

@@ -23,7 +23,6 @@ class DeleteFileArgsDict(TypedDict):
 class DeleteFileSuccess(BaseModel):
     type: Literal["delete_file_result"] = "delete_file_result"
     path: str
-    checkpoint: str | None = None
 
 
 DeleteFileResult = DeleteFileSuccess | ToolError
@@ -40,6 +39,15 @@ class DeleteFileTool(BaseTool):
     name: str = "delete_file"
     description: str = "Delete a file from the workspace (non-recursive)."
     args_schema: type[BaseModel] | dict[str, Any] | None = DeleteFileArgs
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._project = None
+
+    def set_context(self, project, dialog_id):
+        """Set project and dialog context for RAG indexing."""
+        self._project = project
+        self._dialog_id = dialog_id
 
     async def _arun(self, **kwargs: Any) -> dict[str, Any]:
         # Use project root if available, fallback to cwd
@@ -60,7 +68,6 @@ class DeleteFileTool(BaseTool):
         tracker.ensure_repo()
         tracker.start_edit([str(file_path)])
 
-        checkpoint = None
         try:
             if file_path.exists():
                 if file_path.is_file():
@@ -75,21 +82,43 @@ class DeleteFileTool(BaseTool):
             raise
         else:
             tracker.finalize_edit()
-            checkpoint = tracker.create_checkpoint(f"delete_file: {str(file_path)}")
+
+            # Stage file deletion for checkpoint tracking (agent deleted this file)
+            try:
+                rel_path_obj = file_path.relative_to(project_root)
+                tracker.stage_file(str(rel_path_obj))
+            except Exception:
+                pass  # Best effort
+
+        # Remove file from RAG (optional, best-effort)
+        try:
+            if hasattr(self, "_project") and self._project:
+                # Get relative path for RAG
+                try:
+                    rel_path = file_path.relative_to(self._project.root)
+                    index_path = str(rel_path)
+                except ValueError:
+                    # File is outside project root, use absolute path
+                    index_path = str(file_path)
+
+                # Remove from vector store
+                vector_store = self._project.get_vector_store()
+                vector_store.delete_by_source(index_path)
+        except Exception:
+            # Silently ignore RAG deletion errors
+            pass
 
         if self._sse_callback is not None:
             await self.emit_event(
                 {
                     "type": EventType.FILE_EDIT.value,
                     "file": str(file_path),
-                    "checkpoint": getattr(checkpoint, "commit_id", None),
                 }
             )
 
         return {
             "type": "delete_file_result",
             "path": str(file_path),
-            "checkpoint": getattr(checkpoint, "commit_id", None),
         }
 
 
