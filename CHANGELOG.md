@@ -1,5 +1,47 @@
 <!-- version list -->
 
+## v1.7.0 (2025-10-29)
+
+### Chores
+
+- Fix uploading release assets
+  ([`fe3e8a7`](https://github.com/AgentSmithyAI/agentsmithy-agent/commit/fe3e8a73b447903490997233ab4ccdc31f492efd))
+
+- **deps**: Bump actions/download-artifact from 5 to 6
+  ([#45](https://github.com/AgentSmithyAI/agentsmithy-agent/pull/45),
+  [`f182e1c`](https://github.com/AgentSmithyAI/agentsmithy-agent/commit/f182e1c2731403b453bed34d262351641835c2c6))
+
+- **deps**: Bump actions/upload-artifact from 4 to 5
+  ([#43](https://github.com/AgentSmithyAI/agentsmithy-agent/pull/43),
+  [`cb6c785`](https://github.com/AgentSmithyAI/agentsmithy-agent/commit/cb6c785b56115d860b728d747f45be8ffbefb1d3))
+
+- **deps**: Bump fastapi from 0.118.0 to 0.120.0 in the fastapi group
+  ([#46](https://github.com/AgentSmithyAI/agentsmithy-agent/pull/46),
+  [`84d1249`](https://github.com/AgentSmithyAI/agentsmithy-agent/commit/84d12497f125e4b44f877169f7100dc4f272e0cc))
+
+- **deps**: Bump langgraph from 0.6.8 to 1.0.1 in the langgraph group
+  ([#47](https://github.com/AgentSmithyAI/agentsmithy-agent/pull/47),
+  [`8fae858`](https://github.com/AgentSmithyAI/agentsmithy-agent/commit/8fae85824cab0a6898e02de575f982e7eaa90bf4))
+
+- **deps**: Bump pydantic from 2.11.9 to 2.12.3 in the pydantic group
+  ([#48](https://github.com/AgentSmithyAI/agentsmithy-agent/pull/48),
+  [`cb467b4`](https://github.com/AgentSmithyAI/agentsmithy-agent/commit/cb467b4ea9f062aacea697faf7c57686de7f3c22))
+
+- **deps**: Bump the langchain group with 2 updates
+  ([#42](https://github.com/AgentSmithyAI/agentsmithy-agent/pull/42),
+  [`028800a`](https://github.com/AgentSmithyAI/agentsmithy-agent/commit/028800a92da7677bfbf128065774601e82101e99))
+
+- **deps**: Bump tiktoken from 0.11.0 to 0.12.0 in the openai group
+  ([#44](https://github.com/AgentSmithyAI/agentsmithy-agent/pull/44),
+  [`5fbbc3c`](https://github.com/AgentSmithyAI/agentsmithy-agent/commit/5fbbc3c58b1c4e48b26eedf4e0dd4d31ab7caf4d))
+
+### Features
+
+- Checkpoints, rollbacks, edit transactions
+  ([#41](https://github.com/AgentSmithyAI/agentsmithy-agent/pull/41),
+  [`445a22e`](https://github.com/AgentSmithyAI/agentsmithy-agent/commit/445a22ecfbe19043a232f2dd667c7dc660c2d0ca))
+
+
 ## v1.6.2 (2025-10-23)
 
 ### Bug Fixes
