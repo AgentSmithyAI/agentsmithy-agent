@@ -96,7 +96,8 @@ async def test_error_event_delivered_on_llm_streaming_failure(temp_project):
             if event_data.get("type") == "done" or event_data.get("done"):
                 done_found = True
     except Exception:
-        # Stream might raise, that's ok - we're checking events were sent before
+        # Stream might raise; we only assert that error/done events were emitted before failure.
+        # Swallowing is intentional here to avoid masking the delivery check.
         pass
 
     # Verify error and done events were delivered
@@ -164,6 +165,7 @@ async def test_error_event_on_immediate_failure(temp_project):
             if event_data.get("type") == "error":
                 error_found = True
     except Exception:
+        # Stream may raise after emitting error; swallowing is intentional to assert delivery.
         pass
 
     assert (

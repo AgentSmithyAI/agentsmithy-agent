@@ -1667,7 +1667,8 @@ class VersioningTracker:
                 try:
                     metadata = json.loads(meta_file.read_text())
                 except Exception:
-                    pass
+                    # Non-critical: corrupted or unreadable metadata; continue without it
+                    metadata = {}
 
             # Get active session branch (not HEAD which might be on different branch)
             active_session = self._get_active_session_name()
