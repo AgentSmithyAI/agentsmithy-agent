@@ -13,7 +13,7 @@ from typing import Any, cast
 
 import pathspec
 from dulwich import porcelain
-from dulwich.objects import Commit, Tree  # precise types for object store
+from dulwich.objects import Commit, Tree
 from dulwich.repo import Repo
 
 # Note: This module uses dulwich (pure Python git implementation) for all git operations.
@@ -305,6 +305,9 @@ DEFAULT_EXCLUDES = [
     ".terraform/",
     ".terragrunt-cache/",
 ]
+
+# Number of failure entries to include in error messages
+MAX_FAILURE_SAMPLES = 5
 
 
 def stable_hash(text: str) -> str:
@@ -868,13 +871,13 @@ class VersioningTracker:
                 total_files=len(files_to_process),
             )
             # Show first few failures in error message
-            sample_failures = failed_files[:5]
+            sample_failures = failed_files[:MAX_FAILURE_SAMPLES]
             failure_details = "\n".join(
                 f"  - {path}: {err}" for path, err in sample_failures
             )
             more_info = (
-                f"\n  ... and {len(failed_files) - 5} more"
-                if len(failed_files) > 5
+                f"\n  ... and {len(failed_files) - MAX_FAILURE_SAMPLES} more"
+                if len(failed_files) > MAX_FAILURE_SAMPLES
                 else ""
             )
             raise RuntimeError(
