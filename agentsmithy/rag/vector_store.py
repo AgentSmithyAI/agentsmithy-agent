@@ -249,7 +249,6 @@ class VectorStoreManager:
         Returns:
             Number of files that were reindexed
         """
-        import asyncio
 
         # Filter files that are actually indexed
         files_to_reindex = []
