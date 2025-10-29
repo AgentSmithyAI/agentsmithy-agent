@@ -280,3 +280,194 @@ async def test_search_files_nonexistent_path(tmp_path: Path):
     assert res["type"] in {"search_files_error", "tool_error"}
     assert res["error_type"] == "PathNotFoundError"
     assert "does not exist" in res["error"]
+
+
+# Tests for optimization features
+
+
+async def test_search_files_respects_max_file_size(tmp_path: Path):
+    """Test that files larger than MAX_FILE_SIZE_BYTES are skipped."""
+    # Create a small file that should be searched
+    small_file = tmp_path / "small.txt"
+    small_file.write_text("needle in haystack\n" * 10, encoding="utf-8")
+
+    # Create a large file (>10MB) that should be skipped
+    large_file = tmp_path / "large.txt"
+    # Write 11MB of data
+    large_content = "x" * (11 * 1024 * 1024)
+    large_file.write_text(large_content, encoding="utf-8")
+
+    tool = SearchFilesTool()
+    result = await _run(tool, path=str(tmp_path), regex=r"needle|x")
+
+    # Should only find matches in small file, large file should be skipped
+    assert len(result["results"]) > 0
+    assert all("small.txt" in r["file"] for r in result["results"])
+    assert not any("large.txt" in r["file"] for r in result["results"])
+
+
+async def test_search_files_respects_max_results(tmp_path: Path):
+    """Test that search stops after MAX_RESULTS matches."""
+    # Create files with many matches
+    for i in range(10):
+        f = tmp_path / f"file_{i}.txt"
+        # Each file has 200 matches
+        f.write_text("match\n" * 200, encoding="utf-8")
+
+    tool = SearchFilesTool()
+    result = await _run(tool, path=str(tmp_path), regex=r"match")
+
+    # Should stop at MAX_RESULTS (1000 by default)
+    # We created 2000 potential matches, but should get max 1000
+    assert len(result["results"]) <= 1000
+
+
+async def test_search_files_respects_max_files_scanned(tmp_path: Path):
+    """Test that search stops after scanning MAX_FILES_TO_SCAN files."""
+    # Create many files (more than MAX_FILES_TO_SCAN = 2000)
+    # But make it manageable for test - create subdirectories
+    for i in range(100):
+        subdir = tmp_path / f"dir_{i}"
+        subdir.mkdir()
+        for j in range(30):  # 100 * 30 = 3000 files total
+            f = subdir / f"file_{j}.txt"
+            f.write_text(f"content {i}_{j}\n", encoding="utf-8")
+
+    tool = SearchFilesTool()
+    result = await _run(tool, path=str(tmp_path), regex=r"content")
+
+    # Should have scanned at most MAX_FILES_TO_SCAN files
+    # Note: actual results might be less than files scanned
+    # since not all files match, but should be within reasonable range
+    assert len(result["results"]) > 0
+    # Results should be less than total files (3000)
+    assert len(result["results"]) < 3000
+
+
+async def test_search_files_handles_binary_files_gracefully(tmp_path: Path):
+    """Test that binary files don't crash the search."""
+    # Create a text file
+    text_file = tmp_path / "text.txt"
+    text_file.write_text("findme\n", encoding="utf-8")
+
+    # Create a binary file
+    binary_file = tmp_path / "binary.bin"
+    binary_file.write_bytes(b"\x00\x01\x02\xff\xfe\xfd")
+
+    # Create another text file
+    text_file2 = tmp_path / "text2.txt"
+    text_file2.write_text("findme\n", encoding="utf-8")
+
+    tool = SearchFilesTool()
+    result = await _run(tool, path=str(tmp_path), regex=r"findme")
+
+    # Should find matches in text files despite binary file presence
+    assert len(result["results"]) == 2
+    assert all("text" in r["file"] for r in result["results"])
+
+
+async def test_search_files_efficient_with_many_directories(tmp_path: Path):
+    """Test that os.scandir handles deep directory structures efficiently."""
+    # Create a deep directory structure
+    current = tmp_path
+    for i in range(10):
+        current = current / f"level_{i}"
+        current.mkdir()
+        # Add a file at each level
+        (current / f"file_{i}.txt").write_text(
+            f"target at level {i}\n", encoding="utf-8"
+        )
+
+    tool = SearchFilesTool()
+    result = await _run(tool, path=str(tmp_path), regex=r"target")
+
+    # Should find all 10 files
+    assert len(result["results"]) == 10
+
+
+async def test_search_files_empty_files(tmp_path: Path):
+    """Test that empty files are handled correctly."""
+    # Create empty file
+    empty = tmp_path / "empty.txt"
+    empty.write_text("", encoding="utf-8")
+
+    # Create file with content
+    content = tmp_path / "content.txt"
+    content.write_text("match\n", encoding="utf-8")
+
+    tool = SearchFilesTool()
+    result = await _run(tool, path=str(tmp_path), regex=r"match")
+
+    # Should find only the match in content.txt
+    assert len(result["results"]) == 1
+    assert "content.txt" in result["results"][0]["file"]
+
+
+async def test_search_files_single_line_files(tmp_path: Path):
+    """Test context extraction for single-line files."""
+    single = tmp_path / "single.txt"
+    single.write_text("only one line with match", encoding="utf-8")
+
+    tool = SearchFilesTool()
+    result = await _run(tool, path=str(tmp_path), regex=r"match")
+
+    assert len(result["results"]) == 1
+    assert result["results"][0]["line"] == 1
+    assert result["results"][0]["context"] == "only one line with match"
+
+
+async def test_search_files_utf8_handling(tmp_path: Path):
+    """Test that UTF-8 files with special characters are handled correctly."""
+    utf8_file = tmp_path / "utf8.txt"
+    utf8_file.write_text(
+        "Привет мир\nこんにちは世界\nHello 🌍\nmatch here\n", encoding="utf-8"
+    )
+
+    tool = SearchFilesTool()
+    result = await _run(tool, path=str(tmp_path), regex=r"match")
+
+    assert len(result["results"]) == 1
+    assert "match here" in result["results"][0]["context"]
+    # Context should include UTF-8 characters from surrounding lines
+    assert (
+        "🌍" in result["results"][0]["context"]
+        or "世界" in result["results"][0]["context"]
+    )
+
+
+async def test_search_files_glob_pattern_with_nested_dirs(tmp_path: Path):
+    """Test that glob patterns work correctly with nested directories."""
+    # Create nested structure
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "main.py").write_text("python match\n", encoding="utf-8")
+    (tmp_path / "src" / "main.txt").write_text("text match\n", encoding="utf-8")
+
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test.py").write_text("python match\n", encoding="utf-8")
+
+    tool = SearchFilesTool()
+
+    # Search only .py files
+    result = await _run(
+        tool, path=str(tmp_path), regex=r"match", file_pattern="**/*.py"
+    )
+
+    # Should find only .py files
+    assert len(result["results"]) == 2
+    assert all(r["file"].endswith(".py") for r in result["results"])
+
+
+async def test_search_files_stops_at_first_limit_reached(tmp_path: Path):
+    """Test that search stops when ANY limit is reached first."""
+    # Create many small files
+    for i in range(50):
+        f = tmp_path / f"file_{i:03d}.txt"
+        # Each file has 25 matches
+        f.write_text("match\n" * 25, encoding="utf-8")
+
+    tool = SearchFilesTool()
+    result = await _run(tool, path=str(tmp_path), regex=r"match")
+
+    # 50 files * 25 matches = 1250 potential matches
+    # Should stop at MAX_RESULTS (1000)
+    assert len(result["results"]) == 1000

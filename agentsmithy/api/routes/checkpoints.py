@@ -144,8 +144,13 @@ async def list_checkpoints(
                 if dialog.get("id") == dialog_id:
                     initial_checkpoint_id = dialog.get("initial_checkpoint")
                     break
-        except Exception:
-            pass
+        except Exception as meta_err:
+            # Non-critical: dialog index may be missing or corrupted; continue without it
+            logger.warning(
+                "Failed to read dialogs index",
+                dialog_id=dialog_id,
+                error=str(meta_err),
+            )
 
         return CheckpointsListResponse(
             dialog_id=dialog_id,
@@ -217,8 +222,13 @@ async def get_session_status(
                 if dialog.get("id") == dialog_id:
                     last_approved_at = dialog.get("last_approved_at")
                     break
-        except Exception:
-            pass
+        except Exception as meta_err:
+            # Non-critical: dialog index may be missing or corrupted; continue without timestamp
+            logger.warning(
+                "Failed to read last_approved_at from dialogs index",
+                dialog_id=dialog_id,
+                error=str(meta_err),
+            )
 
         # If no unapproved changes, return null for session info
         if has_unapproved:
@@ -351,8 +361,13 @@ async def approve_session(
         # After approval, ensure staging area is clean (UX: no lingering has_unapproved)
         try:
             tracker.clear_staging()
-        except Exception:
-            pass
+        except Exception as clear_err:
+            # Not fatal: staging cleanup is best-effort
+            logger.debug(
+                "Failed to clear staging after approval",
+                dialog_id=dialog_id,
+                error=str(clear_err),
+            )
 
         # Update dialog metadata with new session and approval timestamp
         from datetime import UTC, datetime
