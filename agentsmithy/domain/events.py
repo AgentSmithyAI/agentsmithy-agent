@@ -202,7 +202,6 @@ class EventFactory:
         return SearchEvent(query=query, dialog_id=dialog_id)
 
     @staticmethod
-    @staticmethod
     def done(dialog_id: str | None = None) -> DoneEvent:
         return DoneEvent(dialog_id=dialog_id)
 
