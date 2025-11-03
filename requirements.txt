@@ -157,7 +157,7 @@ langchain==0.3.27
     #   langchain-community
 langchain-chroma==0.2.6
     # via -r requirements.in
-langchain-community==0.3.30
+langchain-community==0.3.31
     # via -r requirements.in
 langchain-core==0.3.79
     # via
