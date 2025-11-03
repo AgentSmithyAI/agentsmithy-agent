@@ -137,7 +137,7 @@ importlib-resources==6.5.2
     # via chromadb
 iniconfig==2.1.0
     # via pytest
-isort==6.0.1
+isort==7.0.0
     # via -r requirements.in
 jiter==0.11.0
     # via openai
