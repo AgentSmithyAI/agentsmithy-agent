@@ -1260,13 +1260,7 @@ class VersioningTracker:
 
         # Clear staging area after restore
         # Staged files were either deleted (not in target) or will be committed later
-        try:
-            index_path = Path(repo.path) / "index"
-            if index_path.exists():
-                index_path.unlink()
-        except Exception:
-            # Best effort - don't fail restore if index cleanup fails
-            pass
+        self.clear_staging()
 
         from agentsmithy.utils.logger import agent_logger
 
@@ -1411,8 +1405,11 @@ class VersioningTracker:
     def reset_to_approved(self) -> dict:
         """Reset current session to approved state (main branch).
 
+        If there are uncommitted or staged changes, creates an automatic checkpoint
+        before reset to preserve work. This checkpoint can be restored later if needed.
+
         Returns:
-            Dict with reset_to (commit), new_session
+            Dict with reset_to (commit), new_session, and optional pre_reset_checkpoint
         """
         from agentsmithy.db.sessions import close_session, create_new_session
 
@@ -1427,6 +1424,28 @@ class VersioningTracker:
         # Get current session
         active_session = self._get_active_session_name()
 
+        # Safety: Create checkpoint if there are uncommitted or staged changes
+        pre_reset_checkpoint = None
+        if self.has_staged_changes() or self.has_uncommitted_changes():
+            from agentsmithy.utils.logger import agent_logger
+
+            try:
+                checkpoint = self.create_checkpoint(
+                    "Auto-save before reset (can be restored if needed)"
+                )
+                pre_reset_checkpoint = checkpoint.commit_id
+
+                agent_logger.info(
+                    "Created auto-save checkpoint before reset",
+                    checkpoint_id=checkpoint.commit_id[:8],
+                )
+            except Exception as e:
+                agent_logger.warning(
+                    "Failed to create auto-save checkpoint before reset",
+                    error=str(e),
+                )
+                # Continue with reset even if checkpoint fails
+
         # Create new session from main
         new_session_num = int(active_session.split("_")[1]) + 1
         new_session = f"session_{new_session_num}"
@@ -1437,7 +1456,14 @@ class VersioningTracker:
         close_session(db_path, active_session, "abandoned")
         create_new_session(db_path, new_session)
 
-        return {"reset_to": main_head.decode(), "new_session": new_session}
+        result = {
+            "reset_to": main_head.decode(),
+            "new_session": new_session,
+        }
+        if pre_reset_checkpoint:
+            result["pre_reset_checkpoint"] = pre_reset_checkpoint
+
+        return result
 
     def has_staged_changes(self) -> bool:
         """Return True if there are entries in the staging area (index).

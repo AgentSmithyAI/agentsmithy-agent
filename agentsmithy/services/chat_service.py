@@ -273,12 +273,28 @@ class ChatService:
                     dialog_id=dialog_id,
                 ).to_sse()
             elif chunk["type"] == EventType.ERROR.value:
-                # Error from tool_executor (e.g., LLM streaming failed)
+                # Error from tool_executor (e.g., httpx.ReadError during LLM streaming)
+                # When connection is already closed, yield raises BrokenPipeError and crashes
+                # the stream without logging. Catch connection errors and log delivery status.
                 error_msg = chunk.get("error", "Unknown error")
                 api_logger.error("Error from tool_executor", error=error_msg)
-                yield SSEEventFactory.error(
-                    message=error_msg, dialog_id=dialog_id
-                ).to_sse()
+                try:
+                    yield SSEEventFactory.error(
+                        message=error_msg, dialog_id=dialog_id
+                    ).to_sse()
+                    # Log successful delivery to diagnose whether errors reach client
+                    api_logger.info(
+                        "ERROR event successfully yielded to SSE stream",
+                        error_msg=error_msg,
+                        dialog_id=dialog_id,
+                    )
+                except (BrokenPipeError, ConnectionResetError, ConnectionError) as e:
+                    # Connection closed - can't send error event
+                    api_logger.warning(
+                        "Cannot send ERROR event - connection closed",
+                        error=str(e),
+                        error_type=type(e).__name__,
+                    )
                 # Don't raise StreamAbortError - just let generator return
                 # tool_executor already handled cleanup
             else:
@@ -530,6 +546,7 @@ class ChatService:
 
                     if hasattr(state["response"], "__aiter__"):
                         chunk_count = 0
+                        api_logger.debug("Starting async for over response stream")
                         try:
                             async for chunk in state["response"]:
                                 chunk_count += 1
@@ -543,7 +560,26 @@ class ChatService:
                                         project_dialog,
                                         reasoning_buffer,
                                     ):
-                                        yield sse_event
+                                        try:
+                                            yield sse_event
+                                        except (
+                                            BrokenPipeError,
+                                            ConnectionResetError,
+                                            ConnectionError,
+                                        ) as conn_err:
+                                            # Client disconnected - can't send events anymore
+                                            api_logger.warning(
+                                                "Client connection lost during streaming",
+                                                error=str(conn_err),
+                                                error_type=type(conn_err).__name__,
+                                            )
+                                            # Flush and exit cleanly
+                                            self._flush_assistant_buffer(
+                                                project_dialog,
+                                                dialog_id,
+                                                assistant_buffer,
+                                            )
+                                            return
                                     stream_log(
                                         api_logger,
                                         "processed_chunk",
@@ -573,7 +609,9 @@ class ChatService:
                             yield SSEEventFactory.done(dialog_id=dialog_id).to_sse()
                             return
                         # Usage persisted inside ToolExecutor now; nothing to do here
-                        api_logger.info(f"Finished streaming {chunk_count} chunks")
+                        api_logger.info(
+                            f"Finished streaming {chunk_count} chunks - response stream completed normally"
+                        )
                     else:
                         try:
                             async for sse_event in self._process_structured_chunk(
@@ -716,6 +754,24 @@ class ChatService:
             api_logger.info("SSE generation completed", total_events=event_count)
             yield SSEEventFactory.done(dialog_id=dialog_id).to_sse()
 
+        except GeneratorExit:
+            # Handle generator exit - this is normal when client disconnects or stream
+            # is closed early (e.g., with break in async for loop).
+            # DO NOT yield anything here - Python raises RuntimeError if a generator
+            # attempts to yield after receiving GeneratorExit (PEP 342). This exception
+            # is part of the generator cleanup protocol when client closes connection.
+            # Without this handler, we'd see "RuntimeError: async generator ignored GeneratorExit"
+            # in logs during stream cleanup, especially in tests or when clients disconnect.
+            api_logger.info("SSE generator closed by client disconnect")
+            # Flush buffer before exit (best effort)
+            try:
+                self._flush_assistant_buffer(
+                    project_dialog, dialog_id, assistant_buffer
+                )
+            except Exception:
+                pass
+            # Re-raise to let Python handle cleanup
+            raise
         except asyncio.CancelledError:
             api_logger.info("Stream cancelled due to shutdown")
             # Flush buffer before exit
