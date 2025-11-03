@@ -273,22 +273,23 @@ class ChatService:
                     dialog_id=dialog_id,
                 ).to_sse()
             elif chunk["type"] == EventType.ERROR.value:
-                # Error from tool_executor (e.g., LLM streaming failed)
+                # Error from tool_executor (e.g., httpx.ReadError during LLM streaming)
+                # When connection is already closed, yield raises BrokenPipeError and crashes
+                # the stream without logging. Catch connection errors and log delivery status.
                 error_msg = chunk.get("error", "Unknown error")
                 api_logger.error("Error from tool_executor", error=error_msg)
                 try:
                     yield SSEEventFactory.error(
                         message=error_msg, dialog_id=dialog_id
                     ).to_sse()
-                    # CRITICAL: Log that ERROR event was successfully sent
+                    # Log successful delivery to diagnose whether errors reach client
                     api_logger.info(
                         "ERROR event successfully yielded to SSE stream",
                         error_msg=error_msg,
                         dialog_id=dialog_id,
                     )
                 except (BrokenPipeError, ConnectionResetError, ConnectionError) as e:
-                    # Client connection already closed (e.g., after httpx.ReadError)
-                    # Can't send error event, just log and continue cleanup
+                    # Connection closed - can't send error event
                     api_logger.warning(
                         "Cannot send ERROR event - connection closed",
                         error=str(e),
@@ -754,8 +755,13 @@ class ChatService:
             yield SSEEventFactory.done(dialog_id=dialog_id).to_sse()
 
         except GeneratorExit:
-            # Handle generator exit - this is normal when client disconnects
-            # DO NOT yield anything here - it will cause RuntimeError
+            # Handle generator exit - this is normal when client disconnects or stream
+            # is closed early (e.g., with break in async for loop).
+            # DO NOT yield anything here - Python raises RuntimeError if a generator
+            # attempts to yield after receiving GeneratorExit (PEP 342). This exception
+            # is part of the generator cleanup protocol when client closes connection.
+            # Without this handler, we'd see "RuntimeError: async generator ignored GeneratorExit"
+            # in logs during stream cleanup, especially in tests or when clients disconnect.
             api_logger.info("SSE generator closed by client disconnect")
             # Flush buffer before exit (best effort)
             try:

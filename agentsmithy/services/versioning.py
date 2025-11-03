@@ -1427,20 +1427,19 @@ class VersioningTracker:
         # Safety: Create checkpoint if there are uncommitted or staged changes
         pre_reset_checkpoint = None
         if self.has_staged_changes() or self.has_uncommitted_changes():
+            from agentsmithy.utils.logger import agent_logger
+
             try:
                 checkpoint = self.create_checkpoint(
                     "Auto-save before reset (can be restored if needed)"
                 )
                 pre_reset_checkpoint = checkpoint.commit_id
-                from agentsmithy.utils.logger import agent_logger
 
                 agent_logger.info(
                     "Created auto-save checkpoint before reset",
                     checkpoint_id=checkpoint.commit_id[:8],
                 )
             except Exception as e:
-                from agentsmithy.utils.logger import agent_logger
-
                 agent_logger.warning(
                     "Failed to create auto-save checkpoint before reset",
                     error=str(e),
