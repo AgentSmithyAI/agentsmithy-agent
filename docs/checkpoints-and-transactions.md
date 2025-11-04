@@ -221,7 +221,10 @@ Get current session status and approval state, including detailed list of change
 
 **Changed Files Details:**
 - `path`: File path relative to project root
-- `status`: Change type - `"added"`, `"modified"`, or `"deleted"`
+- `status`: Change type (`FileChangeStatus` enum):
+  - `"added"` - File was created
+  - `"modified"` - File was changed
+  - `"deleted"` - File was removed
 - `additions`: Number of lines added (null for binary files)
 - `deletions`: Number of lines deleted (null for binary files)
 

@@ -1791,8 +1791,10 @@ class VersioningTracker:
 
         Returns:
             List of dicts with keys: path, status, additions, deletions
-            Status can be: 'added', 'modified', 'deleted'
+            Status values: FileChangeStatus enum (added, modified, deleted)
         """
+        from agentsmithy.api.routes.checkpoints import FileChangeStatus
+
         repo = self.ensure_repo()
 
         try:
@@ -1861,7 +1863,7 @@ class VersioningTracker:
                     changes.append(
                         {
                             "path": path,
-                            "status": "added",
+                            "status": FileChangeStatus.ADDED.value,
                             "additions": additions,
                             "deletions": 0,
                         }
@@ -1872,7 +1874,7 @@ class VersioningTracker:
                     changes.append(
                         {
                             "path": path,
-                            "status": "deleted",
+                            "status": FileChangeStatus.DELETED.value,
                             "additions": 0,
                             "deletions": deletions,
                         }
@@ -1883,7 +1885,7 @@ class VersioningTracker:
                     changes.append(
                         {
                             "path": path,
-                            "status": "modified",
+                            "status": FileChangeStatus.MODIFIED.value,
                             "additions": additions,
                             "deletions": deletions,
                         }
