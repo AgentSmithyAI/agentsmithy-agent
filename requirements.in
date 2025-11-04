@@ -34,9 +34,5 @@ ddgs
 # Web rendering (mandatory)
 playwright
 
-# Development
-pytest
-pytest-asyncio
-black
-isort
+# aiohttp for async http client support
 aiohttp
