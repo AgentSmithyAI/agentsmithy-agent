@@ -111,6 +111,22 @@ class ResetResponse(BaseModel):
     )
 
 
+class FileChangeInfo(BaseModel):
+    """Information about a changed file."""
+
+    path: str = Field(..., description="File path relative to project root")
+    status: str = Field(
+        ...,
+        description="Change status: 'added', 'modified', 'deleted'",
+    )
+    additions: int | None = Field(
+        None, description="Number of lines added (null for binary/new files)"
+    )
+    deletions: int | None = Field(
+        None, description="Number of lines deleted (null for binary/deleted files)"
+    )
+
+
 class SessionStatusResponse(BaseModel):
     """Response with current session status."""
 
@@ -124,6 +140,9 @@ class SessionStatusResponse(BaseModel):
         ..., description="Whether there are unapproved changes"
     )
     last_approved_at: str | None = Field(None, description="Timestamp of last approval")
+    changed_files: list[FileChangeInfo] = Field(
+        default_factory=list, description="List of changed files with statistics"
+    )
 
 
 @router.get("/{dialog_id}/checkpoints", response_model=CheckpointsListResponse)
@@ -198,12 +217,14 @@ async def get_session_status(
         repo = tracker.ensure_repo()
 
         has_unapproved = False
+        changed_files: list[FileChangeInfo] = []
 
         # Check staged (prepared) changes first
         if tracker.has_staged_changes():
             has_unapproved = True
+
         # Check committed but unapproved changes (session vs main)
-        elif tracker.MAIN_BRANCH in repo.refs:
+        if tracker.MAIN_BRANCH in repo.refs:
             session_ref = tracker._get_session_ref(active_session)
             if session_ref in repo.refs:
                 main_head = repo.refs[tracker.MAIN_BRANCH]
@@ -216,7 +237,27 @@ async def get_session_status(
                 session_tree = getattr(session_commit, "tree", None)
 
                 # If trees are different, there are committed but unapproved changes
-                has_unapproved = main_tree != session_tree
+                if main_tree != session_tree:
+                    has_unapproved = True
+
+                    # Get detailed diff
+                    try:
+                        diff_changes = tracker.get_tree_diff("main", active_session)
+                        changed_files = [
+                            FileChangeInfo(
+                                path=change["path"],
+                                status=change["status"],
+                                additions=change.get("additions"),
+                                deletions=change.get("deletions"),
+                            )
+                            for change in diff_changes
+                        ]
+                    except Exception as diff_err:
+                        logger.debug(
+                            "Failed to calculate file diff",
+                            dialog_id=dialog_id,
+                            error=str(diff_err),
+                        )
 
         # Get last approved timestamp from dialog metadata
         last_approved_at = None
@@ -241,6 +282,7 @@ async def get_session_status(
                 session_ref=f"refs/heads/{active_session}",
                 has_unapproved=True,
                 last_approved_at=last_approved_at,
+                changed_files=changed_files,
             )
         else:
             return SessionStatusResponse(
@@ -248,6 +290,7 @@ async def get_session_status(
                 session_ref=None,
                 has_unapproved=False,
                 last_approved_at=last_approved_at,
+                changed_files=[],
             )
     except Exception as e:
         logger.error("Failed to get session status", dialog_id=dialog_id, error=str(e))

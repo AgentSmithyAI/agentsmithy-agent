@@ -966,6 +966,17 @@ class VersioningTracker:
         session_ref = self._get_session_ref(session_name)
         repo.refs[session_ref] = from_commit
 
+        # Force write ref to file (same as in create_checkpoint)
+        try:
+            git_dir = Path(repo.path)
+            if git_dir.name == "checkpoints":
+                git_dir = git_dir / ".git"
+            ref_path = git_dir / session_ref.decode()
+            ref_path.parent.mkdir(parents=True, exist_ok=True)
+            ref_path.write_text(from_commit.decode() + "\n")
+        except Exception:
+            pass
+
         # Set HEAD to new session
         repo.refs[b"HEAD"] = b"ref: " + session_ref
 
@@ -1085,7 +1096,27 @@ class VersioningTracker:
 
         # Save commit and update session branch
         repo.object_store.add_object(commit)
-        repo.refs[session_ref] = commit.id
+
+        # Update session branch ref
+        old_value = (
+            repo.refs.read_ref(session_ref) if session_ref in repo.refs else None
+        )
+        if not repo.refs.set_if_equals(session_ref, old_value, commit.id):
+            # Fallback to direct assignment if CAS fails
+            repo.refs[session_ref] = commit.id
+
+        # Force write ref to file (dulwich may keep it in memory/packed-refs)
+        # This ensures new Repo instances can see the update
+        try:
+            # repo.path points to .git directory, refs are at .git/refs/heads/...
+            git_dir = Path(repo.path)
+            if git_dir.name == "checkpoints":
+                git_dir = git_dir / ".git"
+            ref_path = git_dir / session_ref.decode()
+            ref_path.parent.mkdir(parents=True, exist_ok=True)
+            ref_path.write_text(commit.id.decode() + "\n")
+        except Exception:
+            pass  # Non-critical
 
         # Initialize main branch if this is first commit
         if not commit.parents and self.MAIN_BRANCH not in repo.refs:
@@ -1095,15 +1126,9 @@ class VersioningTracker:
         commit_id = commit.id.decode("utf-8")
         self._record_metadata(commit_id, message)
 
-        # Clear staging area after successful commit
-        # Staged files are now in the checkpoint, no need to keep them in index
-        try:
-            index_path = Path(repo.path) / "index"
-            if index_path.exists():
-                index_path.unlink()
-        except Exception:
-            # Best effort - don't fail checkpoint if index cleanup fails
-            pass
+        # NOTE: We do NOT clear staging area here because restore_checkpoint()
+        # needs to read it to know which files to delete. Index is cleared in
+        # restore_checkpoint() and clear_staging() instead.
 
         return CheckpointInfo(commit_id=commit_id, message=message)
 
@@ -1508,8 +1533,12 @@ class VersioningTracker:
                 pass
 
             # Ensure index files are removed
-            index_path = Path(repo.path) / "index"
-            lock_path = Path(repo.path) / "index.lock"
+            # Dulwich stores index at .git/index for non-bare repos
+            git_dir = Path(repo.path)
+            if git_dir.name != ".git":
+                git_dir = git_dir / ".git"
+            index_path = git_dir / "index"
+            lock_path = git_dir / "index.lock"
             if lock_path.exists():
                 lock_path.unlink()
             if index_path.exists():
@@ -1750,3 +1779,183 @@ class VersioningTracker:
 
         except Exception:
             return []
+
+    def get_tree_diff(
+        self, from_ref: bytes | str, to_ref: bytes | str
+    ) -> list[dict[str, Any]]:
+        """Get diff between two refs/commits with file statistics.
+
+        Args:
+            from_ref: Source ref (e.g. b"refs/heads/main" or "main")
+            to_ref: Target ref (e.g. b"refs/heads/session_1" or "session_1")
+
+        Returns:
+            List of dicts with keys: path, status, additions, deletions
+            Status can be: 'added', 'modified', 'deleted'
+        """
+        repo = self.ensure_repo()
+
+        try:
+            # Normalize refs
+            if isinstance(from_ref, str):
+                if not from_ref.startswith("refs/"):
+                    from_ref = f"refs/heads/{from_ref}"
+                from_ref = from_ref.encode()
+            if isinstance(to_ref, str):
+                if not to_ref.startswith("refs/"):
+                    to_ref = f"refs/heads/{to_ref}"
+                to_ref = to_ref.encode()
+
+            # Check if refs exist
+            if from_ref not in repo.refs or to_ref not in repo.refs:
+                return []
+
+            # Get commit objects
+            from_commit = repo[repo.refs[from_ref]]
+            to_commit = repo[repo.refs[to_ref]]
+
+            # Get trees
+            from_tree_id = getattr(from_commit, "tree", None)
+            to_tree_id = getattr(to_commit, "tree", None)
+
+            if not from_tree_id or not to_tree_id:
+                return []
+
+            from_tree = repo[from_tree_id]
+            to_tree = repo[to_tree_id]
+
+            # Collect files from both trees
+            from_files: dict[str, bytes] = {}  # path -> blob sha
+            to_files: dict[str, bytes] = {}  # path -> blob sha
+
+            def collect_blobs(tree: Tree, prefix: str = "") -> dict[str, bytes]:
+                """Recursively collect all blobs from tree."""
+                blobs: dict[str, bytes] = {}
+                for name, _mode, sha in tree.items():
+                    decoded_name = name.decode("utf-8")
+                    full_path = f"{prefix}/{decoded_name}" if prefix else decoded_name
+                    obj = repo[sha]
+                    if isinstance(obj, Tree):
+                        blobs.update(collect_blobs(obj, full_path))
+                    else:
+                        blobs[full_path] = sha
+                return blobs
+
+            from_files = collect_blobs(cast(Tree, from_tree))
+            to_files = collect_blobs(cast(Tree, to_tree))
+
+            # Calculate diff
+            all_paths = set(from_files.keys()) | set(to_files.keys())
+            changes: list[dict[str, Any]] = []
+
+            for path in sorted(all_paths):
+                from_sha = from_files.get(path)
+                to_sha = to_files.get(path)
+
+                if from_sha == to_sha:
+                    continue  # No change
+
+                if not from_sha:
+                    # File added
+                    additions, deletions = self._count_lines(repo, to_sha)
+                    changes.append(
+                        {
+                            "path": path,
+                            "status": "added",
+                            "additions": additions,
+                            "deletions": 0,
+                        }
+                    )
+                elif not to_sha:
+                    # File deleted
+                    additions, deletions = self._count_lines(repo, from_sha)
+                    changes.append(
+                        {
+                            "path": path,
+                            "status": "deleted",
+                            "additions": 0,
+                            "deletions": deletions,
+                        }
+                    )
+                else:
+                    # File modified - calculate line diff
+                    additions, deletions = self._diff_blobs(repo, from_sha, to_sha)
+                    changes.append(
+                        {
+                            "path": path,
+                            "status": "modified",
+                            "additions": additions,
+                            "deletions": deletions,
+                        }
+                    )
+
+            return changes
+
+        except Exception:
+            return []
+
+    def _count_lines(self, repo: Repo, blob_sha: bytes | None) -> tuple[int, int]:
+        """Count lines in a blob (for additions/deletions of new/deleted files).
+
+        Returns:
+            Tuple of (additions, deletions) - one will be 0
+        """
+        if not blob_sha:
+            return (0, 0)
+
+        try:
+            from dulwich.objects import Blob
+
+            blob_obj = repo[blob_sha]
+            if not isinstance(blob_obj, Blob):
+                return (0, 0)
+            content = blob_obj.data
+            # Check if binary
+            if b"\x00" in content[:8192]:
+                return (0, 0)  # Binary file
+            lines = content.count(b"\n")
+            return (lines, 0)
+        except Exception:
+            return (0, 0)
+
+    def _diff_blobs(
+        self, repo: Repo, from_sha: bytes, to_sha: bytes
+    ) -> tuple[int, int]:
+        """Calculate additions/deletions between two blobs.
+
+        Returns:
+            Tuple of (additions, deletions)
+        """
+        try:
+            from dulwich.objects import Blob
+
+            from_blob_obj = repo[from_sha]
+            to_blob_obj = repo[to_sha]
+
+            if not isinstance(from_blob_obj, Blob) or not isinstance(to_blob_obj, Blob):
+                return (0, 0)
+
+            from_content = from_blob_obj.data
+            to_content = to_blob_obj.data
+
+            # Check if binary
+            if b"\x00" in from_content[:8192] or b"\x00" in to_content[:8192]:
+                return (0, 0)  # Binary file
+
+            # Simple line-based diff
+            from_lines = from_content.splitlines(keepends=False)
+            to_lines = to_content.splitlines(keepends=False)
+
+            # Use simple heuristic: count unique lines
+            from_set = set(from_lines)
+            to_set = set(to_lines)
+
+            # Lines only in 'to' are additions
+            additions = len([line for line in to_lines if line not in from_set])
+            # Lines only in 'from' are deletions
+            deletions = len([line for line in from_lines if line not in to_set])
+
+            return (additions, deletions)
+
+        except Exception:
+            return (0, 0)

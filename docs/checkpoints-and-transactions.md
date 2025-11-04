@@ -176,7 +176,7 @@ GET /api/dialogs/{dialog_id}/history?limit=20
 GET /api/dialogs/{dialog_id}/session
 ```
 
-Get current session status and approval state.
+Get current session status and approval state, including detailed list of changed files.
 
 **Response (with unapproved changes):**
 ```json
@@ -184,7 +184,27 @@ Get current session status and approval state.
   "active_session": "session_2",
   "session_ref": "refs/heads/session_2",
   "has_unapproved": true,
-  "last_approved_at": "2025-10-24T12:00:00Z"
+  "last_approved_at": "2025-10-24T12:00:00Z",
+  "changed_files": [
+    {
+      "path": "src/main.py",
+      "status": "modified",
+      "additions": 15,
+      "deletions": 3
+    },
+    {
+      "path": "src/new_feature.py",
+      "status": "added",
+      "additions": 42,
+      "deletions": 0
+    },
+    {
+      "path": "old_file.py",
+      "status": "deleted",
+      "additions": 0,
+      "deletions": 28
+    }
+  ]
 }
 ```
 
@@ -194,9 +214,16 @@ Get current session status and approval state.
   "active_session": null,
   "session_ref": null,
   "has_unapproved": false,
-  "last_approved_at": "2025-10-24T12:00:00Z"
+  "last_approved_at": "2025-10-24T12:00:00Z",
+  "changed_files": []
 }
 ```
+
+**Changed Files Details:**
+- `path`: File path relative to project root
+- `status`: Change type - `"added"`, `"modified"`, or `"deleted"`
+- `additions`: Number of lines added (null for binary files)
+- `deletions`: Number of lines deleted (null for binary files)
 
 ### Approve Session
 
