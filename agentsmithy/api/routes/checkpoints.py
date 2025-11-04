@@ -105,6 +105,10 @@ class ResetResponse(BaseModel):
 
     reset_to: str = Field(..., description="Checkpoint ID of approved state")
     new_session: str = Field(..., description="New active session name")
+    pre_reset_checkpoint: str | None = Field(
+        None,
+        description="Checkpoint ID created before reset (if there were uncommitted changes)",
+    )
 
 
 class SessionStatusResponse(BaseModel):
@@ -401,21 +405,24 @@ async def reset_to_approved(
     """Reset current session to approved state.
 
     This will:
-    1. Discard current session (mark as 'abandoned' in database)
-    2. Create new session from approved state
-    3. Restore files to approved state
-    4. Schedule RAG reindexing in the background (non-blocking)
+    1. Create auto-save checkpoint if there are uncommitted changes (safety)
+    2. Discard current session (mark as 'abandoned' in database)
+    3. Create new session from approved state
+    4. Restore files to approved state
+    5. Schedule RAG reindexing in the background (non-blocking)
+
+    The auto-save checkpoint can be restored later via the restore endpoint if needed.
 
     Args:
         dialog_id: Dialog ID
 
     Returns:
-        ResetResponse with reset commit ID and new session name
+        ResetResponse with reset commit ID, new session name, and optional pre-reset checkpoint
     """
     try:
         tracker = VersioningTracker(str(project.root), dialog_id)
 
-        # Reset to approved
+        # Reset to approved (creates auto-checkpoint if needed)
         result = await asyncio.to_thread(tracker.reset_to_approved)
 
         # Update dialog metadata with new session
@@ -430,13 +437,15 @@ async def reset_to_approved(
             restored_files = await asyncio.to_thread(
                 tracker.restore_checkpoint, result["reset_to"]
             )
-            logger.info(
-                "Reset to approved state",
-                dialog_id=dialog_id,
-                reset_to=result["reset_to"][:8],
-                new_session=result["new_session"],
-                files_restored=len(restored_files),
-            )
+            log_data = {
+                "dialog_id": dialog_id,
+                "reset_to": result["reset_to"][:8],
+                "new_session": result["new_session"],
+                "files_restored": len(restored_files),
+            }
+            if result.get("pre_reset_checkpoint"):
+                log_data["pre_reset_checkpoint"] = result["pre_reset_checkpoint"][:8]
+            logger.info("Reset to approved state", **log_data)
         except Exception as restore_err:
             logger.warning(
                 "Reset completed with errors (some files may be skipped)",

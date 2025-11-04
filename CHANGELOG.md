@@ -1,5 +1,14 @@
 <!-- version list -->
 
+## v1.7.1 (2025-11-03)
+
+### Bug Fixes
+
+- Fix rollback checkpoint with uncommited changes
+  ([#54](https://github.com/AgentSmithyAI/agentsmithy-agent/pull/54),
+  [`94ff07e`](https://github.com/AgentSmithyAI/agentsmithy-agent/commit/94ff07e826c71031ece198b24046cd57a5eeca8f))
+
+
 ## v1.7.0 (2025-10-29)
 
 ### Chores
