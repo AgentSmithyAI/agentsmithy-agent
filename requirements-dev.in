@@ -1,6 +1,12 @@
 ruff
 mypy
+black
+isort
+pytest
+pytest-asyncio
+pytest-cov
 pip-tools
 pyinstaller
-pytest-cov
 python-semantic-release
+click<8.2
+urllib3<2.4.0
