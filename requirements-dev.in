@@ -8,4 +8,5 @@ pytest-cov
 pip-tools
 pyinstaller
 python-semantic-release
+click<8.2
 urllib3<2.4.0

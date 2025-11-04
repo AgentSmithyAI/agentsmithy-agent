@@ -5,6 +5,9 @@ uvloop; sys_platform != 'win32'  # Unix-only async loop (override to add platfor
 sse-starlette
 python-multipart
 
+# Pin click to 8.1.x for compatibility with python-semantic-release
+click<8.2
+
 # LangChain and LangGraph
 langchain
 langchain-openai
