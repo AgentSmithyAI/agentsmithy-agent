@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 from agentsmithy.api.deps import get_project
 from agentsmithy.core.background_tasks import get_background_manager
 from agentsmithy.core.project import Project
-from agentsmithy.services.versioning import VersioningTracker
+from agentsmithy.services.versioning import FileChangeStatus, VersioningTracker
 from agentsmithy.utils.logger import get_logger
 
 logger = get_logger("api.checkpoints")
@@ -111,6 +111,23 @@ class ResetResponse(BaseModel):
     )
 
 
+class FileChangeInfo(BaseModel):
+    """Information about a changed file."""
+
+    path: str = Field(..., description="File path relative to project root")
+    status: FileChangeStatus = Field(..., description="Change status")
+    additions: int = Field(
+        ..., description="Number of lines added (0 for binary files)"
+    )
+    deletions: int = Field(
+        ..., description="Number of lines deleted (0 for binary files)"
+    )
+    diff: str | None = Field(
+        None,
+        description="Unified diff of changes (null for binary files or new/deleted files)",
+    )
+
+
 class SessionStatusResponse(BaseModel):
     """Response with current session status."""
 
@@ -124,6 +141,9 @@ class SessionStatusResponse(BaseModel):
         ..., description="Whether there are unapproved changes"
     )
     last_approved_at: str | None = Field(None, description="Timestamp of last approval")
+    changed_files: list[FileChangeInfo] = Field(
+        default_factory=list, description="List of changed files with statistics"
+    )
 
 
 @router.get("/{dialog_id}/checkpoints", response_model=CheckpointsListResponse)
@@ -198,12 +218,36 @@ async def get_session_status(
         repo = tracker.ensure_repo()
 
         has_unapproved = False
+        changed_files: list[FileChangeInfo] = []
+        changed_files_paths = set()  # Track paths to avoid duplicates
 
         # Check staged (prepared) changes first
         if tracker.has_staged_changes():
             has_unapproved = True
+
+            # Get staged files and add to changed_files
+            try:
+                staged_files = tracker.get_staged_files(active_session)
+                for staged in staged_files:
+                    changed_files.append(
+                        FileChangeInfo(
+                            path=staged["path"],
+                            status=staged["status"],
+                            additions=0,  # Can't calculate for staged-only files
+                            deletions=0,
+                            diff=None,  # Can't generate diff for uncommitted changes
+                        )
+                    )
+                    changed_files_paths.add(staged["path"])
+            except Exception as staged_err:
+                logger.debug(
+                    "Failed to get staged files",
+                    dialog_id=dialog_id,
+                    error=str(staged_err),
+                )
+
         # Check committed but unapproved changes (session vs main)
-        elif tracker.MAIN_BRANCH in repo.refs:
+        if tracker.MAIN_BRANCH in repo.refs:
             session_ref = tracker._get_session_ref(active_session)
             if session_ref in repo.refs:
                 main_head = repo.refs[tracker.MAIN_BRANCH]
@@ -216,7 +260,34 @@ async def get_session_status(
                 session_tree = getattr(session_commit, "tree", None)
 
                 # If trees are different, there are committed but unapproved changes
-                has_unapproved = main_tree != session_tree
+                if main_tree != session_tree:
+                    has_unapproved = True
+
+                    # Get detailed diff (including diff text)
+                    try:
+                        diff_changes = tracker.get_tree_diff(
+                            "main", active_session, include_diff=True
+                        )
+                        for change in diff_changes:
+                            # Skip if already added as staged file (avoid duplicates)
+                            if change["path"] not in changed_files_paths:
+                                changed_files.append(
+                                    FileChangeInfo(
+                                        path=change["path"],
+                                        status=change["status"],
+                                        additions=change["additions"],
+                                        deletions=change["deletions"],
+                                        diff=change.get("diff"),
+                                    )
+                                )
+                                # Add to set for robust deduplication
+                                changed_files_paths.add(change["path"])
+                    except Exception as diff_err:
+                        logger.debug(
+                            "Failed to calculate file diff",
+                            dialog_id=dialog_id,
+                            error=str(diff_err),
+                        )
 
         # Get last approved timestamp from dialog metadata
         last_approved_at = None
@@ -241,6 +312,7 @@ async def get_session_status(
                 session_ref=f"refs/heads/{active_session}",
                 has_unapproved=True,
                 last_approved_at=last_approved_at,
+                changed_files=changed_files,
             )
         else:
             return SessionStatusResponse(
@@ -248,6 +320,7 @@ async def get_session_status(
                 session_ref=None,
                 has_unapproved=False,
                 last_approved_at=last_approved_at,
+                changed_files=[],
             )
     except Exception as e:
         logger.error("Failed to get session status", dialog_id=dialog_id, error=str(e))

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import difflib
 import hashlib
 import json
 import os
@@ -8,16 +9,27 @@ import tempfile
 from collections import deque
 from collections.abc import Iterable
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from typing import Any, cast
 
 import pathspec
 from dulwich import porcelain
-from dulwich.objects import Commit, Tree
+from dulwich.diff_tree import CHANGE_ADD, CHANGE_DELETE, CHANGE_MODIFY, tree_changes
+from dulwich.objects import Blob, Commit, Tree
 from dulwich.repo import Repo
 
 # Note: This module uses dulwich (pure Python git implementation) for all git operations.
 # Git binary is not required - everything works through dulwich API.
+
+
+class FileChangeStatus(str, Enum):
+    """Status of a file change in a session."""
+
+    ADDED = "added"
+    MODIFIED = "modified"
+    DELETED = "deleted"
+
 
 """
 File Include/Exclude Logic
@@ -50,10 +62,13 @@ This module implements a comprehensive file tracking and exclusion system for ch
 4. Checkpoint Creation:
    - Step 1: Scan working directory, add all files EXCEPT those matching ignore patterns
    - Step 2: Merge staging area (index) into tree - adds staged files even if ignored
-   - Step 3: Commit tree and clear staging area
+   - Step 3: Commit tree (staging area is NOT cleared here - see note below)
    - Rationale: If agent explicitly calls write_file(".venv/config.py"), it's staged immediately,
      then force-added to checkpoint despite matching DEFAULT_EXCLUDES
    - Uses standard git staging workflow instead of custom tracking file
+   - **Important**: Staging area persists after checkpoint creation because restore_checkpoint()
+     needs to read it to identify which files should be deleted during restore. The index is
+     cleared only in restore_checkpoint() and clear_staging().
 
 5. Checkpoint Restoration (restore_checkpoint):
    - Uses standard git semantics: diff HEAD vs target checkpoint
@@ -966,6 +981,17 @@ class VersioningTracker:
         session_ref = self._get_session_ref(session_name)
         repo.refs[session_ref] = from_commit
 
+        # Force write ref to file (same as in create_checkpoint)
+        try:
+            git_dir = Path(repo.path)
+            if git_dir.name == "checkpoints":
+                git_dir = git_dir / ".git"
+            ref_path = git_dir / session_ref.decode()
+            ref_path.parent.mkdir(parents=True, exist_ok=True)
+            ref_path.write_text(from_commit.decode() + "\n")
+        except Exception:
+            pass
+
         # Set HEAD to new session
         repo.refs[b"HEAD"] = b"ref: " + session_ref
 
@@ -1085,7 +1111,27 @@ class VersioningTracker:
 
         # Save commit and update session branch
         repo.object_store.add_object(commit)
-        repo.refs[session_ref] = commit.id
+
+        # Update session branch ref
+        old_value = (
+            repo.refs.read_ref(session_ref) if session_ref in repo.refs else None
+        )
+        if not repo.refs.set_if_equals(session_ref, old_value, commit.id):
+            # Fallback to direct assignment if CAS fails
+            repo.refs[session_ref] = commit.id
+
+        # Force write ref to file (dulwich may keep it in memory/packed-refs)
+        # This ensures new Repo instances can see the update
+        try:
+            # repo.path points to .git directory, refs are at .git/refs/heads/...
+            git_dir = Path(repo.path)
+            if git_dir.name == "checkpoints":
+                git_dir = git_dir / ".git"
+            ref_path = git_dir / session_ref.decode()
+            ref_path.parent.mkdir(parents=True, exist_ok=True)
+            ref_path.write_text(commit.id.decode() + "\n")
+        except Exception:
+            pass  # Non-critical
 
         # Initialize main branch if this is first commit
         if not commit.parents and self.MAIN_BRANCH not in repo.refs:
@@ -1095,15 +1141,19 @@ class VersioningTracker:
         commit_id = commit.id.decode("utf-8")
         self._record_metadata(commit_id, message)
 
-        # Clear staging area after successful commit
-        # Staged files are now in the checkpoint, no need to keep them in index
-        try:
-            index_path = Path(repo.path) / "index"
-            if index_path.exists():
-                index_path.unlink()
-        except Exception:
-            # Best effort - don't fail checkpoint if index cleanup fails
-            pass
+        # IMPORTANT: Staging area is NOT cleared after checkpoint creation
+        #
+        # Why: restore_checkpoint() needs to read the index to determine which files
+        # should be deleted during restore (files that were staged/created by agent
+        # but don't exist in the target checkpoint).
+        #
+        # When cleared:
+        # - restore_checkpoint(): After restoring to ensure clean state
+        # - clear_staging(): When explicitly called to reset staged changes
+        # - approve_all(): Defensive cleanup after committing staged changes
+        #
+        # This is intentional behavior - staging area persists across checkpoints
+        # to maintain full tracking of agent-created files.
 
         return CheckpointInfo(commit_id=commit_id, message=message)
 
@@ -1484,6 +1534,83 @@ class VersioningTracker:
         except (FileNotFoundError, OSError):
             return False
 
+    def get_staged_files(self, session_name: str = "session_1") -> list[dict[str, Any]]:
+        """Get list of staged files with their status.
+
+        Returns files in the index (staged) that haven't been committed yet.
+        Compares index against HEAD (current session) to determine status.
+
+        Returns:
+            List of dicts with keys: path, status (added/modified/deleted)
+            Empty list if no staged changes or on error.
+        """
+        repo = self.ensure_repo()
+        try:
+            index = repo.open_index()
+            if not index:
+                return []
+
+            # Get HEAD tree to compare against
+            session_ref = self._get_session_ref(session_name)
+            if session_ref not in repo.refs:
+                return []
+
+            head_commit = repo[repo.refs[session_ref]]
+            head_tree_id = getattr(head_commit, "tree", None)
+            if not head_tree_id:
+                return []
+
+            head_tree = repo[head_tree_id]
+
+            # Collect files from HEAD
+            def collect_head_files(tree: Tree, prefix: str = "") -> dict[str, bytes]:
+                """Recursively collect all files from HEAD tree."""
+                files: dict[str, bytes] = {}
+                for name, _mode, sha in tree.items():
+                    decoded_name = name.decode("utf-8")
+                    full_path = f"{prefix}/{decoded_name}" if prefix else decoded_name
+                    obj = repo[sha]
+                    if isinstance(obj, Tree):
+                        files.update(collect_head_files(obj, full_path))
+                    else:
+                        files[full_path] = sha
+                return files
+
+            head_files = collect_head_files(cast(Tree, head_tree))
+
+            # Process staged files
+            staged: list[dict[str, Any]] = []
+            for path_bytes, entry in index.items():
+                path = path_bytes.decode("utf-8")
+
+                # Skip conflicted entries
+                if not hasattr(entry, "sha"):
+                    continue
+
+                staged_sha = entry.sha
+
+                if path in head_files:
+                    # File exists in HEAD
+                    if head_files[path] != staged_sha:
+                        # Different SHA = modified
+                        staged.append(
+                            {"path": path, "status": FileChangeStatus.MODIFIED.value}
+                        )
+                    # Same SHA = no change (shouldn't be in index, but handle it)
+                else:
+                    # File not in HEAD = added
+                    staged.append(
+                        {"path": path, "status": FileChangeStatus.ADDED.value}
+                    )
+
+            # TODO: Handle deleted files (in HEAD but not in index)
+            # For now, deleted files are detected by workdir scan
+
+            return staged
+
+        except Exception:
+            return []
+
     def clear_staging(self) -> None:
         """Clear staging area (index) entries and remove index file if present."""
         repo = self.ensure_repo()
@@ -1508,8 +1635,12 @@ class VersioningTracker:
                 pass
 
             # Ensure index files are removed
-            index_path = Path(repo.path) / "index"
-            lock_path = Path(repo.path) / "index.lock"
+            # Dulwich stores index at .git/index for non-bare repos
+            git_dir = Path(repo.path)
+            if git_dir.name != ".git":
+                git_dir = git_dir / ".git"
+            index_path = git_dir / "index"
+            lock_path = git_dir / "index.lock"
             if lock_path.exists():
                 lock_path.unlink()
             if index_path.exists():
@@ -1750,3 +1881,186 @@ class VersioningTracker:
 
         except Exception:
             return []
+
+    def get_tree_diff(
+        self, from_ref: bytes | str, to_ref: bytes | str, include_diff: bool = True
+    ) -> list[dict[str, Any]]:
+        """Get diff between two refs/commits with file statistics.
+
+        Args:
+            from_ref: Source ref (e.g. b"refs/heads/main" or "main")
+            to_ref: Target ref (e.g. b"refs/heads/session_1" or "session_1")
+            include_diff: Whether to include unified diff text (default: True)
+
+        Returns:
+            List of dicts with keys: path, status, additions, deletions, diff (optional)
+            Status values: FileChangeStatus enum (added, modified, deleted)
+        """
+        repo = self.ensure_repo()
+
+        try:
+            # Normalize refs
+            if isinstance(from_ref, str):
+                if not from_ref.startswith("refs/"):
+                    from_ref = f"refs/heads/{from_ref}"
+                from_ref = from_ref.encode()
+            if isinstance(to_ref, str):
+                if not to_ref.startswith("refs/"):
+                    to_ref = f"refs/heads/{to_ref}"
+                to_ref = to_ref.encode()
+
+            # Check if refs exist
+            if from_ref not in repo.refs or to_ref not in repo.refs:
+                return []
+
+            # Get commit objects
+            from_commit = repo[repo.refs[from_ref]]
+            to_commit = repo[repo.refs[to_ref]]
+
+            # Get tree IDs
+            from_tree_id = getattr(from_commit, "tree", None)
+            to_tree_id = getattr(to_commit, "tree", None)
+
+            if not from_tree_id or not to_tree_id:
+                return []
+
+            # Use dulwich's tree_changes to get diff
+            changes: list[dict[str, Any]] = []
+
+            for change in tree_changes(repo.object_store, from_tree_id, to_tree_id):
+                # Get path from new or old entry (at least one should exist)
+                path_bytes = (change.new.path if change.new else None) or (
+                    change.old.path if change.old else None
+                )
+                if not path_bytes:
+                    continue
+                path_str = path_bytes.decode("utf-8")
+
+                if change.type == CHANGE_ADD and change.new:
+                    # File added
+                    additions, deletions = self._count_lines(repo, change.new.sha)
+                    change_dict = {
+                        "path": path_str,
+                        "status": FileChangeStatus.ADDED.value,
+                        "additions": additions,
+                        "deletions": 0,
+                        "diff": None,  # Don't include full content for new files
+                    }
+                    changes.append(change_dict)
+                elif change.type == CHANGE_DELETE and change.old:
+                    # File deleted
+                    additions, deletions = self._count_lines(repo, change.old.sha)
+                    change_dict = {
+                        "path": path_str,
+                        "status": FileChangeStatus.DELETED.value,
+                        "additions": 0,
+                        "deletions": deletions,
+                        "diff": None,  # Don't include full content for deleted files
+                    }
+                    changes.append(change_dict)
+                elif change.type == CHANGE_MODIFY and change.old and change.new:
+                    # File modified
+                    additions, deletions, diff_text = self._diff_blobs_with_text(
+                        repo, change.old.sha, change.new.sha, include_diff
+                    )
+                    change_dict = {
+                        "path": path_str,
+                        "status": FileChangeStatus.MODIFIED.value,
+                        "additions": additions,
+                        "deletions": deletions,
+                        "diff": diff_text if include_diff else None,
+                    }
+                    changes.append(change_dict)
+
+            return changes
+
+        except Exception:
+            return []
+
+    def _count_lines(self, repo: Repo, blob_sha: bytes | None) -> tuple[int, int]:
+        """Count lines in a blob (for additions/deletions of new/deleted files).
+
+        Returns:
+            Tuple of (additions, deletions) - one will be 0
+        """
+        if not blob_sha:
+            return (0, 0)
+
+        try:
+            blob_obj = repo[blob_sha]
+            if not isinstance(blob_obj, Blob):
+                return (0, 0)
+            content = blob_obj.data
+            # Check if binary
+            if b"\x00" in content[:8192]:
+                return (0, 0)  # Binary file
+            lines = len(content.splitlines())
+            return (lines, 0)
+        except Exception:
+            return (0, 0)
+
+    def _diff_blobs(
+        self, repo: Repo, from_sha: bytes, to_sha: bytes
+    ) -> tuple[int, int]:
+        """Calculate additions/deletions between two blobs.
+
+        Returns:
+            Tuple of (additions, deletions)
+        """
+        additions, deletions, _ = self._diff_blobs_with_text(
+            repo, from_sha, to_sha, False
+        )
+        return (additions, deletions)
+
+    def _diff_blobs_with_text(
+        self, repo: Repo, from_sha: bytes, to_sha: bytes, include_text: bool
+    ) -> tuple[int, int, str | None]:
+        """Calculate additions/deletions and optionally get diff text between two blobs.
+
+        Returns:
+            Tuple of (additions, deletions, diff_text)
+            diff_text is None if include_text=False or for binary files
+        """
+        try:
+            from_blob_obj = repo[from_sha]
+            to_blob_obj = repo[to_sha]
+
+            if not isinstance(from_blob_obj, Blob) or not isinstance(to_blob_obj, Blob):
+                return (0, 0, None)
+
+            from_content = from_blob_obj.data
+            to_content = to_blob_obj.data
+
+            # Check if binary
+            if b"\x00" in from_content[:8192] or b"\x00" in to_content[:8192]:
+                return (0, 0, None)  # Binary file
+
+            # Decode to text for difflib
+            try:
+                from_text = from_content.decode("utf-8")
+                to_text = to_content.decode("utf-8")
+            except UnicodeDecodeError:
+                # Treat as binary if can't decode
+                return (0, 0, None)
+
+            # Use difflib for proper diff calculation
+            from_lines = from_text.splitlines(keepends=True)
+            to_lines = to_text.splitlines(keepends=True)
+
+            diff_gen = difflib.unified_diff(from_lines, to_lines, lineterm="")
+            diff_lines = list(diff_gen)
+
+            additions = 0
+            deletions = 0
+            for line in diff_lines:
+                if line.startswith("+") and not line.startswith("+++"):
+                    additions += 1
+                elif line.startswith("-") and not line.startswith("---"):
+                    deletions += 1
+
+            diff_text = "".join(diff_lines) if include_text and diff_lines else None
+
+            return (additions, deletions, diff_text)
+
+        except Exception:
+            return (0, 0, None)

@@ -176,7 +176,7 @@ GET /api/dialogs/{dialog_id}/history?limit=20
 GET /api/dialogs/{dialog_id}/session
 ```
 
-Get current session status and approval state.
+Get current session status and approval state, including detailed list of changed files.
 
 **Response (with unapproved changes):**
 ```json
@@ -184,7 +184,30 @@ Get current session status and approval state.
   "active_session": "session_2",
   "session_ref": "refs/heads/session_2",
   "has_unapproved": true,
-  "last_approved_at": "2025-10-24T12:00:00Z"
+  "last_approved_at": "2025-10-24T12:00:00Z",
+  "changed_files": [
+    {
+      "path": "src/main.py",
+      "status": "modified",
+      "additions": 15,
+      "deletions": 3,
+      "diff": "@@ -1,5 +1,5 @@\n def main():\n-    print('old')\n+    print('new')\n     return 0"
+    },
+    {
+      "path": "src/new_feature.py",
+      "status": "added",
+      "additions": 42,
+      "deletions": 0,
+      "diff": null
+    },
+    {
+      "path": "old_file.py",
+      "status": "deleted",
+      "additions": 0,
+      "deletions": 28,
+      "diff": null
+    }
+  ]
 }
 ```
 
@@ -194,9 +217,24 @@ Get current session status and approval state.
   "active_session": null,
   "session_ref": null,
   "has_unapproved": false,
-  "last_approved_at": "2025-10-24T12:00:00Z"
+  "last_approved_at": "2025-10-24T12:00:00Z",
+  "changed_files": []
 }
 ```
+
+**Changed Files Details:**
+- `path`: File path relative to project root
+- `status`: Change type (`FileChangeStatus` enum):
+  - `"added"` - File was created
+  - `"modified"` - File was changed
+  - `"deleted"` - File was removed
+- `additions`: Number of lines added (0 for binary files or staged-only files)
+- `deletions`: Number of lines deleted (0 for binary files or staged-only files)
+- `diff`: Unified diff text for modified files (null for added/deleted/binary/staged-only files)
+
+**Note**: `changed_files` includes both:
+1. **Committed changes** (checkpointed but not approved) - includes full statistics and diffs
+2. **Staged changes** (prepared but not checkpointed) - shows only path and status, no line counts or diffs
 
 ### Approve Session
 
