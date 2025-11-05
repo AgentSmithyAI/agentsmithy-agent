@@ -1,5 +1,36 @@
 <!-- version list -->
 
+## v1.8.0 (2025-11-05)
+
+### Chores
+
+- **deps**: Bump chromadb from 1.1.0 to 1.3.0 in the chromadb group
+  ([#51](https://github.com/AgentSmithyAI/agentsmithy-agent/pull/51),
+  [`f29db74`](https://github.com/AgentSmithyAI/agentsmithy-agent/commit/f29db74ce4dea300b7c55befb105fba8bf192a41))
+
+- **deps**: Bump langchain-community from 0.3.30 to 0.3.31 in the langchain group
+  ([#49](https://github.com/AgentSmithyAI/agentsmithy-agent/pull/49),
+  [`2def617`](https://github.com/AgentSmithyAI/agentsmithy-agent/commit/2def617360b8e78574bd4109c4e84bc288b44908))
+
+- **deps**: Bump sqlalchemy from 2.0.43 to 2.0.44
+  ([#53](https://github.com/AgentSmithyAI/agentsmithy-agent/pull/53),
+  [`7d67824`](https://github.com/AgentSmithyAI/agentsmithy-agent/commit/7d67824880b244d8fbe0b8d3aee0d5bad6e93932))
+
+- **deps**: Bump the fastapi group with 2 updates
+  ([#50](https://github.com/AgentSmithyAI/agentsmithy-agent/pull/50),
+  [`057b795`](https://github.com/AgentSmithyAI/agentsmithy-agent/commit/057b7950e102ee18ff04a2a5b560d6eb7e14509d))
+
+- **deps**: Bump the linters group with 2 updates
+  ([#52](https://github.com/AgentSmithyAI/agentsmithy-agent/pull/52),
+  [`d1e1165`](https://github.com/AgentSmithyAI/agentsmithy-agent/commit/d1e11652756d000438715e0ffd700752ff718236))
+
+### Features
+
+- Add list of uncommited files within checkpoint
+  ([#55](https://github.com/AgentSmithyAI/agentsmithy-agent/pull/55),
+  [`803fecc`](https://github.com/AgentSmithyAI/agentsmithy-agent/commit/803fecc0d29f7f9b0d3ab6efb48d75fd2fc75f90))
+
+
 ## v1.7.1 (2025-11-03)
 
 ### Bug Fixes
