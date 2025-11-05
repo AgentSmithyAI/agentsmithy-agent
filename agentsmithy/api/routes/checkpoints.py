@@ -228,10 +228,32 @@ async def get_session_status(
 
         has_unapproved = False
         changed_files: list[FileChangeInfo] = []
+        changed_files_paths = set()  # Track paths to avoid duplicates
 
         # Check staged (prepared) changes first
         if tracker.has_staged_changes():
             has_unapproved = True
+
+            # Get staged files and add to changed_files
+            try:
+                staged_files = tracker.get_staged_files(active_session)
+                for staged in staged_files:
+                    changed_files.append(
+                        FileChangeInfo(
+                            path=staged["path"],
+                            status=staged["status"],
+                            additions=0,  # Can't calculate for staged-only files
+                            deletions=0,
+                            diff=None,  # Can't generate diff for uncommitted changes
+                        )
+                    )
+                    changed_files_paths.add(staged["path"])
+            except Exception as staged_err:
+                logger.debug(
+                    "Failed to get staged files",
+                    dialog_id=dialog_id,
+                    error=str(staged_err),
+                )
 
         # Check committed but unapproved changes (session vs main)
         if tracker.MAIN_BRANCH in repo.refs:
@@ -255,16 +277,18 @@ async def get_session_status(
                         diff_changes = tracker.get_tree_diff(
                             "main", active_session, include_diff=True
                         )
-                        changed_files = [
-                            FileChangeInfo(
-                                path=change["path"],
-                                status=change["status"],
-                                additions=change["additions"],
-                                deletions=change["deletions"],
-                                diff=change.get("diff"),
-                            )
-                            for change in diff_changes
-                        ]
+                        for change in diff_changes:
+                            # Skip if already added as staged file
+                            if change["path"] not in changed_files_paths:
+                                changed_files.append(
+                                    FileChangeInfo(
+                                        path=change["path"],
+                                        status=change["status"],
+                                        additions=change["additions"],
+                                        deletions=change["deletions"],
+                                        diff=change.get("diff"),
+                                    )
+                                )
                     except Exception as diff_err:
                         logger.debug(
                             "Failed to calculate file diff",

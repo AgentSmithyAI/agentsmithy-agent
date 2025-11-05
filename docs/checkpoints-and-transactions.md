@@ -228,9 +228,13 @@ Get current session status and approval state, including detailed list of change
   - `"added"` - File was created
   - `"modified"` - File was changed
   - `"deleted"` - File was removed
-- `additions`: Number of lines added (0 for binary files)
-- `deletions`: Number of lines deleted (0 for binary files)
-- `diff`: Unified diff text for modified files (null for added/deleted/binary files)
+- `additions`: Number of lines added (0 for binary files or staged-only files)
+- `deletions`: Number of lines deleted (0 for binary files or staged-only files)
+- `diff`: Unified diff text for modified files (null for added/deleted/binary/staged-only files)
+
+**Note**: `changed_files` includes both:
+1. **Committed changes** (checkpointed but not approved) - includes full statistics and diffs
+2. **Staged changes** (prepared but not checkpointed) - shows only path and status, no line counts or diffs
 
 ### Approve Session
 

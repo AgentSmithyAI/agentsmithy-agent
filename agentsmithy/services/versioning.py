@@ -1511,6 +1511,85 @@ class VersioningTracker:
         except (FileNotFoundError, OSError):
             return False
 
+    def get_staged_files(self, session_name: str = "session_1") -> list[dict[str, Any]]:
+        """Get list of staged files with their status.
+
+        Returns files in the index (staged) that haven't been committed yet.
+        Compares index against HEAD (current session) to determine status.
+
+        Returns:
+            List of dicts with keys: path, status (added/modified/deleted)
+            Empty list if no staged changes or on error.
+        """
+        from agentsmithy.api.routes.checkpoints import FileChangeStatus
+
+        repo = self.ensure_repo()
+        try:
+            index = repo.open_index()
+            if not index:
+                return []
+
+            # Get HEAD tree to compare against
+            session_ref = self._get_session_ref(session_name)
+            if session_ref not in repo.refs:
+                return []
+
+            head_commit = repo[repo.refs[session_ref]]
+            head_tree_id = getattr(head_commit, "tree", None)
+            if not head_tree_id:
+                return []
+
+            head_tree = repo[head_tree_id]
+
+            # Collect files from HEAD
+            def collect_head_files(tree: Tree, prefix: str = "") -> dict[str, bytes]:
+                """Recursively collect all files from HEAD tree."""
+                files: dict[str, bytes] = {}
+                for name, _mode, sha in tree.items():
+                    decoded_name = name.decode("utf-8")
+                    full_path = f"{prefix}/{decoded_name}" if prefix else decoded_name
+                    obj = repo[sha]
+                    if isinstance(obj, Tree):
+                        files.update(collect_head_files(obj, full_path))
+                    else:
+                        files[full_path] = sha
+                return files
+
+            head_files = collect_head_files(cast(Tree, head_tree))
+
+            # Process staged files
+            staged: list[dict[str, Any]] = []
+            for path_bytes, entry in index.items():
+                path = path_bytes.decode("utf-8")
+
+                # Skip conflicted entries
+                if not hasattr(entry, "sha"):
+                    continue
+
+                staged_sha = entry.sha
+
+                if path in head_files:
+                    # File exists in HEAD
+                    if head_files[path] != staged_sha:
+                        # Different SHA = modified
+                        staged.append(
+                            {"path": path, "status": FileChangeStatus.MODIFIED.value}
+                        )
+                    # Same SHA = no change (shouldn't be in index, but handle it)
+                else:
+                    # File not in HEAD = added
+                    staged.append(
+                        {"path": path, "status": FileChangeStatus.ADDED.value}
+                    )
+
+            # TODO: Handle deleted files (in HEAD but not in index)
+            # For now, deleted files are detected by workdir scan
+
+            return staged
+
+        except Exception:
+            return []
+
     def clear_staging(self) -> None:
         """Clear staging area (index) entries and remove index file if present."""
         repo = self.ensure_repo()
