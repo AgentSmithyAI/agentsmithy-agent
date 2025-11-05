@@ -76,7 +76,91 @@ def test_session_changed_files_added(client, temp_project):
     assert changed["status"] == "added"
     assert changed["additions"] == 3  # 3 lines
     assert changed["deletions"] == 0
+    assert changed["diff"] is None  # No diff for added files
 
 
-# Tests with approve_all() are skipped due to DB state management issues
-# TODO: Fix active_session tracking after approve_all()
+def test_session_changed_files_modified_with_diff(client, temp_project):
+    """Test changed_files shows modified file with diff text."""
+    dialog_id = temp_project.create_dialog("test-1")
+
+    # Create initial file and approve it (creates main baseline)
+    test_file = temp_project.root / "test.txt"
+    test_file.write_text("line1\nline2\nline3\n")
+
+    tracker = VersioningTracker(str(temp_project.root), dialog_id)
+    tracker.stage_file("test.txt")
+    tracker.create_checkpoint("Initial")
+
+    # Manually approve to main without creating new session
+    # (simulates the initial state)
+    repo = tracker.ensure_repo()
+    session_ref = b"refs/heads/session_1"
+    main_ref = b"refs/heads/main"
+    repo.refs[main_ref] = repo.refs[session_ref]
+
+    # Modify the file in the same session
+    test_file.write_text("line1\nmodified line2\nline3\nline4\n")
+    tracker.stage_file("test.txt")
+    tracker.create_checkpoint("Modify")
+
+    # Check session endpoint
+    response = client.get(f"/api/dialogs/{dialog_id}/session")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["has_unapproved"] is True
+    assert len(data["changed_files"]) >= 1
+
+    # Find the modified file
+    modified = next((c for c in data["changed_files"] if c["path"] == "test.txt"), None)
+    assert modified is not None
+    assert modified["status"] == "modified"
+    assert modified["additions"] > 0
+    assert modified["deletions"] > 0
+
+    # Check that diff is present and contains unified diff markers
+    assert modified["diff"] is not None
+    diff_text = modified["diff"]
+    assert isinstance(diff_text, str)
+    # Unified diff should contain +/- lines
+    assert "+" in diff_text or "-" in diff_text
+
+
+def test_session_changed_files_binary(client, temp_project):
+    """Test changed_files handles binary files (no diff text)."""
+    dialog_id = temp_project.create_dialog("test-1")
+
+    # Create initial binary file
+    binary_file = temp_project.root / "image.bin"
+    binary_file.write_bytes(b"binary content\x00\x01\x02")
+
+    tracker = VersioningTracker(str(temp_project.root), dialog_id)
+    tracker.stage_file("image.bin")
+    tracker.create_checkpoint("Initial")
+
+    # Manually approve to main
+    repo = tracker.ensure_repo()
+    session_ref = b"refs/heads/session_1"
+    main_ref = b"refs/heads/main"
+    repo.refs[main_ref] = repo.refs[session_ref]
+
+    # Modify binary file
+    binary_file.write_bytes(b"modified binary\x00\x03\x04")
+    tracker.stage_file("image.bin")
+    tracker.create_checkpoint("Modify binary")
+
+    # Check session endpoint
+    response = client.get(f"/api/dialogs/{dialog_id}/session")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["has_unapproved"] is True
+    assert len(data["changed_files"]) >= 1
+
+    # Find the binary file
+    binary = next((c for c in data["changed_files"] if c["path"] == "image.bin"), None)
+    assert binary is not None
+    assert binary["status"] == "modified"
+    assert binary["additions"] == 0  # Binary files show 0
+    assert binary["deletions"] == 0  # Binary files show 0
+    assert binary["diff"] is None  # No diff for binary files
