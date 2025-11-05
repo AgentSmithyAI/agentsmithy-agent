@@ -9,6 +9,7 @@ import tempfile
 from collections import deque
 from collections.abc import Iterable
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from typing import Any, cast
 
@@ -20,6 +21,15 @@ from dulwich.repo import Repo
 
 # Note: This module uses dulwich (pure Python git implementation) for all git operations.
 # Git binary is not required - everything works through dulwich API.
+
+
+class FileChangeStatus(str, Enum):
+    """Status of a file change in a session."""
+
+    ADDED = "added"
+    MODIFIED = "modified"
+    DELETED = "deleted"
+
 
 """
 File Include/Exclude Logic
@@ -52,10 +62,13 @@ This module implements a comprehensive file tracking and exclusion system for ch
 4. Checkpoint Creation:
    - Step 1: Scan working directory, add all files EXCEPT those matching ignore patterns
    - Step 2: Merge staging area (index) into tree - adds staged files even if ignored
-   - Step 3: Commit tree and clear staging area
+   - Step 3: Commit tree (staging area is NOT cleared here - see note below)
    - Rationale: If agent explicitly calls write_file(".venv/config.py"), it's staged immediately,
      then force-added to checkpoint despite matching DEFAULT_EXCLUDES
    - Uses standard git staging workflow instead of custom tracking file
+   - **Important**: Staging area persists after checkpoint creation because restore_checkpoint()
+     needs to read it to identify which files should be deleted during restore. The index is
+     cleared only in restore_checkpoint() and clear_staging().
 
 5. Checkpoint Restoration (restore_checkpoint):
    - Uses standard git semantics: diff HEAD vs target checkpoint
@@ -1128,9 +1141,19 @@ class VersioningTracker:
         commit_id = commit.id.decode("utf-8")
         self._record_metadata(commit_id, message)
 
-        # NOTE: We do NOT clear staging area here because restore_checkpoint()
-        # needs to read it to know which files to delete. Index is cleared in
-        # restore_checkpoint() and clear_staging() instead.
+        # IMPORTANT: Staging area is NOT cleared after checkpoint creation
+        #
+        # Why: restore_checkpoint() needs to read the index to determine which files
+        # should be deleted during restore (files that were staged/created by agent
+        # but don't exist in the target checkpoint).
+        #
+        # When cleared:
+        # - restore_checkpoint(): After restoring to ensure clean state
+        # - clear_staging(): When explicitly called to reset staged changes
+        # - approve_all(): Defensive cleanup after committing staged changes
+        #
+        # This is intentional behavior - staging area persists across checkpoints
+        # to maintain full tracking of agent-created files.
 
         return CheckpointInfo(commit_id=commit_id, message=message)
 
@@ -1521,8 +1544,6 @@ class VersioningTracker:
             List of dicts with keys: path, status (added/modified/deleted)
             Empty list if no staged changes or on error.
         """
-        from agentsmithy.api.routes.checkpoints import FileChangeStatus
-
         repo = self.ensure_repo()
         try:
             index = repo.open_index()
@@ -1875,8 +1896,6 @@ class VersioningTracker:
             List of dicts with keys: path, status, additions, deletions, diff (optional)
             Status values: FileChangeStatus enum (added, modified, deleted)
         """
-        from agentsmithy.api.routes.checkpoints import FileChangeStatus
-
         repo = self.ensure_repo()
 
         try:

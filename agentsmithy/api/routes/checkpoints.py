@@ -9,7 +9,6 @@ Provides endpoints to:
 from __future__ import annotations
 
 import asyncio
-from enum import Enum
 
 from fastapi import APIRouter, Body, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -17,20 +16,12 @@ from pydantic import BaseModel, Field
 from agentsmithy.api.deps import get_project
 from agentsmithy.core.background_tasks import get_background_manager
 from agentsmithy.core.project import Project
-from agentsmithy.services.versioning import VersioningTracker
+from agentsmithy.services.versioning import FileChangeStatus, VersioningTracker
 from agentsmithy.utils.logger import get_logger
 
 logger = get_logger("api.checkpoints")
 
 router = APIRouter(prefix="/api/dialogs", tags=["checkpoints"])
-
-
-class FileChangeStatus(str, Enum):
-    """Status of a file change in a session."""
-
-    ADDED = "added"
-    MODIFIED = "modified"
-    DELETED = "deleted"
 
 
 async def _reindex_files_background(
