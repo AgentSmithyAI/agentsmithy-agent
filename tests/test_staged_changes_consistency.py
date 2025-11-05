@@ -151,3 +151,60 @@ def test_staged_and_committed_changes_both_shown(client, temp_project):
 
     # file3.txt is only staged (currently NOT shown - this is the bug)
     assert "file3.txt" in paths, "Staged-only file should be in changed_files"
+
+
+def test_staged_and_committed_same_file_no_duplicates(client, temp_project):
+    """
+    Test that a file that is both committed AND staged doesn't appear twice.
+
+    Scenario:
+    1. Create file.txt, stage and commit (first version)
+    2. Approve
+    3. Modify file.txt, stage and commit (second version)
+    4. Modify file.txt again, stage but DON'T commit (third version, staged only)
+    5. Call /session endpoint
+
+    Expected: file.txt should appear ONCE in changed_files (not twice)
+    """
+    dialog_id = temp_project.create_dialog("test-dedup")
+
+    tracker = VersioningTracker(str(temp_project.root), dialog_id)
+
+    # Step 1-2: Initial version and approve
+    test_file = temp_project.root / "file.txt"
+    test_file.write_text("version 1\n")
+    tracker.stage_file("file.txt")
+    tracker.create_checkpoint("Version 1")
+
+    repo = tracker.ensure_repo()
+    session_ref = b"refs/heads/session_1"
+    main_ref = b"refs/heads/main"
+    repo.refs[main_ref] = repo.refs[session_ref]
+
+    # Step 3: Second version (committed)
+    test_file.write_text("version 2\n")
+    tracker.stage_file("file.txt")
+    tracker.create_checkpoint("Version 2")
+
+    # Step 4: Third version (staged only)
+    test_file.write_text("version 3\n")
+    tracker.stage_file("file.txt")
+
+    # Step 5: Check endpoint
+    response = client.get(f"/api/dialogs/{dialog_id}/session")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["has_unapproved"] is True
+
+    # Count how many times file.txt appears
+    file_txt_count = sum(1 for f in data["changed_files"] if f["path"] == "file.txt")
+
+    # Should appear ONCE (not twice) - deduplication should work
+    assert (
+        file_txt_count == 1
+    ), f"file.txt appears {file_txt_count} times, expected 1 (deduplication failed)"
+
+    # Verify the file info
+    file_info = next(f for f in data["changed_files"] if f["path"] == "file.txt")
+    assert file_info["status"] == "modified"

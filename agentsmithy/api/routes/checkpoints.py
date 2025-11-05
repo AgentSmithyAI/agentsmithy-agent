@@ -269,7 +269,7 @@ async def get_session_status(
                             "main", active_session, include_diff=True
                         )
                         for change in diff_changes:
-                            # Skip if already added as staged file
+                            # Skip if already added as staged file (avoid duplicates)
                             if change["path"] not in changed_files_paths:
                                 changed_files.append(
                                     FileChangeInfo(
@@ -280,6 +280,8 @@ async def get_session_status(
                                         diff=change.get("diff"),
                                     )
                                 )
+                                # Add to set for robust deduplication
+                                changed_files_paths.add(change["path"])
                     except Exception as diff_err:
                         logger.debug(
                             "Failed to calculate file diff",
