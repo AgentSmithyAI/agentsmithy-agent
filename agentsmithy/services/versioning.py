@@ -530,11 +530,26 @@ class VersioningTracker:
         Staged files will be included in next checkpoint regardless of ignore patterns.
 
         Args:
-            file_path: Path to file relative to project root
+            file_path: Path to file (can be absolute or relative to project root)
         """
         try:
             repo = self.ensure_repo()
-            abs_path = self.project_root / file_path
+
+            # Normalize path: convert to Path and make relative to project_root
+            file_path_obj = Path(file_path)
+            if file_path_obj.is_absolute():
+                # Convert absolute path to relative
+                try:
+                    rel_path = file_path_obj.relative_to(self.project_root)
+                    normalized_path = str(rel_path)
+                except ValueError:
+                    # Path is outside project_root - use as-is (will likely fail)
+                    normalized_path = file_path
+            else:
+                # Already relative
+                normalized_path = file_path
+
+            abs_path = self.project_root / normalized_path
 
             if not abs_path.exists():
                 return
@@ -568,8 +583,9 @@ class VersioningTracker:
                 flags=0,
             )
 
-            # Add entry to index
-            index[file_path.encode("utf-8")] = entry
+            # IMPORTANT: Always use normalized relative path in index
+            # This prevents duplicate entries with absolute/relative paths
+            index[normalized_path.encode("utf-8")] = entry
             index.write()
 
         except Exception as e:
