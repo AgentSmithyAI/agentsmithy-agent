@@ -190,11 +190,14 @@ def test_session_endpoint_committed_vs_staged_order():
             "/"
         ), f"Path should be relative: {file1['path']}"
 
-        # file2: staged only -> should have additions = 0
+        # file2: staged only -> NOW shows real diff (not additions=0)
+        # This is the fix: staged files now show actual additions from HEAD to staging area
+        assert file2["status"] == "added"
         assert (
-            file2["additions"] == 0
-        ), f"file2 is staged-only, should have additions=0, got {file2['additions']}"
-        assert file2["diff"] is None, "Staged-only file should not have diff"
+            file2["additions"] > 0
+        ), f"file2 is staged, should show real line count, got {file2['additions']}"
+        # Added files don't show diff (too large), but modified staged files do
+        assert file2["diff"] is None, "Added files don't show full diff content"
         assert not file2["path"].startswith(
             "/"
         ), f"Path should be relative: {file2['path']}"

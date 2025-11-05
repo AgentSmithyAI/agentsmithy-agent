@@ -268,9 +268,11 @@ async def get_session_status(
         if tracker.has_staged_changes():
             has_unapproved = True
 
-            # Get staged files and add to changed_files
+            # Get staged files with diff information
             try:
-                staged_files = tracker.get_staged_files(active_session)
+                staged_files = tracker.get_staged_files(
+                    active_session, include_diff=True
+                )
                 for staged in staged_files:
                     # Skip if file is already in committed changes
                     # (file is both committed and has additional staged changes)
@@ -279,9 +281,9 @@ async def get_session_status(
                             FileChangeInfo(
                                 path=staged["path"],
                                 status=staged["status"],
-                                additions=0,  # Can't calculate for staged-only files
-                                deletions=0,
-                                diff=None,  # Can't generate diff for uncommitted changes
+                                additions=staged.get("additions", 0),
+                                deletions=staged.get("deletions", 0),
+                                diff=staged.get("diff"),
                             )
                         )
                         changed_files_paths.add(staged["path"])

@@ -1550,14 +1550,21 @@ class VersioningTracker:
         except (FileNotFoundError, OSError):
             return False
 
-    def get_staged_files(self, session_name: str = "session_1") -> list[dict[str, Any]]:
+    def get_staged_files(
+        self, session_name: str = "session_1", include_diff: bool = False
+    ) -> list[dict[str, Any]]:
         """Get list of staged files with their status.
 
         Returns files in the index (staged) that haven't been committed yet.
         Compares index against HEAD (current session) to determine status.
 
+        Args:
+            session_name: Name of the session to compare against
+            include_diff: If True, include additions/deletions/diff for each file
+
         Returns:
             List of dicts with keys: path, status (added/modified/deleted)
+            If include_diff=True, also includes: additions, deletions, diff
             Empty list if no staged changes or on error.
         """
         repo = self.ensure_repo()
@@ -1609,15 +1616,47 @@ class VersioningTracker:
                     # File exists in HEAD
                     if head_files[path] != staged_sha:
                         # Different SHA = modified
-                        staged.append(
-                            {"path": path, "status": FileChangeStatus.MODIFIED.value}
-                        )
+                        file_info: dict[str, Any] = {
+                            "path": path,
+                            "status": FileChangeStatus.MODIFIED.value,
+                        }
+
+                        if include_diff:
+                            # Calculate diff between HEAD and staged
+                            additions, deletions, diff_text = (
+                                self._diff_blobs_with_text(
+                                    repo, head_files[path], staged_sha, True
+                                )
+                            )
+                            file_info["additions"] = additions
+                            file_info["deletions"] = deletions
+                            file_info["diff"] = diff_text
+                        else:
+                            file_info["additions"] = 0
+                            file_info["deletions"] = 0
+                            file_info["diff"] = None
+
+                        staged.append(file_info)
                     # Same SHA = no change (shouldn't be in index, but handle it)
                 else:
                     # File not in HEAD = added
-                    staged.append(
-                        {"path": path, "status": FileChangeStatus.ADDED.value}
-                    )
+                    file_info = {
+                        "path": path,
+                        "status": FileChangeStatus.ADDED.value,
+                    }
+
+                    if include_diff:
+                        # Calculate lines in added file
+                        additions, deletions = self._count_lines(repo, staged_sha)
+                        file_info["additions"] = additions
+                        file_info["deletions"] = 0
+                        file_info["diff"] = None  # Don't include full content
+                    else:
+                        file_info["additions"] = 0
+                        file_info["deletions"] = 0
+                        file_info["diff"] = None
+
+                    staged.append(file_info)
 
             # TODO: Handle deleted files (in HEAD but not in index)
             # For now, deleted files are detected by workdir scan

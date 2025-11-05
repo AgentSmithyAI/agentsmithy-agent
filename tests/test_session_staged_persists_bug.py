@@ -233,12 +233,16 @@ def test_session_deduplication_should_prefer_committed():
                 entry["diff"] is not None
             ), f"Committed file should have diff. Entry: {entry}"
 
-        # file2: staged only -> entries should have additions=0
+        # file2: staged only -> NOW shows real diff (not additions=0)
+        # This is the fix: staged files now show actual additions from HEAD to staging area
         file2_entries = files_by_path.get("file2.txt", [])
         assert len(file2_entries) > 0, "file2 should be in changed_files"
 
         for entry in file2_entries:
+            assert entry["status"] == "added"
+            # NEW: Staged files show real additions, not 0!
             assert (
-                entry["additions"] == 0
-            ), f"file2 is staged-only, should have additions=0, got {entry['additions']}"
-            assert entry["diff"] is None, "Staged-only file should not have diff"
+                entry["additions"] > 0
+            ), f"file2 is staged, should show real line count, got {entry['additions']}"
+            # Added files don't show full diff content
+            assert entry["diff"] is None, "Added files don't show full diff content"
