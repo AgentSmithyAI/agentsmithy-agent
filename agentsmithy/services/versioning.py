@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import difflib
 import hashlib
 import json
 import os
@@ -13,7 +14,8 @@ from typing import Any, cast
 
 import pathspec
 from dulwich import porcelain
-from dulwich.objects import Commit, Tree
+from dulwich.diff_tree import CHANGE_ADD, CHANGE_DELETE, CHANGE_MODIFY, tree_changes
+from dulwich.objects import Blob, Commit, Tree
 from dulwich.repo import Repo
 
 # Note: This module uses dulwich (pure Python git implementation) for all git operations.
@@ -1781,16 +1783,17 @@ class VersioningTracker:
             return []
 
     def get_tree_diff(
-        self, from_ref: bytes | str, to_ref: bytes | str
+        self, from_ref: bytes | str, to_ref: bytes | str, include_diff: bool = True
     ) -> list[dict[str, Any]]:
         """Get diff between two refs/commits with file statistics.
 
         Args:
             from_ref: Source ref (e.g. b"refs/heads/main" or "main")
             to_ref: Target ref (e.g. b"refs/heads/session_1" or "session_1")
+            include_diff: Whether to include unified diff text (default: True)
 
         Returns:
-            List of dicts with keys: path, status, additions, deletions
+            List of dicts with keys: path, status, additions, deletions, diff (optional)
             Status values: FileChangeStatus enum (added, modified, deleted)
         """
         from agentsmithy.api.routes.checkpoints import FileChangeStatus
@@ -1816,80 +1819,60 @@ class VersioningTracker:
             from_commit = repo[repo.refs[from_ref]]
             to_commit = repo[repo.refs[to_ref]]
 
-            # Get trees
+            # Get tree IDs
             from_tree_id = getattr(from_commit, "tree", None)
             to_tree_id = getattr(to_commit, "tree", None)
 
             if not from_tree_id or not to_tree_id:
                 return []
 
-            from_tree = repo[from_tree_id]
-            to_tree = repo[to_tree_id]
-
-            # Collect files from both trees
-            from_files: dict[str, bytes] = {}  # path -> blob sha
-            to_files: dict[str, bytes] = {}  # path -> blob sha
-
-            def collect_blobs(tree: Tree, prefix: str = "") -> dict[str, bytes]:
-                """Recursively collect all blobs from tree."""
-                blobs: dict[str, bytes] = {}
-                for name, _mode, sha in tree.items():
-                    decoded_name = name.decode("utf-8")
-                    full_path = f"{prefix}/{decoded_name}" if prefix else decoded_name
-                    obj = repo[sha]
-                    if isinstance(obj, Tree):
-                        blobs.update(collect_blobs(obj, full_path))
-                    else:
-                        blobs[full_path] = sha
-                return blobs
-
-            from_files = collect_blobs(cast(Tree, from_tree))
-            to_files = collect_blobs(cast(Tree, to_tree))
-
-            # Calculate diff
-            all_paths = set(from_files.keys()) | set(to_files.keys())
+            # Use dulwich's tree_changes to get diff
             changes: list[dict[str, Any]] = []
 
-            for path in sorted(all_paths):
-                from_sha = from_files.get(path)
-                to_sha = to_files.get(path)
+            for change in tree_changes(repo.object_store, from_tree_id, to_tree_id):
+                # Get path from new or old entry (at least one should exist)
+                path_bytes = (change.new.path if change.new else None) or (
+                    change.old.path if change.old else None
+                )
+                if not path_bytes:
+                    continue
+                path_str = path_bytes.decode("utf-8")
 
-                if from_sha == to_sha:
-                    continue  # No change
-
-                if not from_sha:
+                if change.type == CHANGE_ADD and change.new:
                     # File added
-                    additions, deletions = self._count_lines(repo, to_sha)
-                    changes.append(
-                        {
-                            "path": path,
-                            "status": FileChangeStatus.ADDED.value,
-                            "additions": additions,
-                            "deletions": 0,
-                        }
-                    )
-                elif not to_sha:
+                    additions, deletions = self._count_lines(repo, change.new.sha)
+                    change_dict = {
+                        "path": path_str,
+                        "status": FileChangeStatus.ADDED.value,
+                        "additions": additions,
+                        "deletions": 0,
+                        "diff": None,  # Don't include full content for new files
+                    }
+                    changes.append(change_dict)
+                elif change.type == CHANGE_DELETE and change.old:
                     # File deleted
-                    additions, deletions = self._count_lines(repo, from_sha)
-                    changes.append(
-                        {
-                            "path": path,
-                            "status": FileChangeStatus.DELETED.value,
-                            "additions": 0,
-                            "deletions": deletions,
-                        }
+                    additions, deletions = self._count_lines(repo, change.old.sha)
+                    change_dict = {
+                        "path": path_str,
+                        "status": FileChangeStatus.DELETED.value,
+                        "additions": 0,
+                        "deletions": deletions,
+                        "diff": None,  # Don't include full content for deleted files
+                    }
+                    changes.append(change_dict)
+                elif change.type == CHANGE_MODIFY and change.old and change.new:
+                    # File modified
+                    additions, deletions, diff_text = self._diff_blobs_with_text(
+                        repo, change.old.sha, change.new.sha, include_diff
                     )
-                else:
-                    # File modified - calculate line diff
-                    additions, deletions = self._diff_blobs(repo, from_sha, to_sha)
-                    changes.append(
-                        {
-                            "path": path,
-                            "status": FileChangeStatus.MODIFIED.value,
-                            "additions": additions,
-                            "deletions": deletions,
-                        }
-                    )
+                    change_dict = {
+                        "path": path_str,
+                        "status": FileChangeStatus.MODIFIED.value,
+                        "additions": additions,
+                        "deletions": deletions,
+                        "diff": diff_text if include_diff else None,
+                    }
+                    changes.append(change_dict)
 
             return changes
 
@@ -1906,8 +1889,6 @@ class VersioningTracker:
             return (0, 0)
 
         try:
-            from dulwich.objects import Blob
-
             blob_obj = repo[blob_sha]
             if not isinstance(blob_obj, Blob):
                 return (0, 0)
@@ -1915,7 +1896,7 @@ class VersioningTracker:
             # Check if binary
             if b"\x00" in content[:8192]:
                 return (0, 0)  # Binary file
-            lines = content.count(b"\n")
+            lines = len(content.splitlines())
             return (lines, 0)
         except Exception:
             return (0, 0)
@@ -1928,36 +1909,60 @@ class VersioningTracker:
         Returns:
             Tuple of (additions, deletions)
         """
-        try:
-            from dulwich.objects import Blob
+        additions, deletions, _ = self._diff_blobs_with_text(
+            repo, from_sha, to_sha, False
+        )
+        return (additions, deletions)
 
+    def _diff_blobs_with_text(
+        self, repo: Repo, from_sha: bytes, to_sha: bytes, include_text: bool
+    ) -> tuple[int, int, str | None]:
+        """Calculate additions/deletions and optionally get diff text between two blobs.
+
+        Returns:
+            Tuple of (additions, deletions, diff_text)
+            diff_text is None if include_text=False or for binary files
+        """
+        try:
             from_blob_obj = repo[from_sha]
             to_blob_obj = repo[to_sha]
 
             if not isinstance(from_blob_obj, Blob) or not isinstance(to_blob_obj, Blob):
-                return (0, 0)
+                return (0, 0, None)
 
             from_content = from_blob_obj.data
             to_content = to_blob_obj.data
 
             # Check if binary
             if b"\x00" in from_content[:8192] or b"\x00" in to_content[:8192]:
-                return (0, 0)  # Binary file
+                return (0, 0, None)  # Binary file
 
-            # Simple line-based diff
-            from_lines = from_content.splitlines(keepends=False)
-            to_lines = to_content.splitlines(keepends=False)
+            # Decode to text for difflib
+            try:
+                from_text = from_content.decode("utf-8")
+                to_text = to_content.decode("utf-8")
+            except UnicodeDecodeError:
+                # Treat as binary if can't decode
+                return (0, 0, None)
 
-            # Use simple heuristic: count unique lines
-            from_set = set(from_lines)
-            to_set = set(to_lines)
+            # Use difflib for proper diff calculation
+            from_lines = from_text.splitlines(keepends=True)
+            to_lines = to_text.splitlines(keepends=True)
 
-            # Lines only in 'to' are additions
-            additions = len([line for line in to_lines if line not in from_set])
-            # Lines only in 'from' are deletions
-            deletions = len([line for line in from_lines if line not in to_set])
+            diff_gen = difflib.unified_diff(from_lines, to_lines, lineterm="")
+            diff_lines = list(diff_gen)
 
-            return (additions, deletions)
+            additions = 0
+            deletions = 0
+            for line in diff_lines:
+                if line.startswith("+") and not line.startswith("+++"):
+                    additions += 1
+                elif line.startswith("-") and not line.startswith("---"):
+                    deletions += 1
+
+            diff_text = "".join(diff_lines) if include_text and diff_lines else None
+
+            return (additions, deletions, diff_text)
 
         except Exception:
-            return (0, 0)
+            return (0, 0, None)

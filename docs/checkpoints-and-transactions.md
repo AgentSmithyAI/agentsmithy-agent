@@ -190,19 +190,22 @@ Get current session status and approval state, including detailed list of change
       "path": "src/main.py",
       "status": "modified",
       "additions": 15,
-      "deletions": 3
+      "deletions": 3,
+      "diff": "@@ -1,5 +1,5 @@\n def main():\n-    print('old')\n+    print('new')\n     return 0"
     },
     {
       "path": "src/new_feature.py",
       "status": "added",
       "additions": 42,
-      "deletions": 0
+      "deletions": 0,
+      "diff": null
     },
     {
       "path": "old_file.py",
       "status": "deleted",
       "additions": 0,
-      "deletions": 28
+      "deletions": 28,
+      "diff": null
     }
   ]
 }
@@ -225,8 +228,9 @@ Get current session status and approval state, including detailed list of change
   - `"added"` - File was created
   - `"modified"` - File was changed
   - `"deleted"` - File was removed
-- `additions`: Number of lines added (null for binary files)
-- `deletions`: Number of lines deleted (null for binary files)
+- `additions`: Number of lines added (0 for binary files)
+- `deletions`: Number of lines deleted (0 for binary files)
+- `diff`: Unified diff text for modified files (null for added/deleted/binary files)
 
 ### Approve Session
 

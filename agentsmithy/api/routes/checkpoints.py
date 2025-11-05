@@ -125,11 +125,15 @@ class FileChangeInfo(BaseModel):
 
     path: str = Field(..., description="File path relative to project root")
     status: FileChangeStatus = Field(..., description="Change status")
-    additions: int | None = Field(
-        None, description="Number of lines added (null for binary/new files)"
+    additions: int = Field(
+        ..., description="Number of lines added (0 for binary files)"
     )
-    deletions: int | None = Field(
-        None, description="Number of lines deleted (null for binary/deleted files)"
+    deletions: int = Field(
+        ..., description="Number of lines deleted (0 for binary files)"
+    )
+    diff: str | None = Field(
+        None,
+        description="Unified diff of changes (null for binary files or new/deleted files)",
     )
 
 
@@ -246,15 +250,18 @@ async def get_session_status(
                 if main_tree != session_tree:
                     has_unapproved = True
 
-                    # Get detailed diff
+                    # Get detailed diff (including diff text)
                     try:
-                        diff_changes = tracker.get_tree_diff("main", active_session)
+                        diff_changes = tracker.get_tree_diff(
+                            "main", active_session, include_diff=True
+                        )
                         changed_files = [
                             FileChangeInfo(
                                 path=change["path"],
                                 status=change["status"],
-                                additions=change.get("additions"),
-                                deletions=change.get("deletions"),
+                                additions=change["additions"],
+                                deletions=change["deletions"],
+                                diff=change.get("diff"),
                             )
                             for change in diff_changes
                         ]
