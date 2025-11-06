@@ -277,16 +277,14 @@ class ChatService:
                 error_msg = chunk.get("error", "Unknown error")
                 api_logger.error("Terminal error from tool_executor", error=error_msg)
 
-                # Send error event
+                # Send error event then abort stream (will trigger DONE in outer handler)
                 yield SSEEventFactory.error(
                     message=error_msg, dialog_id=dialog_id
                 ).to_sse()
 
-                # CRITICAL: Send DONE event after ERROR to properly close stream
-                yield SSEEventFactory.done(dialog_id=dialog_id).to_sse()
-
-                # Return to stop processing (error is terminal)
-                return
+                # CRITICAL: Raise StreamAbortError to stop the entire stream
+                # This will be caught in the outer loop which will send DONE event
+                raise StreamAbortError()
             else:
                 # Emit error and signal abort
                 yield SSEEventFactory.error(
@@ -581,6 +579,10 @@ class ChatService:
                                     self._flush_assistant_buffer(
                                         project_dialog, dialog_id, assistant_buffer
                                     )
+                                    api_logger.info(
+                                        "Sending DONE event after terminal error (StreamAbortError from response)",
+                                        dialog_id=dialog_id,
+                                    )
                                     yield SSEEventFactory.done(
                                         dialog_id=dialog_id
                                     ).to_sse()
@@ -631,28 +633,31 @@ class ChatService:
                                 try:
                                     async for chunk in response:
                                         chunk_count += 1
-                                        try:
-                                            async for (
-                                                sse_event
-                                            ) in self._process_structured_chunk(
-                                                chunk,
-                                                dialog_id,
-                                                assistant_buffer,
-                                                project_dialog,
-                                                reasoning_buffer,
-                                            ):
-                                                yield sse_event
-                                        except StreamAbortError:
-                                            # Flush buffer before terminating
-                                            self._flush_assistant_buffer(
-                                                project_dialog,
-                                                dialog_id,
-                                                assistant_buffer,
-                                            )
-                                            yield SSEEventFactory.done(
-                                                dialog_id=dialog_id
-                                            ).to_sse()
-                                            return
+                                        async for (
+                                            sse_event
+                                        ) in self._process_structured_chunk(
+                                            chunk,
+                                            dialog_id,
+                                            assistant_buffer,
+                                            project_dialog,
+                                            reasoning_buffer,
+                                        ):
+                                            yield sse_event
+                                except StreamAbortError:
+                                    # Flush buffer before terminating
+                                    self._flush_assistant_buffer(
+                                        project_dialog,
+                                        dialog_id,
+                                        assistant_buffer,
+                                    )
+                                    api_logger.info(
+                                        "Sending DONE event after terminal error (StreamAbortError)",
+                                        dialog_id=dialog_id,
+                                    )
+                                    yield SSEEventFactory.done(
+                                        dialog_id=dialog_id
+                                    ).to_sse()
+                                    return
                                 except Exception as e:
                                     # Catch streaming errors from LLM
                                     # Note: Most LLM errors (context window, etc) are now caught
