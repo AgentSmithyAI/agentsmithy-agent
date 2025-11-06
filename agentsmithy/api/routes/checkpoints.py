@@ -126,6 +126,18 @@ class FileChangeInfo(BaseModel):
         None,
         description="Unified diff of changes (null for binary files or new/deleted files)",
     )
+    base_content: str | None = Field(
+        None,
+        description="Content from base checkpoint (main). Null for added files, binary files, or files >1MB",
+    )
+    is_binary: bool = Field(
+        False,
+        description="Whether the file is binary",
+    )
+    is_too_large: bool = Field(
+        False,
+        description="Whether the file exceeds 1MB size limit",
+    )
 
 
 class SessionStatusResponse(BaseModel):
@@ -254,6 +266,9 @@ async def get_session_status(
                                     additions=change["additions"],
                                     deletions=change["deletions"],
                                     diff=change.get("diff"),
+                                    base_content=change.get("base_content"),
+                                    is_binary=change.get("is_binary", False),
+                                    is_too_large=change.get("is_too_large", False),
                                 )
                             )
                             changed_files_paths.add(change["path"])
@@ -284,6 +299,9 @@ async def get_session_status(
                                 additions=staged.get("additions", 0),
                                 deletions=staged.get("deletions", 0),
                                 diff=staged.get("diff"),
+                                base_content=staged.get("base_content"),
+                                is_binary=staged.get("is_binary", False),
+                                is_too_large=staged.get("is_too_large", False),
                             )
                         )
                         changed_files_paths.add(staged["path"])

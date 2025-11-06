@@ -1572,11 +1572,19 @@ class VersioningTracker:
 
         Args:
             session_name: Name of the session to compare against
-            include_diff: If True, include additions/deletions/diff for each file
+            include_diff: If True, include additions/deletions/diff/base_content for each file
 
         Returns:
-            List of dicts with keys: path, status (added/modified/deleted)
-            If include_diff=True, also includes: additions, deletions, diff
+            List of dicts with keys:
+            - path: File path relative to project root
+            - status: FileChangeStatus enum value (added, modified, deleted)
+            If include_diff=True, also includes:
+            - additions: Number of lines added
+            - deletions: Number of lines deleted
+            - diff: Unified diff text (None for binary/added files)
+            - base_content: Text content from HEAD (None for added/binary/large files)
+            - is_binary: True if file is binary
+            - is_too_large: True if file exceeds 1MB size limit
             Empty list if no staged changes or on error.
         """
         repo = self.ensure_repo()
@@ -1637,21 +1645,31 @@ class VersioningTracker:
                             # Calculate diff between HEAD and staged
                             additions, deletions, diff_text = (
                                 self._diff_blobs_with_text(
-                                    repo, head_files[path], staged_sha, True
+                                    repo, head_files[path], staged_sha, True, path
                                 )
+                            )
+                            # Extract base content from HEAD
+                            base_content, is_binary, is_too_large = (
+                                self._extract_blob_content(repo, head_files[path])
                             )
                             file_info["additions"] = additions
                             file_info["deletions"] = deletions
                             file_info["diff"] = diff_text
+                            file_info["base_content"] = base_content
+                            file_info["is_binary"] = is_binary
+                            file_info["is_too_large"] = is_too_large
                         else:
                             file_info["additions"] = 0
                             file_info["deletions"] = 0
                             file_info["diff"] = None
+                            file_info["base_content"] = None
+                            file_info["is_binary"] = False
+                            file_info["is_too_large"] = False
 
                         staged.append(file_info)
                     # Same SHA = no change (shouldn't be in index, but handle it)
                 else:
-                    # File not in HEAD = added
+                    # File not in HEAD = added (no base content)
                     file_info = {
                         "path": path,
                         "status": FileChangeStatus.ADDED.value,
@@ -1663,10 +1681,16 @@ class VersioningTracker:
                         file_info["additions"] = additions
                         file_info["deletions"] = 0
                         file_info["diff"] = None  # Don't include full content
+                        file_info["base_content"] = None  # File didn't exist
+                        file_info["is_binary"] = False
+                        file_info["is_too_large"] = False
                     else:
                         file_info["additions"] = 0
                         file_info["deletions"] = 0
                         file_info["diff"] = None
+                        file_info["base_content"] = None
+                        file_info["is_binary"] = False
+                        file_info["is_too_large"] = False
 
                     staged.append(file_info)
 
@@ -1960,8 +1984,15 @@ class VersioningTracker:
             include_diff: Whether to include unified diff text (default: True)
 
         Returns:
-            List of dicts with keys: path, status, additions, deletions, diff (optional)
-            Status values: FileChangeStatus enum (added, modified, deleted)
+            List of dicts with keys:
+            - path: File path relative to project root
+            - status: FileChangeStatus enum value (added, modified, deleted)
+            - additions: Number of lines added
+            - deletions: Number of lines deleted
+            - diff: Unified diff text (None for binary/added/deleted files)
+            - base_content: Text content from from_ref (None for added/binary/large files)
+            - is_binary: True if file is binary
+            - is_too_large: True if file exceeds 1MB size limit
         """
         repo = self.ensure_repo()
 
@@ -2004,7 +2035,7 @@ class VersioningTracker:
                 path_str = path_bytes.decode("utf-8")
 
                 if change.type == CHANGE_ADD and change.new:
-                    # File added
+                    # File added - no base content (file didn't exist in main)
                     additions, deletions = self._count_lines(repo, change.new.sha)
                     change_dict = {
                         "path": path_str,
@@ -2012,23 +2043,35 @@ class VersioningTracker:
                         "additions": additions,
                         "deletions": 0,
                         "diff": None,  # Don't include full content for new files
+                        "base_content": None,  # File didn't exist in base
+                        "is_binary": False,
+                        "is_too_large": False,
                     }
                     changes.append(change_dict)
                 elif change.type == CHANGE_DELETE and change.old:
-                    # File deleted
+                    # File deleted - provide base content so client can show what was deleted
                     additions, deletions = self._count_lines(repo, change.old.sha)
+                    base_content, is_binary, is_too_large = self._extract_blob_content(
+                        repo, change.old.sha
+                    )
                     change_dict = {
                         "path": path_str,
                         "status": FileChangeStatus.DELETED.value,
                         "additions": 0,
                         "deletions": deletions,
                         "diff": None,  # Don't include full content for deleted files
+                        "base_content": base_content,
+                        "is_binary": is_binary,
+                        "is_too_large": is_too_large,
                     }
                     changes.append(change_dict)
                 elif change.type == CHANGE_MODIFY and change.old and change.new:
-                    # File modified
+                    # File modified - extract base content from main/from_ref
                     additions, deletions, diff_text = self._diff_blobs_with_text(
-                        repo, change.old.sha, change.new.sha, include_diff
+                        repo, change.old.sha, change.new.sha, include_diff, path_str
+                    )
+                    base_content, is_binary, is_too_large = self._extract_blob_content(
+                        repo, change.old.sha
                     )
                     change_dict = {
                         "path": path_str,
@@ -2036,6 +2079,9 @@ class VersioningTracker:
                         "additions": additions,
                         "deletions": deletions,
                         "diff": diff_text if include_diff else None,
+                        "base_content": base_content,
+                        "is_binary": is_binary,
+                        "is_too_large": is_too_large,
                     }
                     changes.append(change_dict)
 
@@ -2066,6 +2112,50 @@ class VersioningTracker:
         except Exception:
             return (0, 0)
 
+    def _extract_blob_content(
+        self, repo: Repo, blob_sha: bytes | None
+    ) -> tuple[str | None, bool, bool]:
+        """Extract content from blob with binary and size checks.
+
+        Args:
+            repo: Git repository
+            blob_sha: Blob SHA to extract content from
+
+        Returns:
+            Tuple of (content, is_binary, is_too_large)
+            - content: Text content (None if binary or too large or missing)
+            - is_binary: True if file is binary
+            - is_too_large: True if file exceeds 1MB
+        """
+        if not blob_sha:
+            return (None, False, False)
+
+        try:
+            blob_obj = repo[blob_sha]
+            if not isinstance(blob_obj, Blob):
+                return (None, False, False)
+
+            content = blob_obj.data
+
+            # Check if binary (look for null bytes in first 8KB)
+            if b"\x00" in content[:8192]:
+                return (None, True, False)
+
+            # Check size limit (1MB = 1048576 bytes)
+            if len(content) > 1048576:
+                return (None, False, True)
+
+            # Try to decode as UTF-8
+            try:
+                text_content = content.decode("utf-8")
+                return (text_content, False, False)
+            except UnicodeDecodeError:
+                # Can't decode as UTF-8, treat as binary
+                return (None, True, False)
+
+        except Exception:
+            return (None, False, False)
+
     def _diff_blobs(
         self, repo: Repo, from_sha: bytes, to_sha: bytes
     ) -> tuple[int, int]:
@@ -2080,9 +2170,21 @@ class VersioningTracker:
         return (additions, deletions)
 
     def _diff_blobs_with_text(
-        self, repo: Repo, from_sha: bytes, to_sha: bytes, include_text: bool
+        self,
+        repo: Repo,
+        from_sha: bytes,
+        to_sha: bytes,
+        include_text: bool,
+        path: str | None = None,
     ) -> tuple[int, int, str | None]:
         """Calculate additions/deletions and optionally get diff text between two blobs.
+
+        Args:
+            repo: Git repository
+            from_sha: SHA of source blob
+            to_sha: SHA of target blob
+            include_text: Whether to include diff text
+            path: Optional file path for unified diff headers
 
         Returns:
             Tuple of (additions, deletions, diff_text)
@@ -2114,7 +2216,14 @@ class VersioningTracker:
             from_lines = from_text.splitlines(keepends=True)
             to_lines = to_text.splitlines(keepends=True)
 
-            diff_gen = difflib.unified_diff(from_lines, to_lines, lineterm="")
+            # Generate unified diff with proper file headers for client compatibility
+            diff_gen = difflib.unified_diff(
+                from_lines,
+                to_lines,
+                fromfile=f"a/{path}" if path else "a/file",
+                tofile=f"b/{path}" if path else "b/file",
+                lineterm="",
+            )
             diff_lines = list(diff_gen)
 
             additions = 0
@@ -2125,7 +2234,8 @@ class VersioningTracker:
                 elif line.startswith("-") and not line.startswith("---"):
                     deletions += 1
 
-            diff_text = "".join(diff_lines) if include_text and diff_lines else None
+            # Join with newlines to create proper unified diff format
+            diff_text = "\n".join(diff_lines) if include_text and diff_lines else None
 
             return (additions, deletions, diff_text)
 

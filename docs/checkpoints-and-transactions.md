@@ -191,21 +191,30 @@ Get current session status and approval state, including detailed list of change
       "status": "modified",
       "additions": 15,
       "deletions": 3,
-      "diff": "@@ -1,5 +1,5 @@\n def main():\n-    print('old')\n+    print('new')\n     return 0"
+      "diff": "--- a/src/main.py\n+++ b/src/main.py\n@@ -1,5 +1,5 @@\n def main():\n-    print('old')\n+    print('new')\n     return 0",
+      "base_content": "def main():\n    print('old')\n    return 0",
+      "is_binary": false,
+      "is_too_large": false
     },
     {
       "path": "src/new_feature.py",
       "status": "added",
       "additions": 42,
       "deletions": 0,
-      "diff": null
+      "diff": null,
+      "base_content": null,
+      "is_binary": false,
+      "is_too_large": false
     },
     {
       "path": "old_file.py",
       "status": "deleted",
       "additions": 0,
       "deletions": 28,
-      "diff": null
+      "diff": null,
+      "base_content": "# old file content...",
+      "is_binary": false,
+      "is_too_large": false
     }
   ]
 }
@@ -230,11 +239,39 @@ Get current session status and approval state, including detailed list of change
   - `"deleted"` - File was removed
 - `additions`: Number of lines added (0 for binary files or staged-only files)
 - `deletions`: Number of lines deleted (0 for binary files or staged-only files)
-- `diff`: Unified diff text for modified files (null for added/deleted/binary/staged-only files)
+- `diff`: Unified diff text with proper headers (`--- a/path`, `+++ b/path`) for modified files (null for added/deleted/binary/staged-only files)
+- `base_content`: Original file content from base checkpoint (main). Null for:
+  - Added files (didn't exist in base)
+  - Binary files
+  - Files exceeding 1MB size limit
+- `is_binary`: Boolean flag indicating if file is binary (contains null bytes)
+- `is_too_large`: Boolean flag indicating if file exceeds 1MB size limit
 
 **Note**: `changed_files` includes both:
-1. **Committed changes** (checkpointed but not approved) - includes full statistics and diffs
-2. **Staged changes** (prepared but not checkpointed) - shows only path and status, no line counts or diffs
+1. **Committed changes** (checkpointed but not approved) - includes full statistics, diffs, and base content
+2. **Staged changes** (prepared but not checkpointed) - includes statistics, diffs, and base content
+
+**Use Case for `base_content`:**
+Client applications already have access to modified file content (current state). The `base_content` field provides the original content from the base checkpoint, enabling clients to visualize changes without needing to apply patches or maintain separate copies of file states.
+
+**Unified Diff Format:**
+The `diff` field now contains properly formatted unified diff with standard headers:
+```diff
+--- a/src/main.py
++++ b/src/main.py
+@@ -1,5 +1,5 @@
+ def main():
+-    print('old')
++    print('new')
+     return 0
+```
+
+This format is compatible with standard diff parsing libraries and includes:
+- File path headers (`--- a/path` and `+++ b/path`) on separate lines
+- Hunk headers (`@@ -a,b +c,d @@`)
+- Context lines (prefixed with space)
+- Added lines (prefixed with `+`)
+- Removed lines (prefixed with `-`)
 
 ### Approve Session
 
