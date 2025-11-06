@@ -762,11 +762,14 @@ class ToolExecutor:
                     yield {"type": EventType.REASONING_END.value}
                 if chat_started:
                     yield {"type": EventType.CHAT_END.value}
-                # Yield error event that chat_service will forward to client
+                # Yield error event to client
                 yield {
                     "type": EventType.ERROR.value,
                     "error": f"LLM error: {str(stream_error)}",
                 }
+                # Yield DONE event to signal end of stream
+                # (chat_service doesn't know stream ended early without this)
+                yield {"type": EventType.DONE.value}
                 return  # Stop processing
 
             # If no tool calls, we're done - model finished successfully

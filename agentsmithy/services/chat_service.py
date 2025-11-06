@@ -24,6 +24,10 @@ class StreamAbortError(Exception):
     """Signal to abort streaming due to error."""
 
 
+class StreamAbortWithDone(StreamAbortError):
+    """Signal to abort streaming - DONE event already sent."""
+
+
 class ChatService:
     def __init__(self) -> None:
         self._orchestrator: AgentOrchestrator | None = None
@@ -185,6 +189,7 @@ class ChatService:
             EventType.FILE_EDIT.value,
             EventType.TOOL_CALL.value,
             EventType.ERROR.value,
+            EventType.DONE.value,
             EventType.CHAT.value,
             EventType.REASONING.value,
             EventType.CHAT_START.value,
@@ -274,17 +279,22 @@ class ChatService:
                 ).to_sse()
             elif chunk["type"] == EventType.ERROR.value:
                 # Error from tool_executor (terminal - stops execution)
+                # Just forward the error to client - tool_executor will send DONE after this
                 error_msg = chunk.get("error", "Unknown error")
                 api_logger.error("Terminal error from tool_executor", error=error_msg)
 
-                # Send error event then abort stream (will trigger DONE in outer handler)
+                # Send error event - tool_executor will send DONE event next
                 yield SSEEventFactory.error(
                     message=error_msg, dialog_id=dialog_id
                 ).to_sse()
-
-                # CRITICAL: Raise StreamAbortError to stop the entire stream
-                # This will be caught in the outer loop which will send DONE event
-                raise StreamAbortError()
+                # DO NOT raise here - wait for DONE event from tool_executor
+            elif chunk["type"] == EventType.DONE.value:
+                # DONE event from tool_executor (early termination due to error)
+                # Simply forward it to client - this signals end of stream
+                api_logger.info("Received DONE event from tool_executor")
+                yield SSEEventFactory.done(dialog_id=dialog_id).to_sse()
+                # Raise special exception to stop processing WITHOUT sending another DONE
+                raise StreamAbortWithDone()
             else:
                 # Emit error and signal abort
                 yield SSEEventFactory.error(
@@ -574,6 +584,16 @@ class ChatService:
                                         None,
                                         chunk_number=chunk_count,
                                     )
+                                except StreamAbortWithDone:
+                                    # Stream aborted - DONE already sent
+                                    self._flush_assistant_buffer(
+                                        project_dialog, dialog_id, assistant_buffer
+                                    )
+                                    api_logger.info(
+                                        "Stream aborted with DONE already sent (from response)",
+                                        dialog_id=dialog_id,
+                                    )
+                                    return
                                 except StreamAbortError:
                                     # Flush buffer before terminating
                                     self._flush_assistant_buffer(
@@ -614,6 +634,13 @@ class ChatService:
                                 reasoning_buffer,
                             ):
                                 yield sse_event
+                        except StreamAbortWithDone:
+                            # Stream aborted - DONE already sent
+                            self._flush_assistant_buffer(
+                                project_dialog, dialog_id, assistant_buffer
+                            )
+                            api_logger.info("Stream aborted with DONE already sent")
+                            return
                         except StreamAbortError:
                             # Flush buffer before terminating
                             self._flush_assistant_buffer(
@@ -643,6 +670,18 @@ class ChatService:
                                             reasoning_buffer,
                                         ):
                                             yield sse_event
+                                except StreamAbortWithDone:
+                                    # Stream aborted - DONE already sent by tool_executor
+                                    self._flush_assistant_buffer(
+                                        project_dialog,
+                                        dialog_id,
+                                        assistant_buffer,
+                                    )
+                                    api_logger.info(
+                                        "Stream aborted with DONE already sent",
+                                        dialog_id=dialog_id,
+                                    )
+                                    return
                                 except StreamAbortError:
                                     # Flush buffer before terminating
                                     self._flush_assistant_buffer(
@@ -696,6 +735,12 @@ class ChatService:
                                                     reasoning_buffer,
                                                 ):
                                                     yield sse_event
+                                            except StreamAbortWithDone:
+                                                # Stream aborted - DONE already sent
+                                                api_logger.info(
+                                                    "Stream aborted with DONE already sent (actual_response)"
+                                                )
+                                                return
                                             except StreamAbortError:
                                                 yield SSEEventFactory.done(
                                                     dialog_id=dialog_id
@@ -733,6 +778,15 @@ class ChatService:
                                             reasoning_buffer,
                                         ):
                                             yield sse_event
+                                    except StreamAbortWithDone:
+                                        # Stream aborted - DONE already sent
+                                        self._flush_assistant_buffer(
+                                            project_dialog, dialog_id, assistant_buffer
+                                        )
+                                        api_logger.info(
+                                            "Stream aborted with DONE already sent (non-async response)"
+                                        )
+                                        return
                                     except StreamAbortError:
                                         # Flush buffer before terminating
                                         self._flush_assistant_buffer(
