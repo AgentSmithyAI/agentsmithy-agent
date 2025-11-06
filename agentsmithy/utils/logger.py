@@ -60,7 +60,7 @@ def configure_structlog():
             structlog.stdlib.add_log_level,
             structlog.stdlib.PositionalArgumentsFormatter(),
             structlog.processors.StackInfoRenderer(),
-            structlog.processors.format_exc_info,
+            # format_exc_info removed - conflicts with pretty exception rendering when exc_info=True
             structlog.processors.TimeStamper(fmt="iso"),
             structlog.stdlib.ProcessorFormatter.wrap_for_formatter,
         ],

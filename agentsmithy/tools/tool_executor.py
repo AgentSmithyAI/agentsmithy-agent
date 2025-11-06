@@ -28,6 +28,9 @@ class ToolExecutor:
     - process_with_tools_async(stream=False) -> dict
     """
 
+    # Maximum iterations to prevent infinite loops when model repeatedly makes the same error
+    MAX_ITERATIONS = 10
+
     def __init__(self, tool_manager: ToolRegistry, llm_provider: LLMProvider) -> None:
         self.tool_manager = tool_manager
         self.llm_provider = llm_provider
@@ -571,8 +574,21 @@ class ToolExecutor:
         aggregated_tool_results: list[dict[str, Any]] = []
         aggregated_tool_calls: list[dict[str, Any]] = []
 
+        iteration_count = 0
+        consecutive_errors = 0  # Track consecutive errors, not total iterations
+
         while True:
-            agent_logger.info("LLM invoke", messages=len(conversation))
+            iteration_count += 1
+            # Check for too many CONSECUTIVE errors, not iterations
+            if consecutive_errors >= self.MAX_ITERATIONS:
+                raise RuntimeError(
+                    f"Maximum consecutive errors ({self.MAX_ITERATIONS}) reached. "
+                    "Model is stuck in an error loop."
+                )
+
+            agent_logger.info(
+                "LLM invoke", messages=len(conversation), iteration=iteration_count
+            )
             response = await bound_llm.ainvoke(conversation)
 
             # Extract and persist usage using helper
@@ -609,6 +625,21 @@ class ToolExecutor:
                 if not name:
                     continue
                 result = await self.tool_manager.run_tool(name, **args)
+
+                # Check if tool execution returned an error
+                if isinstance(result, dict) and result.get("type") == "tool_error":
+                    # Tool failed - increment error counter
+                    consecutive_errors += 1
+                    agent_logger.error(
+                        "Tool execution error (recoverable)",
+                        tool_name=name,
+                        error_code=result.get("code"),
+                        consecutive_errors=consecutive_errors,
+                    )
+                else:
+                    # Tool succeeded - reset error counter
+                    consecutive_errors = 0
+
                 # Check if tool output should be aggregated/persisted
                 is_ephemeral = self._is_ephemeral_tool(name)
                 if not is_ephemeral:
@@ -634,8 +665,24 @@ class ToolExecutor:
         bound_llm = self._bind_tools()
         conversation: list[BaseMessage] = list(messages)
 
+        iteration_count = 0
+        consecutive_errors = 0  # Track consecutive errors, not total iterations
+
         while True:
-            agent_logger.info("LLM streaming", messages=len(conversation))
+            iteration_count += 1
+            # Check for too many CONSECUTIVE errors, not iterations
+            if consecutive_errors >= self.MAX_ITERATIONS:
+                error_msg = (
+                    f"Maximum consecutive errors ({self.MAX_ITERATIONS}) reached. "
+                    "Model is stuck in an error loop."
+                )
+                agent_logger.error(error_msg, consecutive_errors=consecutive_errors)
+                yield {"type": EventType.ERROR.value, "error": error_msg}
+                break
+
+            agent_logger.info(
+                "LLM streaming", messages=len(conversation), iteration=iteration_count
+            )
 
             # Use astream for true streaming
             accumulated_content = ""
@@ -722,11 +769,13 @@ class ToolExecutor:
                 }
                 return  # Stop processing
 
-            # If no tool calls, we're done
+            # If no tool calls, we're done - model finished successfully
             if not accumulated_tool_calls:
                 # Persist usage using helper
                 self._persist_usage(last_usage or {})
                 # Stream might have already yielded all content chunks
+                # Reset error counter - model succeeded
+                consecutive_errors = 0
                 break
 
             # Create AI message with tool calls for conversation history
@@ -778,10 +827,47 @@ class ToolExecutor:
                         "args": args,
                     }
 
-                    # Execute tool
+                    # Execute tool (tool_manager handles all tool exceptions centrally)
                     result = await self.tool_manager.run_tool(name, **args)
                     is_ephemeral = self._is_ephemeral_tool(name)
 
+                    # Check if tool execution returned an error
+                    # tool_manager.run_tool() catches all exceptions and returns {"type": "tool_error"}
+                    if isinstance(result, dict) and result.get("type") == "tool_error":
+                        # Tool failed - this is recoverable, model can retry with different approach
+                        # Do NOT send to SSE (not terminal), only log and add to conversation
+                        consecutive_errors += 1  # Increment error counter
+                        error_msg = f"Tool '{name}' failed: {result.get('error', 'Unknown error')}"
+                        agent_logger.error(
+                            "Tool execution error (recoverable)",
+                            tool_name=name,
+                            error_code=result.get("code"),
+                            error_type=result.get("error_type"),
+                            consecutive_errors=consecutive_errors,
+                        )
+
+                        # Build tool message with error result so model can see it
+                        if not tool_id:
+                            raise RuntimeError(
+                                "Missing tool_call id; cannot attach tool output"
+                            )
+
+                        tool_message, is_ephemeral = await self._build_tool_message(
+                            tool_id, name, args, result
+                        )
+                        if not is_ephemeral and self._tool_results_storage:
+                            self._append_tool_message_to_history(tool_message)
+
+                        # Add error to conversation so model can retry
+                        conversation.append(tool_message)
+
+                        # Continue processing next tool call
+                        continue
+
+                    # Tool succeeded - reset error counter
+                    consecutive_errors = 0
+
+                    # Handle file edits and other results
                     # Immediately yield file_edit in the same stream if tool produced a file change
                     if isinstance(result, dict) and result.get("type") in {
                         "replace_file_result",
@@ -813,14 +899,77 @@ class ToolExecutor:
                     conversation.append(tool_message)
 
                 except json.JSONDecodeError as e:
+                    # Tool argument parsing failed - this is recoverable, model can retry with correct JSON
+                    # Do NOT send to SSE (not terminal), only log and add to conversation
+                    consecutive_errors += 1  # Increment error counter
                     error_msg = f"Failed to parse tool arguments: {str(e)}"
-                    agent_logger.error(error_msg, tool_name=name, args_str=args_str)
-                    yield {"type": "error", "error": error_msg}
-                    return
+                    agent_logger.error(
+                        "Tool argument parse error (recoverable)",
+                        tool_name=name,
+                        args_str=args_str,
+                        consecutive_errors=consecutive_errors,
+                    )
+
+                    # Create error result to send back to model
+                    error_result = {
+                        "type": "tool_error",
+                        "name": name,
+                        "code": "args_parse_failed",
+                        "error": error_msg,
+                        "error_type": "JSONDecodeError",
+                    }
+
+                    # Build tool message with error result
+                    tool_message, is_ephemeral = await self._build_tool_message(
+                        tool_id, name, {}, error_result
+                    )
+                    if not is_ephemeral and self._tool_results_storage:
+                        self._append_tool_message_to_history(tool_message)
+
+                    # Add error to conversation so model can retry
+                    conversation.append(tool_message)
+
+                    # Continue processing (don't return) - model may retry
+                    continue
+
                 except Exception as e:
-                    error_msg = f"Tool '{name}' failed: {str(e)}"
-                    agent_logger.error(error_msg, tool_name=name)
-                    yield {"type": "error", "error": error_msg}
-                    return
+                    # Unexpected error during tool result processing (not tool execution itself)
+                    # Tool execution errors are handled centrally by tool_manager and checked above
+                    # This catches errors in _build_tool_message, storage, etc.
+                    # If we can continue - it's recoverable, if not - it's terminal
+                    consecutive_errors += 1  # Increment error counter
+                    error_msg = f"Error processing tool '{name}' result: {str(e)}"
+                    agent_logger.error(
+                        "Unexpected error in tool result processing (recoverable)",
+                        tool_name=name,
+                        error=str(e),
+                        error_type=type(e).__name__,
+                        consecutive_errors=consecutive_errors,
+                    )
+
+                    # Do NOT send to SSE (not terminal), only log and try to add to conversation
+                    # Create error result to send back to model
+                    error_result = {
+                        "type": "tool_error",
+                        "name": name,
+                        "code": "processing_failed",
+                        "error": str(e),
+                        "error_type": type(e).__name__,
+                    }
+
+                    # Try to build tool message with error result
+                    try:
+                        tool_message, is_ephemeral = await self._build_tool_message(
+                            tool_id, name, {}, error_result
+                        )
+                        if not is_ephemeral and self._tool_results_storage:
+                            self._append_tool_message_to_history(tool_message)
+                        conversation.append(tool_message)
+                    except Exception:
+                        # If even error message creation fails, just log and continue
+                        agent_logger.error("Failed to create error tool message")
+
+                    # Continue processing (don't return) - model may retry
+                    continue
 
             # Assistant message already appended above

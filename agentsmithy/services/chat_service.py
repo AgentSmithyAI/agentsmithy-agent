@@ -273,30 +273,20 @@ class ChatService:
                     dialog_id=dialog_id,
                 ).to_sse()
             elif chunk["type"] == EventType.ERROR.value:
-                # Error from tool_executor (e.g., httpx.ReadError during LLM streaming)
-                # When connection is already closed, yield raises BrokenPipeError and crashes
-                # the stream without logging. Catch connection errors and log delivery status.
+                # Error from tool_executor (terminal - stops execution)
                 error_msg = chunk.get("error", "Unknown error")
-                api_logger.error("Error from tool_executor", error=error_msg)
-                try:
-                    yield SSEEventFactory.error(
-                        message=error_msg, dialog_id=dialog_id
-                    ).to_sse()
-                    # Log successful delivery to diagnose whether errors reach client
-                    api_logger.info(
-                        "ERROR event successfully yielded to SSE stream",
-                        error_msg=error_msg,
-                        dialog_id=dialog_id,
-                    )
-                except (BrokenPipeError, ConnectionResetError, ConnectionError) as e:
-                    # Connection closed - can't send error event
-                    api_logger.warning(
-                        "Cannot send ERROR event - connection closed",
-                        error=str(e),
-                        error_type=type(e).__name__,
-                    )
-                # Don't raise StreamAbortError - just let generator return
-                # tool_executor already handled cleanup
+                api_logger.error("Terminal error from tool_executor", error=error_msg)
+
+                # Send error event
+                yield SSEEventFactory.error(
+                    message=error_msg, dialog_id=dialog_id
+                ).to_sse()
+
+                # CRITICAL: Send DONE event after ERROR to properly close stream
+                yield SSEEventFactory.done(dialog_id=dialog_id).to_sse()
+
+                # Return to stop processing (error is terminal)
+                return
             else:
                 # Emit error and signal abort
                 yield SSEEventFactory.error(

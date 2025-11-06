@@ -80,6 +80,10 @@ asyncio_default_fixture_loop_scope = "function"
 log_cli = true
 filterwarnings = [
     "ignore::DeprecationWarning",
+    # Ignore "coroutine was never awaited" in background tasks during tests
+    # In production event loop is long-lived and tasks complete normally
+    "ignore:coroutine '.*index_file' was never awaited:RuntimeWarning",
+    "ignore:coroutine '_reindex_files_background' was never awaited:RuntimeWarning",
 ]
 
 [tool.semantic_release]
