@@ -727,14 +727,26 @@ class VersioningTracker:
             )
             if tree_entry and len(tree_entry) == 2:
                 _mode, existing_blob_sha = tree_entry
-                # Quick heuristic: check if file size matches blob size
-                # Note: this is not a guarantee of equality (size collision possible),
-                # but it's a fast optimization to avoid reading large files
+
+                # Fast check: compare file size first
                 existing_blob = project_git_repo[existing_blob_sha]
                 file_size = file_path.stat().st_size
-                if len(existing_blob.data) == file_size:
-                    # File likely unchanged based on size, reuse blob (no file read!)
+
+                if len(existing_blob.data) != file_size:
+                    # Size mismatch - file changed, cannot reuse
+                    return None
+
+                # Size matches, but we must verify content hash to avoid size collisions
+                # (files can have same size but different content, e.g. after formatting)
+                from dulwich.objects import Blob
+
+                content = file_path.read_bytes()
+                current_blob = Blob.from_string(content)
+
+                if current_blob.id == existing_blob_sha:
+                    # Content hash matches - file unchanged, reuse blob
                     return existing_blob
+                # else: size collision - file changed despite same size, fallthrough to create new
         except (KeyError, FileNotFoundError, AttributeError):
             # File not in project git or lookup failed
             pass
