@@ -285,23 +285,8 @@ jobs:
             echo "Warning: UPX not found, building without compression"
           fi
           
-          pyinstaller --onefile \
-            --name agentsmithy \
-            $UPX_ARG \
-            --collect-submodules agentsmithy.tools \
-            --collect-submodules agentsmithy.tools.builtin \
-            --collect-submodules chromadb \
-            --collect-submodules chromadb.telemetry.product \
-            --collect-data chromadb \
-            --collect-submodules tiktoken \
-            --collect-submodules tiktoken_ext \
-            --exclude-module pytest \
-            --exclude-module pytest_asyncio \
-            --exclude-module black \
-            --exclude-module isort \
-            --exclude-module mypy \
-            --exclude-module ruff \
-            main.py
+          # Use spec file to ensure all hidden imports and runtime hooks are included
+          pyinstaller $UPX_ARG agentsmithy.spec
           ls -lh dist/agentsmithy${{ matrix.ext }}
       - name: Rename artifacts with version and latest aliases
         if: steps.ver.outputs.version != ''
