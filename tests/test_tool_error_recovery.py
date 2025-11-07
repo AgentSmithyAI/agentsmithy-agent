@@ -13,25 +13,9 @@ The correct behavior:
 6. Stream continues (not abruptly terminated)
 """
 
-import tempfile
-from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-
-from agentsmithy.core.project import Project
-
-
-@pytest.fixture
-def temp_project():
-    """Create a temporary project for testing."""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        project_root = Path(tmpdir)
-        state_dir = project_root / ".agentsmithy"
-        project = Project(name="test", root=project_root, state_dir=state_dir)
-        project.ensure_state_dir()
-        project.ensure_dialogs_dir()
-        yield project
 
 
 @pytest.mark.asyncio

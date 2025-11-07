@@ -162,6 +162,22 @@ class BackgroundTaskManager:
         """Return number of active background tasks."""
         return len([t for t in self._tasks if not t.done()])
 
+    @property
+    def has_tasks(self) -> bool:
+        """Return True if there are any tracked tasks (completed or pending)."""
+        return len(self._tasks) > 0
+
+    def cancel_all(self) -> None:
+        """Cancel all pending tasks immediately (for testing/cleanup).
+
+        This is a synchronous operation that cancels all tasks without waiting.
+        Use shutdown() for graceful cleanup with timeout.
+        """
+        for task in list(self._tasks):
+            if not task.done():
+                task.cancel()
+        self._tasks.clear()
+
 
 # Global instance
 _background_manager: BackgroundTaskManager | None = None

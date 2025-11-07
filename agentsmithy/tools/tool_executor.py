@@ -574,12 +574,18 @@ class ToolExecutor:
         aggregated_tool_results: list[dict[str, Any]] = []
         aggregated_tool_calls: list[dict[str, Any]] = []
 
+        # iteration_count: Used only for logging/debugging progress
+        # consecutive_errors: Checked to prevent error loops
+        #
+        # Note: iteration_count is NOT limited - model should work as long as needed
+        # for complex tasks. We only limit consecutive_errors to prevent infinite
+        # error loops (model repeatedly failing the same way).
         iteration_count = 0
-        consecutive_errors = 0  # Track consecutive errors, not total iterations
+        consecutive_errors = 0
 
         while True:
             iteration_count += 1
-            # Check for too many CONSECUTIVE errors, not iterations
+            # Check for too many CONSECUTIVE errors (not total iterations)
             if consecutive_errors >= self.MAX_ITERATIONS:
                 raise RuntimeError(
                     f"Maximum consecutive errors ({self.MAX_ITERATIONS}) reached. "
@@ -664,12 +670,18 @@ class ToolExecutor:
         bound_llm = self._bind_tools()
         conversation: list[BaseMessage] = list(messages)
 
+        # iteration_count: Used only for logging/debugging progress
+        # consecutive_errors: Checked to prevent error loops
+        #
+        # Note: iteration_count is NOT limited - model should work as long as needed
+        # for complex tasks. We only limit consecutive_errors to prevent infinite
+        # error loops (model repeatedly failing the same way).
         iteration_count = 0
-        consecutive_errors = 0  # Track consecutive errors, not total iterations
+        consecutive_errors = 0
 
         while True:
             iteration_count += 1
-            # Check for too many CONSECUTIVE errors, not iterations
+            # Check for too many CONSECUTIVE errors (not total iterations)
             if consecutive_errors >= self.MAX_ITERATIONS:
                 error_msg = (
                     f"Maximum consecutive errors ({self.MAX_ITERATIONS}) reached. "

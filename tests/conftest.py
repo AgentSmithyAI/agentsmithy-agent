@@ -19,18 +19,15 @@ def cleanup_background_tasks():
     yield
 
     # Clean up any background tasks that were created during the test
-    # Cancel any pending tasks to prevent "coroutine was never awaited" warnings
+    # Use public API for cleanup (prevents resource warnings in tests)
     try:
-        from agentsmithy.core.background_tasks import _background_manager
+        from agentsmithy.core.background_tasks import get_background_manager
 
-        if _background_manager is not None and _background_manager._tasks:
-            # Cancel all pending tasks
-            for task in list(_background_manager._tasks):
-                if not task.done():
-                    task.cancel()
-            _background_manager._tasks.clear()
+        manager = get_background_manager()
+        if manager.has_tasks:
+            manager.cancel_all()  # Synchronous cancellation for test cleanup
     except Exception:
-        # If background_manager doesn't exist or cleanup fails, ignore
+        # If cleanup fails, ignore (best effort)
         pass
 
 
