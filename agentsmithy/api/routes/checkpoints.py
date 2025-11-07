@@ -140,6 +140,30 @@ class FileChangeInfo(BaseModel):
     )
 
 
+def _create_file_change_info(change: dict) -> FileChangeInfo:
+    """Create FileChangeInfo from a change dictionary.
+
+    Helper function to avoid duplication when creating FileChangeInfo objects
+    from both committed and staged file changes.
+
+    Args:
+        change: Dictionary with file change information from tracker
+
+    Returns:
+        FileChangeInfo instance
+    """
+    return FileChangeInfo(
+        path=change["path"],
+        status=change["status"],
+        additions=change.get("additions", 0),
+        deletions=change.get("deletions", 0),
+        diff=change.get("diff"),
+        base_content=change.get("base_content"),
+        is_binary=change.get("is_binary", False),
+        is_too_large=change.get("is_too_large", False),
+    )
+
+
 class SessionStatusResponse(BaseModel):
     """Response with current session status."""
 
@@ -259,18 +283,7 @@ async def get_session_status(
                             "main", active_session, include_diff=True
                         )
                         for change in diff_changes:
-                            changed_files.append(
-                                FileChangeInfo(
-                                    path=change["path"],
-                                    status=change["status"],
-                                    additions=change["additions"],
-                                    deletions=change["deletions"],
-                                    diff=change.get("diff"),
-                                    base_content=change.get("base_content"),
-                                    is_binary=change.get("is_binary", False),
-                                    is_too_large=change.get("is_too_large", False),
-                                )
-                            )
+                            changed_files.append(_create_file_change_info(change))
                             changed_files_paths.add(change["path"])
                     except Exception as diff_err:
                         logger.debug(
@@ -292,18 +305,7 @@ async def get_session_status(
                     # Skip if file is already in committed changes
                     # (file is both committed and has additional staged changes)
                     if staged["path"] not in changed_files_paths:
-                        changed_files.append(
-                            FileChangeInfo(
-                                path=staged["path"],
-                                status=staged["status"],
-                                additions=staged.get("additions", 0),
-                                deletions=staged.get("deletions", 0),
-                                diff=staged.get("diff"),
-                                base_content=staged.get("base_content"),
-                                is_binary=staged.get("is_binary", False),
-                                is_too_large=staged.get("is_too_large", False),
-                            )
-                        )
+                        changed_files.append(_create_file_change_info(staged))
                         changed_files_paths.add(staged["path"])
             except Exception as staged_err:
                 logger.debug(

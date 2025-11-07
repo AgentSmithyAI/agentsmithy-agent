@@ -2299,7 +2299,7 @@ class VersioningTracker:
             Tuple of (additions, deletions)
         """
         additions, deletions, _ = self._diff_blobs_with_text(
-            repo, from_sha, to_sha, False
+            repo, from_sha, to_sha, False, "unknown"
         )
         return (additions, deletions)
 
@@ -2354,8 +2354,8 @@ class VersioningTracker:
             diff_gen = difflib.unified_diff(
                 from_lines,
                 to_lines,
-                fromfile=f"a/{path}" if path else "a/file",
-                tofile=f"b/{path}" if path else "b/file",
+                fromfile=f"a/{path}" if path else "a/unknown",
+                tofile=f"b/{path}" if path else "b/unknown",
                 lineterm="",
             )
             diff_lines = list(diff_gen)

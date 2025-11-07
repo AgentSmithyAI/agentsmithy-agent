@@ -640,18 +640,17 @@ class ToolExecutor:
                     # Tool succeeded - reset error counter
                     consecutive_errors = 0
 
-                # Check if tool output should be aggregated/persisted
-                is_ephemeral = self._is_ephemeral_tool(name)
-                if not is_ephemeral:
-                    aggregated_tool_results.append({"name": name, "result": result})
-                    aggregated_tool_calls.append({"name": name, "args": args})
-
                 # Store result and create reference
                 tool_call_id = call.get("id", "") or f"call_{uuid.uuid4().hex[:8]}"
 
                 tool_message, is_ephemeral = await self._build_tool_message(
                     tool_call_id, name, args, result
                 )
+
+                # Check if tool output should be aggregated/persisted
+                if not is_ephemeral:
+                    aggregated_tool_results.append({"name": name, "result": result})
+                    aggregated_tool_calls.append({"name": name, "args": args})
                 # Persist to history only if non-ephemeral and storage path built with reference
                 if not is_ephemeral and self._tool_results_storage:
                     self._append_tool_message_to_history(tool_message)
@@ -777,8 +776,7 @@ class ToolExecutor:
                 # Persist usage using helper
                 self._persist_usage(last_usage or {})
                 # Stream might have already yielded all content chunks
-                # Reset error counter - model succeeded
-                consecutive_errors = 0
+                # Model succeeded (no need to reset error counter - exiting loop)
                 break
 
             # Create AI message with tool calls for conversation history
@@ -832,7 +830,6 @@ class ToolExecutor:
 
                     # Execute tool (tool_manager handles all tool exceptions centrally)
                     result = await self.tool_manager.run_tool(name, **args)
-                    is_ephemeral = self._is_ephemeral_tool(name)
 
                     # Check if tool execution returned an error
                     # tool_manager.run_tool() catches all exceptions and returns {"type": "tool_error"}
@@ -840,7 +837,6 @@ class ToolExecutor:
                         # Tool failed - this is recoverable, model can retry with different approach
                         # Do NOT send to SSE (not terminal), only log and add to conversation
                         consecutive_errors += 1  # Increment error counter
-                        error_msg = f"Tool '{name}' failed: {result.get('error', 'Unknown error')}"
                         agent_logger.error(
                             "Tool execution error (recoverable)",
                             tool_name=name,
@@ -905,7 +901,6 @@ class ToolExecutor:
                     # Tool argument parsing failed - this is recoverable, model can retry with correct JSON
                     # Do NOT send to SSE (not terminal), only log and add to conversation
                     consecutive_errors += 1  # Increment error counter
-                    error_msg = f"Failed to parse tool arguments: {str(e)}"
                     agent_logger.error(
                         "Tool argument parse error (recoverable)",
                         tool_name=name,
@@ -918,7 +913,7 @@ class ToolExecutor:
                         "type": "tool_error",
                         "name": name,
                         "code": "args_parse_failed",
-                        "error": error_msg,
+                        "error": f"Failed to parse tool arguments: {str(e)}",
                         "error_type": "JSONDecodeError",
                     }
 
@@ -941,7 +936,6 @@ class ToolExecutor:
                     # This catches errors in _build_tool_message, storage, etc.
                     # If we can continue - it's recoverable, if not - it's terminal
                     consecutive_errors += 1  # Increment error counter
-                    error_msg = f"Error processing tool '{name}' result: {str(e)}"
                     agent_logger.error(
                         "Unexpected error in tool result processing (recoverable)",
                         tool_name=name,
