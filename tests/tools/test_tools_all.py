@@ -48,6 +48,11 @@ async def test_replace_in_file_basic(tmp_path: Path, monkeypatch):
     assert res["type"] == "replace_file_result"
     assert f.read_text(encoding="utf-8") == "def"
 
+    # Give background task time to schedule, then cleanup fixture will cancel it
+    import asyncio
+
+    await asyncio.sleep(0.05)
+
 
 async def test_list_files_hidden_flag(tmp_path: Path):
     (tmp_path / "x").mkdir()

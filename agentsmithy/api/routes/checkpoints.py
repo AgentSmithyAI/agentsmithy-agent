@@ -126,6 +126,42 @@ class FileChangeInfo(BaseModel):
         None,
         description="Unified diff of changes (null for binary files or new/deleted files)",
     )
+    base_content: str | None = Field(
+        None,
+        description="Content from base checkpoint (main). Null for added files, binary files, or files >1MB",
+    )
+    is_binary: bool = Field(
+        False,
+        description="Whether the file is binary",
+    )
+    is_too_large: bool = Field(
+        False,
+        description="Whether the file exceeds 1MB size limit",
+    )
+
+
+def _create_file_change_info(change: dict) -> FileChangeInfo:
+    """Create FileChangeInfo from a change dictionary.
+
+    Helper function to avoid duplication when creating FileChangeInfo objects
+    from both committed and staged file changes.
+
+    Args:
+        change: Dictionary with file change information from tracker
+
+    Returns:
+        FileChangeInfo instance
+    """
+    return FileChangeInfo(
+        path=change["path"],
+        status=change["status"],
+        additions=change.get("additions", 0),
+        deletions=change.get("deletions", 0),
+        diff=change.get("diff"),
+        base_content=change.get("base_content"),
+        is_binary=change.get("is_binary", False),
+        is_too_large=change.get("is_too_large", False),
+    )
 
 
 class SessionStatusResponse(BaseModel):
@@ -221,30 +257,8 @@ async def get_session_status(
         changed_files: list[FileChangeInfo] = []
         changed_files_paths = set()  # Track paths to avoid duplicates
 
-        # Check staged (prepared) changes first
-        if tracker.has_staged_changes():
-            has_unapproved = True
-
-            # Get staged files and add to changed_files
-            try:
-                staged_files = tracker.get_staged_files(active_session)
-                for staged in staged_files:
-                    changed_files.append(
-                        FileChangeInfo(
-                            path=staged["path"],
-                            status=staged["status"],
-                            additions=0,  # Can't calculate for staged-only files
-                            deletions=0,
-                            diff=None,  # Can't generate diff for uncommitted changes
-                        )
-                    )
-                    changed_files_paths.add(staged["path"])
-            except Exception as staged_err:
-                logger.debug(
-                    "Failed to get staged files",
-                    dialog_id=dialog_id,
-                    error=str(staged_err),
-                )
+        # IMPORTANT: Process committed changes FIRST, then staged-only changes
+        # This ensures committed files show real diff stats, not additions=0
 
         # Check committed but unapproved changes (session vs main)
         if tracker.MAIN_BRANCH in repo.refs:
@@ -269,25 +283,39 @@ async def get_session_status(
                             "main", active_session, include_diff=True
                         )
                         for change in diff_changes:
-                            # Skip if already added as staged file (avoid duplicates)
-                            if change["path"] not in changed_files_paths:
-                                changed_files.append(
-                                    FileChangeInfo(
-                                        path=change["path"],
-                                        status=change["status"],
-                                        additions=change["additions"],
-                                        deletions=change["deletions"],
-                                        diff=change.get("diff"),
-                                    )
-                                )
-                                # Add to set for robust deduplication
-                                changed_files_paths.add(change["path"])
+                            changed_files.append(_create_file_change_info(change))
+                            changed_files_paths.add(change["path"])
                     except Exception as diff_err:
                         logger.debug(
                             "Failed to calculate file diff",
                             dialog_id=dialog_id,
                             error=str(diff_err),
                         )
+
+        # Check staged (prepared) changes - add only if NOT already in committed list
+        if tracker.has_staged_changes():
+            has_unapproved = True
+
+            # Get staged files with diff information
+            try:
+                staged_files = tracker.get_staged_files(
+                    active_session, include_diff=True
+                )
+                for staged in staged_files:
+                    # Skip if file is already in committed changes
+                    # (file is both committed and has additional staged changes)
+                    if staged["path"] not in changed_files_paths:
+                        changed_files.append(_create_file_change_info(staged))
+                        changed_files_paths.add(staged["path"])
+            except Exception as staged_err:
+                logger.debug(
+                    "Failed to get staged files",
+                    dialog_id=dialog_id,
+                    error=str(staged_err),
+                )
+
+        # Sort changed files by path for consistent display order
+        changed_files.sort(key=lambda f: f.path)
 
         # Get last approved timestamp from dialog metadata
         last_approved_at = None

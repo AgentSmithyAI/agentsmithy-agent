@@ -9,6 +9,28 @@ import pytest
 from agentsmithy.core.project import Project
 
 
+@pytest.fixture(autouse=True)
+def cleanup_background_tasks():
+    """Clean up background tasks after each test to prevent resource warnings.
+
+    This prevents warnings about unawaited coroutines when tests use
+    TestClient (sync) which closes event loop before background tasks start.
+    """
+    yield
+
+    # Clean up any background tasks that were created during the test
+    # Use public API for cleanup (prevents resource warnings in tests)
+    try:
+        from agentsmithy.core.background_tasks import get_background_manager
+
+        manager = get_background_manager()
+        if manager.has_tasks:
+            manager.cancel_all()  # Synchronous cancellation for test cleanup
+    except Exception:
+        # If cleanup fails, ignore (best effort)
+        pass
+
+
 @pytest.fixture
 def temp_project():
     """Create a temporary project for testing.

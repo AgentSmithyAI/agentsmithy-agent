@@ -37,7 +37,8 @@ async def failing_stream_after_reasoning():
     # Then yield error event (like tool_executor does)
     yield {"type": "error", "error": "LLM error: "}
 
-    # Generator ends here (like tool_executor does with return after error)
+    # Yield DONE event (tool_executor now yields this after ERROR)
+    yield {"type": "done"}
 
 
 @pytest.mark.asyncio
@@ -160,6 +161,8 @@ async def test_error_with_empty_message_followed_by_done(temp_project):
         yield {"type": "chat", "content": "Starting..."}
         # Empty error message like in real logs
         yield {"type": "error", "error": ""}
+        # Yield DONE event (tool_executor now yields this after ERROR)
+        yield {"type": "done"}
 
     mock_orchestrator = MagicMock()
     mock_graph_execution = MagicMock()

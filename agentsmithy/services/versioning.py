@@ -530,11 +530,26 @@ class VersioningTracker:
         Staged files will be included in next checkpoint regardless of ignore patterns.
 
         Args:
-            file_path: Path to file relative to project root
+            file_path: Path to file (can be absolute or relative to project root)
         """
         try:
             repo = self.ensure_repo()
-            abs_path = self.project_root / file_path
+
+            # Normalize path: convert to Path and make relative to project_root
+            file_path_obj = Path(file_path)
+            if file_path_obj.is_absolute():
+                # Convert absolute path to relative
+                try:
+                    rel_path = file_path_obj.relative_to(self.project_root)
+                    normalized_path = str(rel_path)
+                except ValueError:
+                    # Path is outside project_root - use as-is (will likely fail)
+                    normalized_path = file_path
+            else:
+                # Already relative
+                normalized_path = file_path
+
+            abs_path = self.project_root / normalized_path
 
             if not abs_path.exists():
                 return
@@ -568,8 +583,9 @@ class VersioningTracker:
                 flags=0,
             )
 
-            # Add entry to index
-            index[file_path.encode("utf-8")] = entry
+            # IMPORTANT: Always use normalized relative path in index
+            # This prevents duplicate entries with absolute/relative paths
+            index[normalized_path.encode("utf-8")] = entry
             index.write()
 
         except Exception as e:
@@ -577,6 +593,49 @@ class VersioningTracker:
             from agentsmithy.utils.logger import agent_logger
 
             agent_logger.debug("Failed to stage file", file=file_path, error=str(e))
+
+    def stage_file_deletion(self, file_path: str) -> None:
+        """Stage file deletion in git index.
+
+        This is equivalent to 'git rm' - removes file from staging area.
+        The deletion will be included in next checkpoint.
+
+        Args:
+            file_path: Path to deleted file (can be absolute or relative to project root)
+        """
+        try:
+            repo = self.ensure_repo()
+
+            # Normalize path: convert to Path and make relative to project_root
+            file_path_obj = Path(file_path)
+            if file_path_obj.is_absolute():
+                # Convert absolute path to relative
+                try:
+                    rel_path = file_path_obj.relative_to(self.project_root)
+                    normalized_path = str(rel_path)
+                except ValueError:
+                    # Path is outside project_root - skip
+                    return
+            else:
+                # Already relative
+                normalized_path = file_path
+
+            # Remove from git index (staging area)
+            index = repo.open_index()
+            path_bytes = normalized_path.encode("utf-8")
+
+            # Only remove if file exists in index
+            if path_bytes in index:
+                del index[path_bytes]
+                index.write()
+
+        except Exception as e:
+            # Best effort - don't fail if staging fails
+            from agentsmithy.utils.logger import agent_logger
+
+            agent_logger.debug(
+                "Failed to stage file deletion", file=file_path, error=str(e)
+            )
 
     def track_file_change(self, file_path: str, operation: str) -> None:
         """Track a file change within the current transaction.
@@ -711,14 +770,57 @@ class VersioningTracker:
             )
             if tree_entry and len(tree_entry) == 2:
                 _mode, existing_blob_sha = tree_entry
-                # Quick heuristic: check if file size matches blob size
-                # Note: this is not a guarantee of equality (size collision possible),
-                # but it's a fast optimization to avoid reading large files
+
+                # Fast check: compare file size first
                 existing_blob = project_git_repo[existing_blob_sha]
-                file_size = file_path.stat().st_size
-                if len(existing_blob.data) == file_size:
-                    # File likely unchanged based on size, reuse blob (no file read!)
+                stat_info = file_path.stat()
+                file_size = stat_info.st_size
+
+                if len(existing_blob.data) != file_size:
+                    # Size mismatch - file changed, cannot reuse
+                    return None
+
+                # Optimization: Check mtime before reading file
+                # If file hasn't been modified recently, likely unchanged
+                try:
+                    # Get commit time of existing blob from project git
+                    # Walk commits to find when this file was last committed
+                    import time
+
+                    current_time = time.time()
+                    file_mtime = stat_info.st_mtime
+
+                    # Heuristic: if file was modified more than 1 second ago and size matches,
+                    # very likely unchanged (git operations usually complete within 1s)
+                    # This catches the common case of "just committed, immediately creating checkpoint"
+                    if current_time - file_mtime > 1.0:
+                        # File hasn't been touched recently, size matches -> assume unchanged
+                        return existing_blob
+                except Exception:
+                    # mtime check failed, fallback to hash verification
+                    pass
+
+                # Size matches but file was recently modified - verify content hash to avoid size collisions
+                # (files can have same size but different content, e.g. after formatting)
+                #
+                # Use streaming hash calculation to avoid loading entire file into memory
+                import hashlib
+
+                # Git blob hash format: "blob {size}\0{content}"
+                hasher = hashlib.sha1()
+                hasher.update(f"blob {file_size}\0".encode())
+
+                # Read file in chunks (1MB at a time)
+                with open(file_path, "rb") as f:
+                    while chunk := f.read(1048576):  # 1MB chunks
+                        hasher.update(chunk)
+
+                computed_sha = hasher.digest()
+
+                if computed_sha == existing_blob_sha:
+                    # Content hash matches - file unchanged, reuse blob
                     return existing_blob
+                # else: size collision - file changed despite same size, fallthrough to create new
         except (KeyError, FileNotFoundError, AttributeError):
             # File not in project git or lookup failed
             pass
@@ -1534,21 +1636,40 @@ class VersioningTracker:
         except (FileNotFoundError, OSError):
             return False
 
-    def get_staged_files(self, session_name: str = "session_1") -> list[dict[str, Any]]:
+    def get_staged_files(
+        self, session_name: str = "session_1", include_diff: bool = False
+    ) -> list[dict[str, Any]]:
         """Get list of staged files with their status.
 
         Returns files in the index (staged) that haven't been committed yet.
         Compares index against HEAD (current session) to determine status.
 
+        Args:
+            session_name: Name of the session to compare against
+            include_diff: If True, include additions/deletions/diff/base_content for each file
+
         Returns:
-            List of dicts with keys: path, status (added/modified/deleted)
+            List of dicts with keys:
+            - path: File path relative to project root
+            - status: FileChangeStatus enum value (added, modified, deleted)
+            If include_diff=True, also includes:
+            - additions: Number of lines added
+            - deletions: Number of lines deleted
+            - diff: Unified diff text (None for binary/added files)
+            - base_content: Text content from HEAD (None for added/binary/large files)
+            - is_binary: True if file is binary
+            - is_too_large: True if file exceeds 1MB size limit
             Empty list if no staged changes or on error.
         """
         repo = self.ensure_repo()
         try:
-            index = repo.open_index()
-            if not index:
-                return []
+            # Try to open index (may not exist or be empty)
+            index = None
+            try:
+                index = repo.open_index()
+            except (FileNotFoundError, OSError):
+                # No index file - will process only workdir changes
+                pass
 
             # Get HEAD tree to compare against
             session_ref = self._get_session_ref(session_name)
@@ -1578,33 +1699,166 @@ class VersioningTracker:
 
             head_files = collect_head_files(cast(Tree, head_tree))
 
-            # Process staged files
+            # Process staged files (in index)
             staged: list[dict[str, Any]] = []
-            for path_bytes, entry in index.items():
-                path = path_bytes.decode("utf-8")
+            if index is not None:
+                for path_bytes, entry in index.items():
+                    path = path_bytes.decode("utf-8")
 
-                # Skip conflicted entries
-                if not hasattr(entry, "sha"):
-                    continue
+                    # Skip conflicted entries
+                    if not hasattr(entry, "sha"):
+                        continue
 
-                staged_sha = entry.sha
+                    staged_sha = entry.sha
 
-                if path in head_files:
-                    # File exists in HEAD
-                    if head_files[path] != staged_sha:
-                        # Different SHA = modified
-                        staged.append(
-                            {"path": path, "status": FileChangeStatus.MODIFIED.value}
+                    if path in head_files:
+                        # File exists in HEAD
+                        if head_files[path] != staged_sha:
+                            # Different SHA = modified
+                            file_info: dict[str, Any] = {
+                                "path": path,
+                                "status": FileChangeStatus.MODIFIED.value,
+                            }
+
+                            if include_diff:
+                                # Calculate diff between HEAD and staged
+                                additions, deletions, diff_text = (
+                                    self._diff_blobs_with_text(
+                                        repo, head_files[path], staged_sha, True, path
+                                    )
+                                )
+                                # Extract base content from HEAD
+                                base_content, is_binary, is_too_large = (
+                                    self._extract_blob_content(repo, head_files[path])
+                                )
+                                file_info["additions"] = additions
+                                file_info["deletions"] = deletions
+                                file_info["diff"] = diff_text
+                                file_info["base_content"] = base_content
+                                file_info["is_binary"] = is_binary
+                                file_info["is_too_large"] = is_too_large
+                            else:
+                                file_info["additions"] = 0
+                                file_info["deletions"] = 0
+                                file_info["diff"] = None
+                                file_info["base_content"] = None
+                                file_info["is_binary"] = False
+                                file_info["is_too_large"] = False
+
+                            staged.append(file_info)
+                        # Same SHA = no change (shouldn't be in index, but handle it)
+                    else:
+                        # File not in HEAD = added (no base content)
+                        file_info = {
+                            "path": path,
+                            "status": FileChangeStatus.ADDED.value,
+                        }
+
+                        if include_diff:
+                            # Calculate lines in added file
+                            # _count_lines returns (lines, 0), we only need the first value
+                            additions, _ = self._count_lines(repo, staged_sha)
+                            file_info["additions"] = additions
+                            file_info["deletions"] = 0
+                            file_info["diff"] = None  # Don't include full content
+                            file_info["base_content"] = None  # File didn't exist
+                            file_info["is_binary"] = False
+                            file_info["is_too_large"] = False
+                        else:
+                            file_info["additions"] = 0
+                            file_info["deletions"] = 0
+                            file_info["diff"] = None
+                            file_info["base_content"] = None
+                            file_info["is_binary"] = False
+                            file_info["is_too_large"] = False
+
+                        staged.append(file_info)
+
+            # Handle deleted files (in HEAD but not in workdir and not in index)
+            # This catches files that were removed from disk but not staged for deletion
+            import os
+
+            # Collect current files in working directory
+            current_workdir_files: set[str] = set()
+            ignore_spec = self._get_ignore_spec()
+
+            for root, dirs, files in os.walk(self.project_root):
+                root_path = Path(root)
+                rel_root = (
+                    root_path.relative_to(self.project_root)
+                    if root_path != self.project_root
+                    else Path(".")
+                )
+
+                # Filter directories
+                filtered_dirs = []
+                for d in dirs:
+                    # Skip .agentsmithy directory
+                    if d == ".agentsmithy":
+                        continue
+
+                    dir_rel_path = (rel_root / d) if rel_root != Path(".") else Path(d)
+                    dir_path_str = str(dir_rel_path).replace("\\", "/")
+                    if ignore_spec.match_file(dir_path_str):
+                        continue
+                    filtered_dirs.append(d)
+
+                dirs[:] = filtered_dirs
+
+                for filename in files:
+                    file_path = Path(root) / filename
+                    file_rel_path = file_path.relative_to(self.project_root)
+                    file_path_str = str(file_rel_path).replace("\\", "/")
+
+                    if ignore_spec.match_file(file_path_str):
+                        continue
+
+                    current_workdir_files.add(file_path_str)
+
+            # Collect files currently in index
+            index_files: set[str] = set()
+            if index is not None:
+                index_files = set(
+                    path_bytes.decode("utf-8") for path_bytes, _ in index.items()
+                )
+
+            # Find deleted files: in HEAD but not in workdir and not in index
+            # (if file is in index, it's already handled above as modified/added)
+            for head_path in head_files.keys():
+                if (
+                    head_path not in current_workdir_files
+                    and head_path not in index_files
+                ):
+                    # File was deleted from workdir but deletion not staged
+                    file_info = {
+                        "path": head_path,
+                        "status": FileChangeStatus.DELETED.value,
+                    }
+
+                    if include_diff:
+                        # Get base content and line count
+                        # _count_lines returns (lines, 0), but for deleted files we need (0, lines)
+                        lines, _ = self._count_lines(repo, head_files[head_path])
+                        base_content, is_binary, is_too_large = (
+                            self._extract_blob_content(repo, head_files[head_path])
                         )
-                    # Same SHA = no change (shouldn't be in index, but handle it)
-                else:
-                    # File not in HEAD = added
-                    staged.append(
-                        {"path": path, "status": FileChangeStatus.ADDED.value}
-                    )
+                        file_info["additions"] = 0
+                        file_info["deletions"] = lines  # Number of lines deleted
+                        file_info["diff"] = (
+                            None  # Don't include full content for deleted files
+                        )
+                        file_info["base_content"] = base_content
+                        file_info["is_binary"] = is_binary
+                        file_info["is_too_large"] = is_too_large
+                    else:
+                        file_info["additions"] = 0
+                        file_info["deletions"] = 0
+                        file_info["diff"] = None
+                        file_info["base_content"] = None
+                        file_info["is_binary"] = False
+                        file_info["is_too_large"] = False
 
-            # TODO: Handle deleted files (in HEAD but not in index)
-            # For now, deleted files are detected by workdir scan
+                    staged.append(file_info)
 
             return staged
 
@@ -1893,8 +2147,15 @@ class VersioningTracker:
             include_diff: Whether to include unified diff text (default: True)
 
         Returns:
-            List of dicts with keys: path, status, additions, deletions, diff (optional)
-            Status values: FileChangeStatus enum (added, modified, deleted)
+            List of dicts with keys:
+            - path: File path relative to project root
+            - status: FileChangeStatus enum value (added, modified, deleted)
+            - additions: Number of lines added
+            - deletions: Number of lines deleted
+            - diff: Unified diff text (None for binary/added/deleted files)
+            - base_content: Text content from from_ref (None for added/binary/large files)
+            - is_binary: True if file is binary
+            - is_too_large: True if file exceeds 1MB size limit
         """
         repo = self.ensure_repo()
 
@@ -1937,31 +2198,45 @@ class VersioningTracker:
                 path_str = path_bytes.decode("utf-8")
 
                 if change.type == CHANGE_ADD and change.new:
-                    # File added
-                    additions, deletions = self._count_lines(repo, change.new.sha)
+                    # File added - no base content (file didn't exist in main)
+                    # _count_lines returns (lines, 0), we only need the first value
+                    additions, _ = self._count_lines(repo, change.new.sha)
                     change_dict = {
                         "path": path_str,
                         "status": FileChangeStatus.ADDED.value,
                         "additions": additions,
                         "deletions": 0,
                         "diff": None,  # Don't include full content for new files
+                        "base_content": None,  # File didn't exist in base
+                        "is_binary": False,
+                        "is_too_large": False,
                     }
                     changes.append(change_dict)
                 elif change.type == CHANGE_DELETE and change.old:
-                    # File deleted
-                    additions, deletions = self._count_lines(repo, change.old.sha)
+                    # File deleted - provide base content so client can show what was deleted
+                    # _count_lines returns (lines, 0), so use first value for deletion count
+                    lines, _ = self._count_lines(repo, change.old.sha)
+                    base_content, is_binary, is_too_large = self._extract_blob_content(
+                        repo, change.old.sha
+                    )
                     change_dict = {
                         "path": path_str,
                         "status": FileChangeStatus.DELETED.value,
                         "additions": 0,
-                        "deletions": deletions,
+                        "deletions": lines,  # Use lines (first value), not second value which is always 0
                         "diff": None,  # Don't include full content for deleted files
+                        "base_content": base_content,
+                        "is_binary": is_binary,
+                        "is_too_large": is_too_large,
                     }
                     changes.append(change_dict)
                 elif change.type == CHANGE_MODIFY and change.old and change.new:
-                    # File modified
+                    # File modified - extract base content from main/from_ref
                     additions, deletions, diff_text = self._diff_blobs_with_text(
-                        repo, change.old.sha, change.new.sha, include_diff
+                        repo, change.old.sha, change.new.sha, include_diff, path_str
+                    )
+                    base_content, is_binary, is_too_large = self._extract_blob_content(
+                        repo, change.old.sha
                     )
                     change_dict = {
                         "path": path_str,
@@ -1969,6 +2244,9 @@ class VersioningTracker:
                         "additions": additions,
                         "deletions": deletions,
                         "diff": diff_text if include_diff else None,
+                        "base_content": base_content,
+                        "is_binary": is_binary,
+                        "is_too_large": is_too_large,
                     }
                     changes.append(change_dict)
 
@@ -1999,6 +2277,50 @@ class VersioningTracker:
         except Exception:
             return (0, 0)
 
+    def _extract_blob_content(
+        self, repo: Repo, blob_sha: bytes | None
+    ) -> tuple[str | None, bool, bool]:
+        """Extract content from blob with binary and size checks.
+
+        Args:
+            repo: Git repository
+            blob_sha: Blob SHA to extract content from
+
+        Returns:
+            Tuple of (content, is_binary, is_too_large)
+            - content: Text content (None if binary or too large or missing)
+            - is_binary: True if file is binary
+            - is_too_large: True if file exceeds 1MB
+        """
+        if not blob_sha:
+            return (None, False, False)
+
+        try:
+            blob_obj = repo[blob_sha]
+            if not isinstance(blob_obj, Blob):
+                return (None, False, False)
+
+            content = blob_obj.data
+
+            # Check if binary (look for null bytes in first 8KB)
+            if b"\x00" in content[:8192]:
+                return (None, True, False)
+
+            # Check size limit (1MB = 1048576 bytes)
+            if len(content) > 1048576:
+                return (None, False, True)
+
+            # Try to decode as UTF-8
+            try:
+                text_content = content.decode("utf-8")
+                return (text_content, False, False)
+            except UnicodeDecodeError:
+                # Can't decode as UTF-8, treat as binary
+                return (None, True, False)
+
+        except Exception:
+            return (None, False, False)
+
     def _diff_blobs(
         self, repo: Repo, from_sha: bytes, to_sha: bytes
     ) -> tuple[int, int]:
@@ -2008,14 +2330,26 @@ class VersioningTracker:
             Tuple of (additions, deletions)
         """
         additions, deletions, _ = self._diff_blobs_with_text(
-            repo, from_sha, to_sha, False
+            repo, from_sha, to_sha, False, "unknown"
         )
         return (additions, deletions)
 
     def _diff_blobs_with_text(
-        self, repo: Repo, from_sha: bytes, to_sha: bytes, include_text: bool
+        self,
+        repo: Repo,
+        from_sha: bytes,
+        to_sha: bytes,
+        include_text: bool,
+        path: str | None = None,
     ) -> tuple[int, int, str | None]:
         """Calculate additions/deletions and optionally get diff text between two blobs.
+
+        Args:
+            repo: Git repository
+            from_sha: SHA of source blob
+            to_sha: SHA of target blob
+            include_text: Whether to include diff text
+            path: Optional file path for unified diff headers
 
         Returns:
             Tuple of (additions, deletions, diff_text)
@@ -2047,7 +2381,14 @@ class VersioningTracker:
             from_lines = from_text.splitlines(keepends=True)
             to_lines = to_text.splitlines(keepends=True)
 
-            diff_gen = difflib.unified_diff(from_lines, to_lines, lineterm="")
+            # Generate unified diff with proper file headers for client compatibility
+            diff_gen = difflib.unified_diff(
+                from_lines,
+                to_lines,
+                fromfile=f"a/{path}" if path else "a/unknown",
+                tofile=f"b/{path}" if path else "b/unknown",
+                lineterm="",
+            )
             diff_lines = list(diff_gen)
 
             additions = 0
@@ -2058,7 +2399,8 @@ class VersioningTracker:
                 elif line.startswith("-") and not line.startswith("---"):
                     deletions += 1
 
-            diff_text = "".join(diff_lines) if include_text and diff_lines else None
+            # Join with newlines to create proper unified diff format
+            diff_text = "\n".join(diff_lines) if include_text and diff_lines else None
 
             return (additions, deletions, diff_text)
 
