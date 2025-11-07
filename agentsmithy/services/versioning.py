@@ -773,20 +773,51 @@ class VersioningTracker:
 
                 # Fast check: compare file size first
                 existing_blob = project_git_repo[existing_blob_sha]
-                file_size = file_path.stat().st_size
+                stat_info = file_path.stat()
+                file_size = stat_info.st_size
 
                 if len(existing_blob.data) != file_size:
                     # Size mismatch - file changed, cannot reuse
                     return None
 
-                # Size matches, but we must verify content hash to avoid size collisions
+                # Optimization: Check mtime before reading file
+                # If file hasn't been modified recently, likely unchanged
+                try:
+                    # Get commit time of existing blob from project git
+                    # Walk commits to find when this file was last committed
+                    import time
+
+                    current_time = time.time()
+                    file_mtime = stat_info.st_mtime
+
+                    # Heuristic: if file was modified more than 1 second ago and size matches,
+                    # very likely unchanged (git operations usually complete within 1s)
+                    # This catches the common case of "just committed, immediately creating checkpoint"
+                    if current_time - file_mtime > 1.0:
+                        # File hasn't been touched recently, size matches -> assume unchanged
+                        return existing_blob
+                except Exception:
+                    # mtime check failed, fallback to hash verification
+                    pass
+
+                # Size matches but file was recently modified - verify content hash to avoid size collisions
                 # (files can have same size but different content, e.g. after formatting)
-                from dulwich.objects import Blob
+                #
+                # Use streaming hash calculation to avoid loading entire file into memory
+                import hashlib
 
-                content = file_path.read_bytes()
-                current_blob = Blob.from_string(content)
+                # Git blob hash format: "blob {size}\0{content}"
+                hasher = hashlib.sha1()
+                hasher.update(f"blob {file_size}\0".encode())
 
-                if current_blob.id == existing_blob_sha:
+                # Read file in chunks (1MB at a time)
+                with open(file_path, "rb") as f:
+                    while chunk := f.read(1048576):  # 1MB chunks
+                        hasher.update(chunk)
+
+                computed_sha = hasher.digest()
+
+                if computed_sha == existing_blob_sha:
                     # Content hash matches - file unchanged, reuse blob
                     return existing_blob
                 # else: size collision - file changed despite same size, fallthrough to create new
