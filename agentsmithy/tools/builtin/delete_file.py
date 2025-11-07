@@ -86,7 +86,7 @@ class DeleteFileTool(BaseTool):
             # Stage file deletion for checkpoint tracking (agent deleted this file)
             try:
                 rel_path_obj = file_path.relative_to(project_root)
-                tracker.stage_file(str(rel_path_obj))
+                tracker.stage_file_deletion(str(rel_path_obj))
             except Exception:
                 pass  # Best effort
 

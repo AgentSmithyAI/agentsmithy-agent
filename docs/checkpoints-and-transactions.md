@@ -168,6 +168,50 @@ GET /api/dialogs/{dialog_id}/history?limit=20
 - `session` - Session name when checkpoint was created (e.g., "session_1", "session_2")
 - Session changes after each approve operation
 
+## Checkpoints API
+
+### List All Checkpoints
+
+```http
+GET /api/dialogs/{dialog_id}/checkpoints
+```
+
+Get all checkpoints for a dialog in chronological order.
+
+**Response:**
+```json
+{
+  "dialog_id": "abc123",
+  "checkpoints": [
+    {
+      "commit_id": "a1b2c3d4e5f6789abc",
+      "message": "Before user message: Create TODO app"
+    },
+    {
+      "commit_id": "b2c3d4e5f6789abc12",
+      "message": "Before user message: Add authentication"
+    },
+    {
+      "commit_id": "c3d4e5f6789abc123",
+      "message": "Before user message: Add tests"
+    }
+  ],
+  "initial_checkpoint": "a1b2c3d4e5f6789abc"
+}
+```
+
+**Fields:**
+- `dialog_id` - Dialog identifier
+- `checkpoints` - Array of all checkpoints in chronological order (oldest first)
+  - `commit_id` - Full commit SHA for the checkpoint
+  - `message` - Human-readable checkpoint message
+- `initial_checkpoint` - ID of the very first checkpoint (snapshot before any AI changes)
+
+**Use cases:**
+- Display checkpoint history in UI
+- Allow user to browse and restore to any checkpoint
+- Show when the initial snapshot was created
+
 ## Session Management API
 
 ### Get Session Status
@@ -550,13 +594,53 @@ All files matching these patterns will be excluded from checkpoints.
 
 ### Hardcoded Exclusions
 
-In addition to `.gitignore`, the following are always excluded:
+In addition to `.gitignore`, the following are always excluded from checkpoints:
 
-- **Hidden files and directories:** anything starting with `.`
-- **Build artifacts:** `dist/`, `build/`, `target/`
-- **Dependencies:** `node_modules/`, `venv/`, `.venv/`, `__pycache__/`
-- **Binary files:** `*.pyc`, `*.pyo`, `*.so`, `*.dylib`, `*.dll`
-- **AgentSmithy state:** `.agentsmithy/`
+**AgentSmithy state:**
+- `.agentsmithy/` - internal state and checkpoints
+- `chroma_db/` - RAG vector store
+
+**Version control:**
+- `.git/`, `.svn/`, `.hg/`
+
+**Python:**
+- `.venv/`, `venv/`, `env/`, `.env/` - virtual environments
+- `__pycache__/`, `*.pyc`, `*.pyo`, `*.pyd` - bytecode
+- `.pytest_cache/`, `.mypy_cache/`, `.ruff_cache/`, `.tox/`
+- `.coverage`, `coverage/`, `htmlcov/` - test coverage
+- `*.egg-info/`, `dist/`, `build/`, `.eggs/`
+- `.ipynb_checkpoints/`, `.hypothesis/`, `.nox/`, `.benchmarks/`
+
+**JavaScript/TypeScript:**
+- `node_modules/` - dependencies
+- `.next/`, `.nuxt/`, `.cache/`, `.parcel-cache/`
+- `dist/`, `build/`, `out/`, `.output/`
+- `coverage/`, `.nyc_output/`
+
+**Rust:**
+- `target/` - build output
+- `Cargo.lock` - only for libraries
+
+**Go:**
+- `vendor/` - dependencies
+
+**C/C++:**
+- `*.o`, `*.a`, `*.so`, `*.dylib`, `*.dll`, `*.exe`
+
+**Java:**
+- `target/`, `build/` - build output
+- `*.class`, `*.jar`, `*.war`
+
+**IDEs and editors:**
+- `.idea/`, `.vscode/`, `*.swp`, `*.swo`, `.DS_Store`
+
+**Logs:**
+- `*.log`, `logs/`, `npm-debug.log*`, `yarn-debug.log*`
+
+**OS:**
+- `.DS_Store`, `Thumbs.db`, `desktop.ini`
+
+See `DEFAULT_EXCLUDES` in `agentsmithy/services/versioning.py` for the complete list.
 
 ### Benefits
 
@@ -633,6 +717,251 @@ User resets to Checkpoint 1:
 - Automatically cleared after checkpoint/restore
 
 **Rationale:** If agent explicitly calls `write_file(".venv/config.py")`, it's intentional (not an artifact), so it should be included in checkpoints despite matching ignore patterns.
+
+## File Change Scenarios
+
+This section covers all scenarios of file creation, modification, and deletion, and how the system handles each case.
+
+### File Operation Methods
+
+Files can be changed in two ways:
+
+1. **Via agent tools** - `write_file`, `replace_in_file`, `delete_file`
+2. **Via commands or user** - `run_command` with `rm`, manual edits, shell operations
+
+The key difference: **Tool operations stage files to Git index, command operations don't.**
+
+### Scenario 1: File Created via Tool
+
+```python
+write_file("app.py", content)
+```
+
+**What happens:**
+1. File written to disk
+2. `tracker.stage_file("app.py")` - added to Git index (staging area)
+3. **Before checkpoint:** `get_staged_files()` shows `status: "added"`
+4. **Checkpoint created:** File scanned from workdir + merged from index → included in checkpoint
+5. **Restore:** File will be deleted if not in target checkpoint
+
+**Edge case (ignored files):**
+```python
+write_file(".venv/config.py", content)  # .venv/ in .gitignore
+```
+- Staging ensures file is included despite .gitignore
+- Without staging, file would be skipped by workdir scan
+
+### Scenario 2: File Created via Command
+
+```bash
+run_command("echo 'test' > temp.txt")
+```
+
+**What happens:**
+1. File written to disk by command
+2. **NOT staged** (command tools don't call tracker methods)
+3. **Before checkpoint:** `get_staged_files()` shows `status: "added"` (detected by workdir scan vs HEAD)
+4. **Checkpoint created:** File found by workdir scan → included in checkpoint
+5. **Restore:** File will be deleted if not in target checkpoint
+
+**Edge case (ignored files):**
+```bash
+run_command("mkdir .venv && echo 'config' > .venv/config.py")
+```
+- ❌ **Will NOT be included in checkpoint** (matches .gitignore)
+- This is expected behavior - we don't track artifacts created by commands
+- Only agent-explicit file creation (via tools) forces inclusion
+
+### Scenario 3: File Modified via Tool
+
+```python
+replace_in_file("main.py", old, new)
+```
+
+**What happens:**
+1. File modified on disk
+2. `tracker.stage_file("main.py")` - updated in Git index
+3. **Before checkpoint:** `get_staged_files()` shows `status: "modified"` with diff
+4. **Checkpoint created:** Modified content included
+5. **Restore:** File reverted to target checkpoint version
+
+### Scenario 4: File Modified via Command
+
+```bash
+run_command("sed -i 's/old/new/g' main.py")
+```
+
+**What happens:**
+1. File modified by command
+2. **NOT staged**
+3. **Before checkpoint:** `get_staged_files()` - file **NOT shown** (not in index, but see below)
+4. **Checkpoint created:** Modified content detected by workdir scan → included
+5. **Restore:** File reverted to target checkpoint version
+
+**Important:** Modified files created by commands are detected during checkpoint creation (workdir scan), but NOT shown in `get_staged_files()` until checkpoint is created. After checkpoint, the change is visible as diff between checkpoints.
+
+### Scenario 5: File Deleted via Tool
+
+```python
+delete_file("old.py")
+```
+
+**What happens:**
+1. File removed from disk
+2. `tracker.stage_file_deletion("old.py")` - removed from Git index
+3. **Before checkpoint:** `get_staged_files()` shows `status: "deleted"` with base_content
+4. **Checkpoint created:** File absent from workdir + absent from index → NOT in checkpoint
+5. **Restore:** File will be restored if present in target checkpoint
+
+**Why stage_file_deletion needed:**
+- Only for edge case: file was staged (via tool) but then deleted before checkpoint
+- Example: `write_file("temp.py")` → `delete_file("temp.py")` → no checkpoint yet
+- Without staging deletion, file would remain in index and appear as "added" despite not existing
+
+### Scenario 6: File Deleted via Command
+
+```bash
+run_command("rm old.py")
+# or
+run_command("rm -rf src/")
+```
+
+**What happens:**
+1. File(s) removed from disk by command
+2. **NOT staged for deletion** (command tools don't call tracker)
+3. **Before checkpoint:** `get_staged_files()` shows `status: "deleted"` - detected by comparing HEAD vs workdir
+4. **Checkpoint created:** File absent from workdir scan → NOT in checkpoint
+5. **Restore:** File will be restored if present in target checkpoint
+
+**This works for:**
+- Single file deletion: `rm file.py`
+- Directory deletion: `rm -rf directory/`
+- Bulk operations: `find . -name "*.tmp" -delete`
+- Manual deletion by user
+
+**Detection mechanism:**
+```
+1. Get files from HEAD checkpoint
+2. Get files from working directory
+3. Diff: files in HEAD but not in workdir = deleted
+```
+
+### Session Status API
+
+`GET /api/dialogs/{id}/session` shows ALL changes before checkpoint creation:
+
+```json
+{
+  "changed_files": [
+    {
+      "path": "new.py",
+      "status": "added",
+      "additions": 42,
+      "deletions": 0
+    },
+    {
+      "path": "main.py",
+      "status": "modified",
+      "additions": 15,
+      "deletions": 3,
+      "diff": "unified diff...",
+      "base_content": "original content..."
+    },
+    {
+      "path": "old.py",
+      "status": "deleted",
+      "additions": 0,
+      "deletions": 28,
+      "base_content": "deleted file content..."
+    }
+  ]
+}
+```
+
+**What's included:**
+- ✅ Files staged via tools (in index)
+- ✅ Files created/deleted via commands (detected by workdir vs HEAD diff)
+- ❌ Files modified via commands (not detectable until checkpoint - workdir content doesn't have "previous version")
+
+### Checkpoint Creation
+
+When creating a checkpoint:
+
+1. **Scan working directory** - Find all non-ignored files
+2. **Merge staging area** - Add staged files even if ignored
+3. **Build tree** - Create Git tree with all files
+4. **Commit** - Save snapshot
+
+**Result:**
+- Created files: present in tree
+- Modified files: present with new content
+- Deleted files: **absent from tree** (automatically excluded)
+
+### Restore Process
+
+When restoring to a checkpoint:
+
+1. **Compare trees** - Diff current HEAD vs target checkpoint
+2. **Delete files** - Remove files present in HEAD but not in target
+3. **Restore files** - Write files from target checkpoint
+4. **Handle modified** - Overwrite with target versions
+
+**Examples:**
+
+```
+Checkpoint A: [main.py, utils.py, config.py]
+Checkpoint B: [main.py, utils.py]           # config.py deleted
+
+Restore A→B: Delete config.py
+Restore B→A: Restore config.py from checkpoint A tree
+```
+
+### What Can Go Wrong
+
+**Problem 1: Ignored files created via command**
+```bash
+run_command("mkdir build && echo 'output' > build/result.txt")
+```
+- ❌ `build/result.txt` won't be in checkpoint (matches ignore patterns)
+- ✅ **Expected behavior** - build artifacts shouldn't be tracked
+- 🔧 **Solution:** If file is important, create it via `write_file` tool
+
+**Problem 2: Large file modifications**
+```python
+# File is 5MB, modified externally
+run_command("./process_data.py input.csv")  # Modifies input.csv
+```
+- Modified file will be in checkpoint (full 5MB)
+- Session API won't show the modification until checkpoint
+- 🔧 **Solution:** This is expected - checkpoints are full snapshots
+
+**Problem 3: Race condition with external processes**
+```bash
+run_command("npm install")  # Creates node_modules/
+# Checkpoint happens while npm is still running
+```
+- Checkpoint might capture partial state
+- 🔧 **Solution:** Ensure commands complete before checkpoint (they do by default)
+
+**Problem 4: Symbolic links**
+```bash
+run_command("ln -s /etc/config app/config")
+```
+- Symlinks are not followed or tracked
+- 🔧 **Solution:** Copy file content instead of creating symlink
+
+### Summary Table
+
+| Operation | Method | Staged? | In get_staged_files? | In Checkpoint? | Ignored files? |
+|-----------|--------|---------|---------------------|----------------|----------------|
+| Create | Tool | ✅ | ✅ added | ✅ | ✅ Force-included |
+| Create | Command | ❌ | ✅ added | ✅ | ❌ Skipped |
+| Modify | Tool | ✅ | ✅ modified | ✅ | ✅ If already tracked |
+| Modify | Command | ❌ | ❌ | ✅ | ✅ If already tracked |
+| Delete | Tool | ✅ removed | ✅ deleted | ❌ | ✅ Works for any file |
+| Delete | Command | ❌ | ✅ deleted | ❌ | ✅ Works for any file |
+
+**Key insight:** Staging is only needed for **ignored files created via tools**. For everything else, workdir scanning handles detection and checkpoint creation automatically.
 
 ## RAG Integration
 

@@ -594,6 +594,49 @@ class VersioningTracker:
 
             agent_logger.debug("Failed to stage file", file=file_path, error=str(e))
 
+    def stage_file_deletion(self, file_path: str) -> None:
+        """Stage file deletion in git index.
+
+        This is equivalent to 'git rm' - removes file from staging area.
+        The deletion will be included in next checkpoint.
+
+        Args:
+            file_path: Path to deleted file (can be absolute or relative to project root)
+        """
+        try:
+            repo = self.ensure_repo()
+
+            # Normalize path: convert to Path and make relative to project_root
+            file_path_obj = Path(file_path)
+            if file_path_obj.is_absolute():
+                # Convert absolute path to relative
+                try:
+                    rel_path = file_path_obj.relative_to(self.project_root)
+                    normalized_path = str(rel_path)
+                except ValueError:
+                    # Path is outside project_root - skip
+                    return
+            else:
+                # Already relative
+                normalized_path = file_path
+
+            # Remove from git index (staging area)
+            index = repo.open_index()
+            path_bytes = normalized_path.encode("utf-8")
+
+            # Only remove if file exists in index
+            if path_bytes in index:
+                del index[path_bytes]
+                index.write()
+
+        except Exception as e:
+            # Best effort - don't fail if staging fails
+            from agentsmithy.utils.logger import agent_logger
+
+            agent_logger.debug(
+                "Failed to stage file deletion", file=file_path, error=str(e)
+            )
+
     def track_file_change(self, file_path: str, operation: str) -> None:
         """Track a file change within the current transaction.
 
@@ -1589,9 +1632,12 @@ class VersioningTracker:
         """
         repo = self.ensure_repo()
         try:
-            index = repo.open_index()
-            if not index:
-                return []
+            # Try to open index (may not exist or be empty)
+            try:
+                index = repo.open_index()
+            except (FileNotFoundError, OSError):
+                # No index file - use empty dict for iteration (has .items() method)
+                index = {}  # type: ignore[assignment]
 
             # Get HEAD tree to compare against
             session_ref = self._get_session_ref(session_name)
@@ -1621,7 +1667,7 @@ class VersioningTracker:
 
             head_files = collect_head_files(cast(Tree, head_tree))
 
-            # Process staged files
+            # Process staged files (in index)
             staged: list[dict[str, Any]] = []
             for path_bytes, entry in index.items():
                 path = path_bytes.decode("utf-8")
@@ -1694,8 +1740,89 @@ class VersioningTracker:
 
                     staged.append(file_info)
 
-            # TODO: Handle deleted files (in HEAD but not in index)
-            # For now, deleted files are detected by workdir scan
+            # Handle deleted files (in HEAD but not in workdir and not in index)
+            # This catches files that were removed from disk but not staged for deletion
+            import os
+
+            # Collect current files in working directory
+            current_workdir_files: set[str] = set()
+            ignore_spec = self._get_ignore_spec()
+
+            for root, dirs, files in os.walk(self.project_root):
+                root_path = Path(root)
+                rel_root = (
+                    root_path.relative_to(self.project_root)
+                    if root_path != self.project_root
+                    else Path(".")
+                )
+
+                # Filter directories
+                filtered_dirs = []
+                for d in dirs:
+                    # Skip .agentsmithy directory
+                    if d == ".agentsmithy":
+                        continue
+
+                    dir_rel_path = (rel_root / d) if rel_root != Path(".") else Path(d)
+                    dir_path_str = str(dir_rel_path).replace("\\", "/")
+                    if ignore_spec.match_file(dir_path_str):
+                        continue
+                    filtered_dirs.append(d)
+
+                dirs[:] = filtered_dirs
+
+                for filename in files:
+                    file_path = Path(root) / filename
+                    file_rel_path = file_path.relative_to(self.project_root)
+                    file_path_str = str(file_rel_path).replace("\\", "/")
+
+                    if ignore_spec.match_file(file_path_str):
+                        continue
+
+                    current_workdir_files.add(file_path_str)
+
+            # Collect files currently in index
+            index_files = set(
+                path_bytes.decode("utf-8") for path_bytes, _ in index.items()
+            )
+
+            # Find deleted files: in HEAD but not in workdir and not in index
+            # (if file is in index, it's already handled above as modified/added)
+            for head_path in head_files.keys():
+                if (
+                    head_path not in current_workdir_files
+                    and head_path not in index_files
+                ):
+                    # File was deleted from workdir but deletion not staged
+                    file_info = {
+                        "path": head_path,
+                        "status": FileChangeStatus.DELETED.value,
+                    }
+
+                    if include_diff:
+                        # Get base content and line count
+                        # _count_lines returns (lines, 0), but for deleted files we need (0, lines)
+                        lines, _ = self._count_lines(repo, head_files[head_path])
+                        base_content, is_binary, is_too_large = (
+                            self._extract_blob_content(repo, head_files[head_path])
+                        )
+                        file_info["additions"] = 0
+                        file_info["deletions"] = lines  # Number of lines deleted
+                        file_info["diff"] = (
+                            None  # Don't include full content for deleted files
+                        )
+                        file_info["base_content"] = base_content
+                        file_info["is_binary"] = is_binary
+                        file_info["is_too_large"] = is_too_large
+                    else:
+                        file_info["additions"] = 0
+                        file_info["deletions"] = 0
+                        file_info["diff"] = None
+                        file_info["base_content"] = None
+                        file_info["is_binary"] = False
+                        file_info["is_too_large"] = False
+
+                    staged.append(file_info)
 
             return staged
 
