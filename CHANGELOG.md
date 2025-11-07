@@ -1,5 +1,14 @@
 <!-- version list -->
 
+## v1.8.1 (2025-11-07)
+
+### Bug Fixes
+
+- Fix files' diffs for checkpoints
+  ([#56](https://github.com/AgentSmithyAI/agentsmithy-agent/pull/56),
+  [`0f9837d`](https://github.com/AgentSmithyAI/agentsmithy-agent/commit/0f9837d9df6ff479fc25882bc0f94ec350a13ccf))
+
+
 ## v1.8.0 (2025-11-05)
 
 ### Chores
