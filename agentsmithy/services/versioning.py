@@ -1723,7 +1723,8 @@ class VersioningTracker:
 
                     if include_diff:
                         # Calculate lines in added file
-                        additions, deletions = self._count_lines(repo, staged_sha)
+                        # _count_lines returns (lines, 0), we only need the first value
+                        additions, _ = self._count_lines(repo, staged_sha)
                         file_info["additions"] = additions
                         file_info["deletions"] = 0
                         file_info["diff"] = None  # Don't include full content
@@ -2163,7 +2164,8 @@ class VersioningTracker:
 
                 if change.type == CHANGE_ADD and change.new:
                     # File added - no base content (file didn't exist in main)
-                    additions, deletions = self._count_lines(repo, change.new.sha)
+                    # _count_lines returns (lines, 0), we only need the first value
+                    additions, _ = self._count_lines(repo, change.new.sha)
                     change_dict = {
                         "path": path_str,
                         "status": FileChangeStatus.ADDED.value,
@@ -2177,7 +2179,8 @@ class VersioningTracker:
                     changes.append(change_dict)
                 elif change.type == CHANGE_DELETE and change.old:
                     # File deleted - provide base content so client can show what was deleted
-                    additions, deletions = self._count_lines(repo, change.old.sha)
+                    # _count_lines returns (lines, 0), so use first value for deletion count
+                    lines, _ = self._count_lines(repo, change.old.sha)
                     base_content, is_binary, is_too_large = self._extract_blob_content(
                         repo, change.old.sha
                     )
@@ -2185,7 +2188,7 @@ class VersioningTracker:
                         "path": path_str,
                         "status": FileChangeStatus.DELETED.value,
                         "additions": 0,
-                        "deletions": deletions,
+                        "deletions": lines,  # Use lines (first value), not second value which is always 0
                         "diff": None,  # Don't include full content for deleted files
                         "base_content": base_content,
                         "is_binary": is_binary,

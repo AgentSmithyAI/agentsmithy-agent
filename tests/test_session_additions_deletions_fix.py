@@ -115,7 +115,7 @@ def test_session_endpoint_committed_vs_staged_order():
 
     Scenario:
     1. file1: committed with changes (should show additions > 0)
-    2. file2: staged only, not committed (should show additions = 0)
+    2. file2: staged only, not committed (should show additions > 0)
     """
     with tempfile.TemporaryDirectory() as tmpdir:
         project_root = Path(tmpdir) / "project"
