@@ -1633,11 +1633,12 @@ class VersioningTracker:
         repo = self.ensure_repo()
         try:
             # Try to open index (may not exist or be empty)
+            index = None
             try:
                 index = repo.open_index()
             except (FileNotFoundError, OSError):
-                # No index file - use empty dict for iteration (has .items() method)
-                index = {}  # type: ignore[assignment]
+                # No index file - will process only workdir changes
+                pass
 
             # Get HEAD tree to compare against
             session_ref = self._get_session_ref(session_name)
@@ -1669,41 +1670,69 @@ class VersioningTracker:
 
             # Process staged files (in index)
             staged: list[dict[str, Any]] = []
-            for path_bytes, entry in index.items():
-                path = path_bytes.decode("utf-8")
+            if index is not None:
+                for path_bytes, entry in index.items():
+                    path = path_bytes.decode("utf-8")
 
-                # Skip conflicted entries
-                if not hasattr(entry, "sha"):
-                    continue
+                    # Skip conflicted entries
+                    if not hasattr(entry, "sha"):
+                        continue
 
-                staged_sha = entry.sha
+                    staged_sha = entry.sha
 
-                if path in head_files:
-                    # File exists in HEAD
-                    if head_files[path] != staged_sha:
-                        # Different SHA = modified
-                        file_info: dict[str, Any] = {
+                    if path in head_files:
+                        # File exists in HEAD
+                        if head_files[path] != staged_sha:
+                            # Different SHA = modified
+                            file_info: dict[str, Any] = {
+                                "path": path,
+                                "status": FileChangeStatus.MODIFIED.value,
+                            }
+
+                            if include_diff:
+                                # Calculate diff between HEAD and staged
+                                additions, deletions, diff_text = (
+                                    self._diff_blobs_with_text(
+                                        repo, head_files[path], staged_sha, True, path
+                                    )
+                                )
+                                # Extract base content from HEAD
+                                base_content, is_binary, is_too_large = (
+                                    self._extract_blob_content(repo, head_files[path])
+                                )
+                                file_info["additions"] = additions
+                                file_info["deletions"] = deletions
+                                file_info["diff"] = diff_text
+                                file_info["base_content"] = base_content
+                                file_info["is_binary"] = is_binary
+                                file_info["is_too_large"] = is_too_large
+                            else:
+                                file_info["additions"] = 0
+                                file_info["deletions"] = 0
+                                file_info["diff"] = None
+                                file_info["base_content"] = None
+                                file_info["is_binary"] = False
+                                file_info["is_too_large"] = False
+
+                            staged.append(file_info)
+                        # Same SHA = no change (shouldn't be in index, but handle it)
+                    else:
+                        # File not in HEAD = added (no base content)
+                        file_info = {
                             "path": path,
-                            "status": FileChangeStatus.MODIFIED.value,
+                            "status": FileChangeStatus.ADDED.value,
                         }
 
                         if include_diff:
-                            # Calculate diff between HEAD and staged
-                            additions, deletions, diff_text = (
-                                self._diff_blobs_with_text(
-                                    repo, head_files[path], staged_sha, True, path
-                                )
-                            )
-                            # Extract base content from HEAD
-                            base_content, is_binary, is_too_large = (
-                                self._extract_blob_content(repo, head_files[path])
-                            )
+                            # Calculate lines in added file
+                            # _count_lines returns (lines, 0), we only need the first value
+                            additions, _ = self._count_lines(repo, staged_sha)
                             file_info["additions"] = additions
-                            file_info["deletions"] = deletions
-                            file_info["diff"] = diff_text
-                            file_info["base_content"] = base_content
-                            file_info["is_binary"] = is_binary
-                            file_info["is_too_large"] = is_too_large
+                            file_info["deletions"] = 0
+                            file_info["diff"] = None  # Don't include full content
+                            file_info["base_content"] = None  # File didn't exist
+                            file_info["is_binary"] = False
+                            file_info["is_too_large"] = False
                         else:
                             file_info["additions"] = 0
                             file_info["deletions"] = 0
@@ -1713,33 +1742,6 @@ class VersioningTracker:
                             file_info["is_too_large"] = False
 
                         staged.append(file_info)
-                    # Same SHA = no change (shouldn't be in index, but handle it)
-                else:
-                    # File not in HEAD = added (no base content)
-                    file_info = {
-                        "path": path,
-                        "status": FileChangeStatus.ADDED.value,
-                    }
-
-                    if include_diff:
-                        # Calculate lines in added file
-                        # _count_lines returns (lines, 0), we only need the first value
-                        additions, _ = self._count_lines(repo, staged_sha)
-                        file_info["additions"] = additions
-                        file_info["deletions"] = 0
-                        file_info["diff"] = None  # Don't include full content
-                        file_info["base_content"] = None  # File didn't exist
-                        file_info["is_binary"] = False
-                        file_info["is_too_large"] = False
-                    else:
-                        file_info["additions"] = 0
-                        file_info["deletions"] = 0
-                        file_info["diff"] = None
-                        file_info["base_content"] = None
-                        file_info["is_binary"] = False
-                        file_info["is_too_large"] = False
-
-                    staged.append(file_info)
 
             # Handle deleted files (in HEAD but not in workdir and not in index)
             # This catches files that were removed from disk but not staged for deletion
@@ -1783,9 +1785,11 @@ class VersioningTracker:
                     current_workdir_files.add(file_path_str)
 
             # Collect files currently in index
-            index_files = set(
-                path_bytes.decode("utf-8") for path_bytes, _ in index.items()
-            )
+            index_files: set[str] = set()
+            if index is not None:
+                index_files = set(
+                    path_bytes.decode("utf-8") for path_bytes, _ in index.items()
+                )
 
             # Find deleted files: in HEAD but not in workdir and not in index
             # (if file is in index, it's already handled above as modified/added)

@@ -43,7 +43,7 @@ def func2():
 """
         )
         tracker.stage_file("new_file.py")
-        cp2 = tracker.create_checkpoint("Add new file")
+        _ = tracker.create_checkpoint("Add new file")
 
         # Get diff between main and session_1
         diff = tracker.get_tree_diff("main", "session_1", include_diff=True)
@@ -54,12 +54,12 @@ def func2():
 
         file_info = new_files[0]
         assert file_info["status"] == "added"
-        assert file_info["additions"] == 5, (
-            f"Expected 5 additions for new file, got {file_info['additions']}"
-        )
-        assert file_info["deletions"] == 0, (
-            f"Expected 0 deletions for new file, got {file_info['deletions']}"
-        )
+        assert (
+            file_info["additions"] == 5
+        ), f"Expected 5 additions for new file, got {file_info['additions']}"
+        assert (
+            file_info["deletions"] == 0
+        ), f"Expected 0 deletions for new file, got {file_info['deletions']}"
 
 
 def test_tree_diff_counts_deleted_file_lines():
@@ -92,27 +92,29 @@ def test_tree_diff_counts_deleted_file_lines():
         )
         tracker.stage_file("old_file.py")
         cp1 = tracker.create_checkpoint("Initial with old file")
-        
+
         # Set main to cp1 (simulate approval)
         repo.refs[b"refs/heads/main"] = cp1.commit_id.encode()
-        
+
         # Delete the file and create new checkpoint (automatically on session_1)
         old_file.unlink()
         tracker.stage_file_deletion("old_file.py")
-        cp2 = tracker.create_checkpoint("Delete old file")
+        _ = tracker.create_checkpoint("Delete old file")
 
         # Get diff between main and session_1
         diff = tracker.get_tree_diff("main", "session_1", include_diff=True)
 
         # Find old_file.py in diff
         deleted_files = [f for f in diff if "old_file.py" in f["path"]]
-        assert len(deleted_files) == 1, f"Expected 1 deleted file, got {len(deleted_files)}"
+        assert (
+            len(deleted_files) == 1
+        ), f"Expected 1 deleted file, got {len(deleted_files)}"
 
         file_info = deleted_files[0]
         assert file_info["status"] == "deleted"
-        assert file_info["additions"] == 0, (
-            f"Expected 0 additions for deleted file, got {file_info['additions']}"
-        )
+        assert (
+            file_info["additions"] == 0
+        ), f"Expected 0 additions for deleted file, got {file_info['additions']}"
         # THE BUG: This was showing 0 instead of 9
         assert file_info["deletions"] == 9, (
             f"BUG: Expected 9 deletions for deleted file (9 lines), got {file_info['deletions']}. "
@@ -150,25 +152,27 @@ FEATURE_X = True
 """
         )
         tracker.stage_file("config.py")
-        cp2 = tracker.create_checkpoint("Update config")
+        _ = tracker.create_checkpoint("Update config")
 
         # Get diff between main and session_1
         diff = tracker.get_tree_diff("main", "session_1", include_diff=True)
 
         # Find config.py in diff
         modified_files = [f for f in diff if "config.py" in f["path"]]
-        assert len(modified_files) == 1, f"Expected 1 modified file, got {len(modified_files)}"
+        assert (
+            len(modified_files) == 1
+        ), f"Expected 1 modified file, got {len(modified_files)}"
 
         file_info = modified_files[0]
         assert file_info["status"] == "modified"
         # Changed: VERSION line, DEBUG line, added FEATURE_X line
         # Should be 3 additions (changed lines + new line), 2 deletions (old lines)
-        assert file_info["additions"] == 3, (
-            f"Expected 3 additions, got {file_info['additions']}"
-        )
-        assert file_info["deletions"] == 2, (
-            f"Expected 2 deletions, got {file_info['deletions']}"
-        )
+        assert (
+            file_info["additions"] == 3
+        ), f"Expected 3 additions, got {file_info['additions']}"
+        assert (
+            file_info["deletions"] == 2
+        ), f"Expected 2 deletions, got {file_info['deletions']}"
         assert file_info["diff"] is not None
         assert 'VERSION = "2.0"' in file_info["diff"]
 
@@ -206,7 +210,7 @@ def test_tree_diff_all_operations_together():
         file3.write_text("New line 1\nNew line 2\n")
         tracker.stage_file("new.txt")
 
-        cp2 = tracker.create_checkpoint("Multiple changes")
+        _ = tracker.create_checkpoint("Multiple changes")
 
         # Get diff
         diff = tracker.get_tree_diff("main", "session_1", include_diff=True)
@@ -224,13 +228,12 @@ def test_tree_diff_all_operations_together():
         deleted = [f for f in diff if f["path"] == "delete.txt"][0]
         assert deleted["status"] == "deleted"
         assert deleted["additions"] == 0
-        assert deleted["deletions"] == 2, (
-            f"BUG: Deleted file should show 2 deletions, got {deleted['deletions']}"
-        )
+        assert (
+            deleted["deletions"] == 2
+        ), f"BUG: Deleted file should show 2 deletions, got {deleted['deletions']}"
 
         # Check added file
         added = [f for f in diff if f["path"] == "new.txt"][0]
         assert added["status"] == "added"
         assert added["additions"] == 2
         assert added["deletions"] == 0
-
