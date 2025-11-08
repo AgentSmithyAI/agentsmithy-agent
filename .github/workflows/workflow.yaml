@@ -264,7 +264,7 @@ jobs:
           path: |
             build
             *.spec
-          key: pyinstaller-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('requirements.txt', 'main.py', 'agentsmithy/**/*.py') }}
+          key: pyinstaller-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('requirements.txt', 'main.py', 'agentsmithy/**/*.py', 'agentsmithy.spec', 'rthooks/**') }}
           restore-keys: |
             pyinstaller-${{ runner.os }}-${{ runner.arch }}-
             pyinstaller-${{ runner.os }}-
