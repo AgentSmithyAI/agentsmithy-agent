@@ -264,10 +264,12 @@ jobs:
           path: |
             build
             *.spec
-          key: pyinstaller-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('requirements.txt', 'main.py', 'agentsmithy/**/*.py', 'agentsmithy.spec', 'rthooks/**') }}
+          # Key format: spec/rthooks hash first (critical), then code hash (incremental)
+          # If spec/rthooks change, first part changes -> restore-keys won't match -> full rebuild
+          # If only code changes, first part same -> restore-keys match -> incremental rebuild
+          key: pyinstaller-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('agentsmithy.spec', 'rthooks/**') }}-${{ hashFiles('requirements.txt', 'main.py', 'agentsmithy/**/*.py') }}
           restore-keys: |
-            pyinstaller-${{ runner.os }}-${{ runner.arch }}-
-            pyinstaller-${{ runner.os }}-
+            pyinstaller-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('agentsmithy.spec', 'rthooks/**') }}-
       - name: Build executable with PyInstaller
         if: steps.ver.outputs.version != ''
         shell: bash
