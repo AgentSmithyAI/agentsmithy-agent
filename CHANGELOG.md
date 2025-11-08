@@ -1,5 +1,13 @@
 <!-- version list -->
 
+## v1.9.0 (2025-11-08)
+
+### Features
+
+- Read .env file on start ([#58](https://github.com/AgentSmithyAI/agentsmithy-agent/pull/58),
+  [`686e8e1`](https://github.com/AgentSmithyAI/agentsmithy-agent/commit/686e8e159415d63aecb689679ffef958200933dd))
+
+
 ## v1.8.4 (2025-11-08)
 
 ### Bug Fixes
