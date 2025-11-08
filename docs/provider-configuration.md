@@ -4,6 +4,38 @@
 
 AgentSmithy supports configuring multiple provider instances with different configurations. This allows you to use different OpenAI-compatible servers or different API keys for different agents.
 
+## Configuration Methods
+
+AgentSmithy supports two main configuration methods:
+
+1. **Environment Variables** (`.env` file in workdir) — Quick setup for basic configuration
+2. **Configuration File** (`.agentsmithy/config.json`) — Advanced multi-provider setup
+
+### Environment Variables
+
+Create a `.env` file in your workdir with the following variables:
+
+```bash
+# Required
+OPENAI_API_KEY=sk-your-api-key-here
+
+# Optional model configuration
+MODEL=gpt-4o
+EMBEDDING_MODEL=text-embedding-3-small
+OPENAI_BASE_URL=https://api.openai.com/v1
+
+# Optional server configuration
+SERVER_HOST=localhost
+SERVER_PORT=8765
+LOG_LEVEL=INFO
+```
+
+The `.env` file is automatically loaded on server startup. Environment variables provide a simple way to configure basic settings without editing JSON files.
+
+### Configuration File
+
+For advanced scenarios (multiple providers, different models per agent, etc.), use `.agentsmithy/config.json` in your workdir. See the sections below for detailed configuration options.
+
 ## Configuration Structure
 
 ### Provider Definitions

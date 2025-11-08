@@ -3,7 +3,8 @@
 
 Bootstraps a Uvicorn ASGI server for agentsmithy.api.server:app (shim over legacy
 agentsmithy.api.server:app during migration).
-Requires a .env (DEFAULT_MODEL and OPENAI_API_KEY) and a --workdir path.
+Loads .env file from --workdir if present to populate environment variables.
+Requires --workdir path and proper configuration (model and API key).
 """
 
 import asyncio
@@ -63,6 +64,16 @@ if __name__ == "__main__":
     # Change working directory to workdir so relative paths work correctly
     os.chdir(workdir_path)
     startup_logger.debug("Changed working directory", workdir=str(workdir_path))
+
+    # Load .env file from workdir to populate environment variables for config
+    from dotenv import load_dotenv
+
+    env_file = workdir_path / ".env"
+    if env_file.exists():
+        load_dotenv(dotenv_path=env_file, override=False)
+        startup_logger.debug("Loaded .env file", path=str(env_file))
+    else:
+        startup_logger.debug("No .env file found in workdir", path=str(env_file))
 
     # Initialize configuration manager
     from agentsmithy.config import (
