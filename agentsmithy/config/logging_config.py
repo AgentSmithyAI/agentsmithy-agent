@@ -12,6 +12,17 @@ def get_uvicorn_log_level():
     return getattr(logging, level, logging.INFO)
 
 
+def get_log_format():
+    """Get log format from environment."""
+    return os.getenv("LOG_FORMAT", "pretty").lower()
+
+
+def get_log_colors():
+    """Get log colors setting from environment."""
+    colors_env = os.getenv("LOG_COLORS", "true").lower()
+    return colors_env in ("true", "1", "yes", "on")
+
+
 class RenameLoggerProcessor:
     """Processor to rename confusing logger names."""
 
@@ -24,73 +35,87 @@ class RenameLoggerProcessor:
         return event_dict
 
 
-# Uvicorn logging configuration
-LOGGING_CONFIG = {
-    "version": 1,
-    "disable_existing_loggers": False,
-    "formatters": {
-        "default": {
-            "()": structlog.stdlib.ProcessorFormatter,
-            "processor": structlog.dev.ConsoleRenderer(colors=True),
-            "foreign_pre_chain": [
-                structlog.stdlib.add_logger_name,
-                structlog.stdlib.add_log_level,
-                RenameLoggerProcessor(),  # Rename loggers for clarity
-                structlog.stdlib.PositionalArgumentsFormatter(),
-                structlog.processors.TimeStamper(fmt="iso"),
-                structlog.processors.StackInfoRenderer(),
-                structlog.processors.UnicodeDecoder(),
-            ],
+def get_logging_config():
+    """Get uvicorn logging configuration based on environment settings."""
+    log_format = get_log_format()
+    log_colors = get_log_colors()
+
+    # Choose renderer based on format and colors
+    if log_format == "json":
+        renderer = structlog.processors.JSONRenderer()
+    else:
+        renderer = structlog.dev.ConsoleRenderer(colors=log_colors)
+
+    return {
+        "version": 1,
+        "disable_existing_loggers": False,
+        "formatters": {
+            "default": {
+                "()": structlog.stdlib.ProcessorFormatter,
+                "processor": renderer,
+                "foreign_pre_chain": [
+                    structlog.stdlib.add_logger_name,
+                    structlog.stdlib.add_log_level,
+                    RenameLoggerProcessor(),  # Rename loggers for clarity
+                    structlog.stdlib.PositionalArgumentsFormatter(),
+                    structlog.processors.TimeStamper(fmt="iso"),
+                    structlog.processors.StackInfoRenderer(),
+                    structlog.processors.UnicodeDecoder(),
+                ],
+            },
         },
-    },
-    "handlers": {
-        "default": {
-            "formatter": "default",
-            "class": "logging.StreamHandler",
-            "stream": "ext://sys.stdout",
+        "handlers": {
+            "default": {
+                "formatter": "default",
+                "class": "logging.StreamHandler",
+                "stream": "ext://sys.stdout",
+            },
         },
-    },
-    "loggers": {
-        "uvicorn": {
-            "handlers": ["default"],
-            "level": get_uvicorn_log_level(),
-            "propagate": False,
+        "loggers": {
+            "uvicorn": {
+                "handlers": ["default"],
+                "level": get_uvicorn_log_level(),
+                "propagate": False,
+            },
+            "uvicorn.access": {
+                "handlers": ["default"],
+                "level": get_uvicorn_log_level(),
+                "propagate": False,
+            },
+            "uvicorn.error": {
+                "handlers": ["default"],
+                "level": get_uvicorn_log_level(),
+                "propagate": False,
+            },
+            "httpx": {
+                "handlers": ["default"],
+                "level": "WARNING",
+                "propagate": False,
+            },
+            "openai": {
+                "handlers": ["default"],
+                "level": "INFO",
+                "propagate": False,
+            },
+            "httpcore": {
+                "handlers": ["default"],
+                "level": "WARNING",
+                "propagate": False,
+            },
+            # Suppress noisy INFO logs from ddgs dependency 'primp'
+            "primp": {
+                "handlers": ["default"],
+                "level": "WARNING",
+                "propagate": False,
+            },
+            "primp.primp": {
+                "handlers": ["default"],
+                "level": "WARNING",
+                "propagate": False,
+            },
         },
-        "uvicorn.access": {
-            "handlers": ["default"],
-            "level": get_uvicorn_log_level(),
-            "propagate": False,
-        },
-        "uvicorn.error": {
-            "handlers": ["default"],
-            "level": get_uvicorn_log_level(),
-            "propagate": False,
-        },
-        "httpx": {
-            "handlers": ["default"],
-            "level": "WARNING",
-            "propagate": False,
-        },
-        "openai": {
-            "handlers": ["default"],
-            "level": "INFO",
-            "propagate": False,
-        },
-        "httpcore": {
-            "handlers": ["default"],
-            "level": "WARNING",
-            "propagate": False,
-        },
-        # Suppress noisy INFO logs from ddgs dependency 'primp'
-        "primp": {
-            "handlers": ["default"],
-            "level": "WARNING",
-            "propagate": False,
-        },
-        "primp.primp": {
-            "handlers": ["default"],
-            "level": "WARNING",
-            "propagate": False,
-        },
-    },
-}
+    }
+
+
+# Uvicorn logging configuration (backwards compatibility)
+LOGGING_CONFIG = get_logging_config()

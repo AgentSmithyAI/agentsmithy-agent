@@ -33,8 +33,25 @@ if __name__ == "__main__":
         required=False,
         help="IDE identifier (e.g., 'vscode', 'jetbrains', 'vim')",
     )
+    parser.add_argument(
+        "--log-format",
+        choices=["pretty", "json"],
+        help="Log format (pretty or json). Overrides config and LOG_FORMAT env var.",
+    )
+    parser.add_argument(
+        "--log-colors",
+        type=lambda x: x.lower() in ("true", "1", "yes", "on"),
+        help="Enable colored logs (true/false). Overrides config and LOG_COLORS env var.",
+    )
     # No --project: workdir is the project
     args, _ = parser.parse_known_args()
+
+    # Set logging env vars from CLI flags before logger import
+    # These override config and env vars, providing command-line precedence
+    if args.log_format:
+        os.environ["LOG_FORMAT"] = args.log_format
+    if args.log_colors is not None:
+        os.environ["LOG_COLORS"] = "true" if args.log_colors else "false"
 
     # Setup logging for startup (after argparse, so --help doesn't need logger)
     from agentsmithy.utils.logger import get_logger
@@ -190,8 +207,10 @@ if __name__ == "__main__":
             state_dir=str(state_dir),
         )
 
-        # Use custom logging configuration for consistent JSON output
-        from agentsmithy.config import LOGGING_CONFIG
+        # Use custom logging configuration for consistent output
+        from agentsmithy.config.logging_config import get_logging_config
+
+        LOGGING_CONFIG = get_logging_config()
 
         # Allow reload to be controlled via env (default False for prod)
         reload_enabled_env = os.getenv("SERVER_RELOAD", "false").lower()

@@ -237,6 +237,10 @@ class Settings:
     def log_format(self) -> str:
         return self._get("log_format", "pretty", "LOG_FORMAT")
 
+    @property
+    def log_colors(self) -> bool:
+        return self._get("log_colors", True, "LOG_COLORS")
+
 
 # Global settings instance (will be initialized with config manager)
 settings = Settings()

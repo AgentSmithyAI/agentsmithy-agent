@@ -69,4 +69,5 @@ def get_default_config() -> dict[str, Any]:
         # Logging Configuration
         "log_level": "INFO",
         "log_format": "pretty",
+        "log_colors": True,
     }
