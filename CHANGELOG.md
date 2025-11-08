@@ -1,5 +1,13 @@
 <!-- version list -->
 
+## v1.8.3 (2025-11-08)
+
+### Bug Fixes
+
+- Fix CI cache to include missed libs in binaries
+  ([`da54cbd`](https://github.com/AgentSmithyAI/agentsmithy-agent/commit/da54cbd91b8c444c3f2f4829dba430b7bc779579))
+
+
 ## v1.8.2 (2025-11-08)
 
 ### Bug Fixes
