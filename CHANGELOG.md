@@ -1,5 +1,18 @@
 <!-- version list -->
 
+## v1.8.2 (2025-11-08)
+
+### Bug Fixes
+
+- Trigger CI/CD pipeline to rebuild invalid binaries
+  ([`3cb4a82`](https://github.com/AgentSmithyAI/agentsmithy-agent/commit/3cb4a8260ea9b741edfd5462bf387ba3e04a9fe5))
+
+### Chores
+
+- Fix pyinstaller args in CI ([#57](https://github.com/AgentSmithyAI/agentsmithy-agent/pull/57),
+  [`33403ee`](https://github.com/AgentSmithyAI/agentsmithy-agent/commit/33403eefee03c271edb0e02050d846d93529370a))
+
+
 ## v1.8.1 (2025-11-07)
 
 ### Bug Fixes
