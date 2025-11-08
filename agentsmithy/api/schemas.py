@@ -32,6 +32,9 @@ class ChatResponse(BaseModel):
 class HealthResponse(BaseModel):
     status: str = "ok"
     service: str = "agentsmithy-server"
+    server_status: str | None = None  # starting | ready | stopping | stopped
+    port: int | None = None
+    pid: int | None = None
 
 
 class DialogCreateRequest(BaseModel):

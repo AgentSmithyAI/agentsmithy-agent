@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .project import Project
+from .status_manager import StatusManager
 
 
 def _pid_alive(pid: int) -> bool:
@@ -20,6 +21,11 @@ def _pid_alive(pid: int) -> bool:
 
 def _status_path(project: Project) -> Path:
     return (project.state_dir / "status.json").resolve()
+
+
+def get_status_manager(project: Project) -> StatusManager:
+    """Get StatusManager instance for a project."""
+    return StatusManager(_status_path(project))
 
 
 def read_status(project: Project) -> dict[str, Any]:
@@ -60,21 +66,31 @@ def set_scan_status(
     - error: optional error message
     - pid/task_id: optional identifiers for the scanning routine
     """
-    doc = read_status(project)
-    now = datetime.now(UTC).isoformat()
-    doc["scan_status"] = status
-    if status == "scanning" and not doc.get("scan_started_at"):
-        doc["scan_started_at"] = now
-    doc["scan_updated_at"] = now
-    if progress is not None:
-        doc["scan_progress"] = max(0, min(100, int(progress)))
-    if error is not None:
-        doc["error"] = error
-    if pid is not None:
-        doc["scan_pid"] = pid
-    if task_id is not None:
-        doc["scan_task_id"] = task_id
-    write_status(project, doc)
+    manager = get_status_manager(project)
+    manager.update_scan_status(
+        status,  # type: ignore
+        progress=progress,
+        error=error,
+        pid=pid,
+        task_id=task_id,
+    )
+
+
+def set_server_status(
+    project: Project,
+    status: str,
+    *,
+    pid: int | None = None,
+    port: int | None = None,
+) -> None:
+    """Update server-related fields in status.json atomically.
+
+    - status: starting | ready | stopping | stopped
+    - pid: optional server PID (set on starting)
+    - port: optional server port (set on starting)
+    """
+    manager = get_status_manager(project)
+    manager.update_server_status(status, pid=pid, port=port)  # type: ignore
 
 
 def ensure_singleton_and_select_port(
@@ -85,15 +101,22 @@ def ensure_singleton_and_select_port(
 ) -> int:
     """Ensure only one server per project and pick a free port.
 
-    - If existing status has a live server_pid, raise RuntimeError
+    - If existing status has a live server_pid with status starting/ready, raise RuntimeError
     - Otherwise pick a free port (starting at base_port), set SERVER_PORT env, and
-      write initial status.json with server_pid/port/timestamp, preserving scan fields.
+      write initial status.json with server_status=starting, preserving scan fields.
     """
     existing = read_status(project)
     existing_pid = existing.get("server_pid")
-    if isinstance(existing_pid, int) and _pid_alive(existing_pid):
+    existing_status = existing.get("server_status")
+
+    # Only block if process is alive AND status indicates server is running/starting
+    if (
+        isinstance(existing_pid, int)
+        and _pid_alive(existing_pid)
+        and existing_status in ("starting", "ready")
+    ):
         raise RuntimeError(
-            f"Server already running for project {project.name} at port {existing.get('port')} (pid {existing_pid})"
+            f"Server already running for project {project.name} at port {existing.get('port')} (pid {existing_pid}, status {existing_status})"
         )
 
     def _port_free(port: int) -> bool:
@@ -116,12 +139,15 @@ def ensure_singleton_and_select_port(
     # Export to env so settings pick it up
     os.environ["SERVER_PORT"] = str(chosen)
 
-    # Write initial status
+    # Write initial status with server_status="starting"
+    # Server is NOT ready yet - still need to initialize dialogs, config, etc.
     now = datetime.now(UTC).isoformat()
     status_doc: dict[str, Any] = {
+        "server_status": "starting",
         "server_pid": os.getpid(),
         "port": chosen,
         "server_started_at": now,
+        "server_updated_at": now,
         "scan_status": existing.get("scan_status") or "idle",
         "scan_started_at": existing.get("scan_started_at"),
         "scan_updated_at": existing.get("scan_updated_at"),

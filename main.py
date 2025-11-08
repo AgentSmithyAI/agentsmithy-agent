@@ -149,9 +149,7 @@ if __name__ == "__main__":
 
         # Delegate port selection and status.json management to project runtime
         from agentsmithy.core.project import get_current_project
-        from agentsmithy.core.project_runtime import (
-            ensure_singleton_and_select_port,
-        )
+        from agentsmithy.core.project_runtime import ensure_singleton_and_select_port
 
         chosen_port = ensure_singleton_and_select_port(
             get_current_project(),
@@ -159,6 +157,7 @@ if __name__ == "__main__":
             host=settings.server_host,
             max_probe=20,
         )
+        # Status is now "starting" - server not ready yet
         # Update config with the chosen port
         if config_manager:
             asyncio.run(config_manager.set("server_port", chosen_port))
@@ -246,6 +245,7 @@ if __name__ == "__main__":
             app.state.config_manager = config_manager
 
             # Log runtime environment information
+            from agentsmithy import __version__
             from agentsmithy.platforms import get_os_adapter
 
             adapter = get_os_adapter()
@@ -258,12 +258,13 @@ if __name__ == "__main__":
 
             startup_logger.info(
                 "Runtime environment",
+                version=__version__,
+                ide=args.ide or "unknown",
                 system=os_ctx.get("system", "Unknown"),
                 release=os_ctx.get("release", "unknown"),
                 machine=os_ctx.get("machine", "unknown"),
                 python=os_ctx.get("python", "unknown"),
                 shell=shell,
-                ide=args.ide or "unknown",
             )
 
             # Optionally run project inspector in background (non-blocking)
@@ -347,6 +348,7 @@ if __name__ == "__main__":
                     set_shutdown_event,
                 )
                 from agentsmithy.core.project import get_current_project
+                from agentsmithy.core.project_runtime import set_server_status
 
                 project_obj = get_current_project()
                 project_obj.ensure_dialogs_dir()
@@ -371,8 +373,18 @@ if __name__ == "__main__":
                     startup_logger.info(
                         "Config file watcher started with change callback"
                     )
+
+                # Server is now ready to accept requests
+                set_server_status(project_obj, "ready")
+                startup_logger.info("Server status updated to 'ready'")
             except Exception as e:
                 startup_logger.error("Startup initialization failed", error=str(e))
+                # Mark server as stopped on startup failure
+                from agentsmithy.core.project import get_current_project
+                from agentsmithy.core.project_runtime import set_server_status
+
+                set_server_status(get_current_project(), "stopped")
+                raise
 
             # Monitor shutdown event and uvicorn serve()
             shutdown_task = asyncio.create_task(shutdown_event.wait())
@@ -386,6 +398,11 @@ if __name__ == "__main__":
             # If shutdown was triggered, stop the server
             if shutdown_task in done:
                 startup_logger.info("Stopping server due to shutdown signal...")
+                # Update status to stopping before actually stopping
+                from agentsmithy.core.project import get_current_project
+                from agentsmithy.core.project_runtime import set_server_status
+
+                set_server_status(get_current_project(), "stopping")
                 server.should_exit = True
                 try:
                     await serve_task
@@ -399,6 +416,8 @@ if __name__ == "__main__":
                     dispose_db_engine,
                     get_chat_service,
                 )
+                from agentsmithy.core.project import get_current_project
+                from agentsmithy.core.project_runtime import set_server_status
 
                 # Stop config watcher
                 if hasattr(app.state, "config_manager") and app.state.config_manager:
@@ -416,8 +435,20 @@ if __name__ == "__main__":
 
                 dispose_db_engine()
                 startup_logger.info("Chat service shutdown completed")
+
+                # Mark server as stopped
+                set_server_status(get_current_project(), "stopped")
+                startup_logger.info("Server status updated to 'stopped'")
             except Exception as e:
                 startup_logger.error("Shutdown cleanup failed", error=str(e))
+                # Best effort: try to mark as stopped even on error
+                try:
+                    from agentsmithy.core.project import get_current_project
+                    from agentsmithy.core.project_runtime import set_server_status
+
+                    set_server_status(get_current_project(), "stopped")
+                except Exception:
+                    pass
 
         # Run server with asyncio
         asyncio.run(run_server())
