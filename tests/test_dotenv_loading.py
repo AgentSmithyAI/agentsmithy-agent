@@ -4,6 +4,8 @@ import os
 import tempfile
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 
 def test_dotenv_loading_from_workdir():
     """Test that .env file is loaded from workdir on startup."""
@@ -30,9 +32,7 @@ def test_dotenv_loading_from_workdir():
             for key in original_env.keys():
                 os.environ.pop(key, None)
 
-            # Import and use load_dotenv directly (simulating main.py behavior)
-            from dotenv import load_dotenv
-
+            # Load .env file (simulating main.py behavior)
             load_dotenv(dotenv_path=env_file, override=False)
 
             # Verify variables were loaded
@@ -63,8 +63,6 @@ def test_dotenv_does_not_override_existing_vars():
         os.environ["TEST_OVERRIDE_VAR"] = "already-set"
 
         try:
-            from dotenv import load_dotenv
-
             # Load with override=False (default behavior in main.py)
             load_dotenv(dotenv_path=env_file, override=False)
 
@@ -89,8 +87,6 @@ def test_dotenv_missing_file_handled_gracefully():
         assert not env_file.exists()
 
         # This should not raise an error (simulating main.py behavior)
-        from dotenv import load_dotenv
-
         # load_dotenv returns False when file doesn't exist, but doesn't raise
         result = load_dotenv(dotenv_path=env_file, override=False)
         assert result is False  # File not found, but no error
