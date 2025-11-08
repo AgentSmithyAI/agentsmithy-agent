@@ -30,10 +30,14 @@ Recommended `.agentsmithy/config.json` structure:
 }
 ```
 
-Environment variables supported:
+Environment variables supported (can be set in `.env` file in workdir):
 
 - `OPENAI_API_KEY`
 - `OPENAI_BASE_URL`
+- `MODEL` (default model for agents)
+- `EMBEDDING_MODEL` (model for embeddings)
+
+The server automatically loads `.env` from the workdir on startup.
 
 ### Class layout
 
