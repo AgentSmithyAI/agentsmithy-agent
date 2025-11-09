@@ -234,6 +234,19 @@ if __name__ == "__main__":
         except Exception:
             pass
 
+        # Monkey-patch server.startup to set status to 'ready' after server starts
+        original_startup = server.startup
+
+        async def patched_startup(sockets=None):
+            await original_startup(sockets=sockets)
+            # Server is now listening, mark as ready
+            from agentsmithy.core.project_runtime import set_server_status
+
+            set_server_status(get_current_project(), "ready")
+            startup_logger.info("Server status updated to 'ready'")
+
+        server.startup = patched_startup  # type: ignore[method-assign]
+
         async def run_server():
             # Pass shutdown event to the app
             from agentsmithy.api.server import app
@@ -373,10 +386,6 @@ if __name__ == "__main__":
                     startup_logger.info(
                         "Config file watcher started with change callback"
                     )
-
-                # Server is now ready to accept requests
-                set_server_status(project_obj, "ready")
-                startup_logger.info("Server status updated to 'ready'")
             except Exception as e:
                 startup_logger.error("Startup initialization failed", error=str(e))
                 # Mark server as stopped on startup failure
@@ -386,9 +395,12 @@ if __name__ == "__main__":
                 set_server_status(get_current_project(), "stopped")
                 raise
 
-            # Monitor shutdown event and uvicorn serve()
-            shutdown_task = asyncio.create_task(shutdown_event.wait())
+            # Start uvicorn server
+            # Note: server.startup() is monkey-patched above to set status='ready' after listening
             serve_task = asyncio.create_task(server.serve())
+
+            # Monitor shutdown event
+            shutdown_task = asyncio.create_task(shutdown_event.wait())
 
             # Wait for either shutdown or server to complete
             done, _pending = await asyncio.wait(
