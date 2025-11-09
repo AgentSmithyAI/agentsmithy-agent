@@ -29,6 +29,7 @@ async def health(project: Project = Depends(get_project)):  # noqa: B008
             server_status=status_doc.get("server_status"),
             port=status_doc.get("port"),
             pid=os.getpid(),  # Current process PID
+            server_error=status_doc.get("server_error"),
         )
     except Exception:
         # Fallback if status can't be read

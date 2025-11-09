@@ -126,15 +126,9 @@ if __name__ == "__main__":
         startup_logger.error("Failed to initialize configuration", error=str(e))
         sys.exit(1)
 
-    # Validate required settings (strict models + API key)
     try:
-        settings.validate_or_raise()
-    except ValueError as e:
-        startup_logger.error("Invalid configuration", error=str(e))
-        sys.exit(1)
-
-    try:
-        # Ensure hidden state directory exists
+        # Ensure hidden state directory exists FIRST
+        # We need this to write status.json even on early failures
         try:
             # Initialize a workspace entity to own directory management
             from agentsmithy.core.project import set_workspace
@@ -149,7 +143,27 @@ if __name__ == "__main__":
 
         # Delegate port selection and status.json management to project runtime
         from agentsmithy.core.project import get_current_project
-        from agentsmithy.core.project_runtime import ensure_singleton_and_select_port
+        from agentsmithy.core.project_runtime import (
+            ensure_singleton_and_select_port,
+            set_server_status,
+        )
+
+        # Validate required settings (strict models + API key)
+        # If validation fails, we'll mark server as stopped before exiting
+        try:
+            settings.validate_or_raise()
+        except ValueError as e:
+            startup_logger.error("Invalid configuration", error=str(e))
+            # Write status as error (not stopped - this is a config failure)
+            try:
+                set_server_status(
+                    get_current_project(),
+                    "error",
+                    error=f"Configuration validation failed: {str(e)}",
+                )
+            except Exception:
+                pass
+            sys.exit(1)
 
         chosen_port = ensure_singleton_and_select_port(
             get_current_project(),
@@ -388,11 +402,13 @@ if __name__ == "__main__":
                     )
             except Exception as e:
                 startup_logger.error("Startup initialization failed", error=str(e))
-                # Mark server as stopped on startup failure
+                # Mark server as error on startup failure
                 from agentsmithy.core.project import get_current_project
                 from agentsmithy.core.project_runtime import set_server_status
 
-                set_server_status(get_current_project(), "stopped")
+                set_server_status(
+                    get_current_project(), "error", error=f"Startup failed: {str(e)}"
+                )
                 raise
 
             # Start uvicorn server

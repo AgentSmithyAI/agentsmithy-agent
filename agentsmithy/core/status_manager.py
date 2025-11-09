@@ -12,7 +12,7 @@ from pathlib import Path
 from threading import Lock
 from typing import Any, Literal
 
-ServerStatus = Literal["starting", "ready", "stopping", "stopped"]
+ServerStatus = Literal["starting", "ready", "stopping", "stopped", "error", "crashed"]
 ScanStatus = Literal["idle", "scanning", "done", "error", "canceled"]
 
 
@@ -58,13 +58,15 @@ class StatusManager:
         *,
         pid: int | None = None,
         port: int | None = None,
+        error: str | None = None,
     ) -> None:
         """Atomically update server status fields.
 
         Args:
-            status: Server status (starting/ready/stopping/stopped)
+            status: Server status (starting/ready/stopping/stopped/error/crashed)
             pid: Optional server PID (set on starting)
             port: Optional server port (set on starting)
+            error: Optional error message for server failures
         """
         with self._lock:
             doc = self._read()
@@ -77,11 +79,31 @@ class StatusManager:
                     doc["server_pid"] = pid
                 if port is not None:
                     doc["port"] = port
+                # Clear error on new start
+                doc.pop("server_error", None)
+            elif status == "error":
+                # Error state: clear PID/port but keep error message
+                # This is for config/validation errors - no point retrying without fix
+                doc.pop("server_pid", None)
+                doc.pop("port", None)
+                if error is not None:
+                    doc["server_error"] = error
+            elif status == "crashed":
+                # Crashed state: unexpected termination detected
+                # Safe to retry - this is not a config error
+                doc.pop("server_pid", None)
+                doc.pop("port", None)
+                if error is not None:
+                    doc["server_error"] = error
             elif status == "stopped":
-                # Clear server fields on stop
+                # Normal stop: clear everything including error
                 doc.pop("server_pid", None)
                 doc.pop("port", None)
                 doc.pop("server_started_at", None)
+                doc.pop("server_error", None)
+            else:
+                # For other states (ready, stopping), clear error
+                doc.pop("server_error", None)
 
             self._write(doc)
 

@@ -82,15 +82,17 @@ def set_server_status(
     *,
     pid: int | None = None,
     port: int | None = None,
+    error: str | None = None,
 ) -> None:
     """Update server-related fields in status.json atomically.
 
-    - status: starting | ready | stopping | stopped
+    - status: starting | ready | stopping | stopped | error | crashed
     - pid: optional server PID (set on starting)
     - port: optional server port (set on starting)
+    - error: optional error message for server failures
     """
     manager = get_status_manager(project)
-    manager.update_server_status(status, pid=pid, port=port)  # type: ignore
+    manager.update_server_status(status, pid=pid, port=port, error=error)  # type: ignore
 
 
 def ensure_singleton_and_select_port(
@@ -109,11 +111,29 @@ def ensure_singleton_and_select_port(
     existing_pid = existing.get("server_pid")
     existing_status = existing.get("server_status")
 
+    # Detect crash: status indicates running but PID is dead
+    if (
+        isinstance(existing_pid, int)
+        and not _pid_alive(existing_pid)
+        and existing_status in ("starting", "ready", "stopping")
+    ):
+        # Mark as crashed before starting new server
+        status_doc = existing.copy()
+        status_doc["server_status"] = "crashed"
+        status_doc["server_updated_at"] = datetime.now(UTC).isoformat()
+        status_doc["server_error"] = (
+            f"Server process (pid {existing_pid}) terminated unexpectedly while in '{existing_status}' state"
+        )
+        status_doc.pop("server_pid", None)
+        status_doc.pop("port", None)
+        write_status(project, status_doc)
+
     # Only block if process is alive AND status indicates server is running/starting
+    # "error", "crashed", and "stopped" states don't block new server startup
     if (
         isinstance(existing_pid, int)
         and _pid_alive(existing_pid)
-        and existing_status in ("starting", "ready")
+        and existing_status in ("starting", "ready", "stopping")
     ):
         raise RuntimeError(
             f"Server already running for project {project.name} at port {existing.get('port')} (pid {existing_pid}, status {existing_status})"
@@ -142,7 +162,7 @@ def ensure_singleton_and_select_port(
     # Write initial status with server_status="starting"
     # Server is NOT ready yet - still need to initialize dialogs, config, etc.
     now = datetime.now(UTC).isoformat()
-    status_doc: dict[str, Any] = {
+    new_status_doc: dict[str, Any] = {
         "server_status": "starting",
         "server_pid": os.getpid(),
         "port": chosen,
@@ -156,5 +176,5 @@ def ensure_singleton_and_select_port(
         "error": existing.get("error"),
         "scan_progress": existing.get("scan_progress"),
     }
-    write_status(project, status_doc)
+    write_status(project, new_status_doc)
     return chosen

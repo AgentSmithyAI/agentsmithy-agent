@@ -5,6 +5,7 @@ Welcome to the AgentSmithy documentation.
 ## Index
 
 - [SSE Protocol](./sse-protocol.md) — POST-based SSE streaming, event taxonomy
+- [Server Status Management](./server-status.md) — Server status lifecycle and client integration
 - [Project structure and runtime files](./project-structure.md)
 - [Architecture](./architecture.md)
 - [Dialog History endpoint](./history-endpoint.md)
@@ -51,9 +52,9 @@ curl -X POST http://localhost:8765/api/chat \
 ## Endpoints
 
 - `POST /api/chat` — main chat endpoint (supports SSE when `stream=true`)
-- `GET /health` — health check
+- `GET /health` — health check with server status information
 - Dialogs API under `/api/dialogs` for managing conversations
 
-If you're integrating a client/editor, start with the SSE Protocol.
+If you're integrating a client/editor, start with the [SSE Protocol](./sse-protocol.md) and [Server Status Management](./server-status.md).
 
 
