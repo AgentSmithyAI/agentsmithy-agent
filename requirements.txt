@@ -282,7 +282,7 @@ pyasn1-modules==0.4.2
     # via google-auth
 pybase64==1.4.2
     # via chromadb
-pydantic==2.12.3
+pydantic==2.12.4
     # via
     #   -r requirements.in
     #   chromadb
@@ -294,7 +294,7 @@ pydantic==2.12.3
     #   langsmith
     #   openai
     #   pydantic-settings
-pydantic-core==2.41.4
+pydantic-core==2.41.5
     # via pydantic
 pydantic-settings==2.11.0
     # via
