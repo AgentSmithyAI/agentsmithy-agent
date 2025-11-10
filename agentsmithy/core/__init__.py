@@ -2,6 +2,13 @@
 
 from .project import Project
 from .project_runtime import set_scan_status, set_server_status
-from .status_manager import StatusManager
+from .status_manager import ScanStatus, ServerStatus, StatusManager
 
-__all__ = ["Project", "StatusManager", "set_scan_status", "set_server_status"]
+__all__ = [
+    "Project",
+    "StatusManager",
+    "ServerStatus",
+    "ScanStatus",
+    "set_scan_status",
+    "set_server_status",
+]

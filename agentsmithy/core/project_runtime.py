@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .project import Project
-from .status_manager import StatusManager
+from .status_manager import ScanStatus, ServerStatus, StatusManager
 
 
 def _pid_alive(pid: int) -> bool:
@@ -52,7 +52,7 @@ def write_status(project: Project, status_doc: dict[str, Any]) -> None:
 
 def set_scan_status(
     project: Project,
-    status: str,
+    status: ScanStatus | str,
     *,
     progress: int | None = None,
     error: str | None = None,
@@ -61,14 +61,20 @@ def set_scan_status(
 ) -> None:
     """Update scan-related fields in status.json atomically.
 
-    - status: idle | scanning | done | error | canceled
-    - progress: optional 0..100
-    - error: optional error message
-    - pid/task_id: optional identifiers for the scanning routine
+    Args:
+        status: Scan status enum value or string
+        progress: Optional progress 0-100
+        error: Optional error message
+        pid: Optional scan process PID
+        task_id: Optional scan task identifier
     """
+    # Convert string to enum if needed (for backward compatibility)
+    if isinstance(status, str):
+        status = ScanStatus(status)
+
     manager = get_status_manager(project)
     manager.update_scan_status(
-        status,  # type: ignore
+        status,
         progress=progress,
         error=error,
         pid=pid,
@@ -78,7 +84,7 @@ def set_scan_status(
 
 def set_server_status(
     project: Project,
-    status: str,
+    status: ServerStatus | str,
     *,
     pid: int | None = None,
     port: int | None = None,
@@ -86,13 +92,18 @@ def set_server_status(
 ) -> None:
     """Update server-related fields in status.json atomically.
 
-    - status: starting | ready | stopping | stopped | error | crashed
-    - pid: optional server PID (set on starting)
-    - port: optional server port (set on starting)
-    - error: optional error message for server failures
+    Args:
+        status: Server status enum value or string
+        pid: Optional server PID (set on starting)
+        port: Optional server port (set on starting)
+        error: Optional error message for server failures
     """
+    # Convert string to enum if needed (for backward compatibility)
+    if isinstance(status, str):
+        status = ServerStatus(status)
+
     manager = get_status_manager(project)
-    manager.update_server_status(status, pid=pid, port=port, error=error)  # type: ignore
+    manager.update_server_status(status, pid=pid, port=port, error=error)
 
 
 def ensure_singleton_and_select_port(
@@ -112,14 +123,19 @@ def ensure_singleton_and_select_port(
     existing_status = existing.get("server_status")
 
     # Detect crash: status indicates running but PID is dead
+    running_states = {
+        ServerStatus.STARTING.value,
+        ServerStatus.READY.value,
+        ServerStatus.STOPPING.value,
+    }
     if (
         isinstance(existing_pid, int)
         and not _pid_alive(existing_pid)
-        and existing_status in ("starting", "ready", "stopping")
+        and existing_status in running_states
     ):
         # Mark as crashed before starting new server
         status_doc = existing.copy()
-        status_doc["server_status"] = "crashed"
+        status_doc["server_status"] = ServerStatus.CRASHED.value
         status_doc["server_updated_at"] = datetime.now(UTC).isoformat()
         status_doc["server_error"] = (
             f"Server process (pid {existing_pid}) terminated unexpectedly while in '{existing_status}' state"
@@ -133,7 +149,7 @@ def ensure_singleton_and_select_port(
     if (
         isinstance(existing_pid, int)
         and _pid_alive(existing_pid)
-        and existing_status in ("starting", "ready", "stopping")
+        and existing_status in running_states
     ):
         raise RuntimeError(
             f"Server already running for project {project.name} at port {existing.get('port')} (pid {existing_pid}, status {existing_status})"
@@ -163,12 +179,12 @@ def ensure_singleton_and_select_port(
     # Server is NOT ready yet - still need to initialize dialogs, config, etc.
     now = datetime.now(UTC).isoformat()
     new_status_doc: dict[str, Any] = {
-        "server_status": "starting",
+        "server_status": ServerStatus.STARTING.value,
         "server_pid": os.getpid(),
         "port": chosen,
         "server_started_at": now,
         "server_updated_at": now,
-        "scan_status": existing.get("scan_status") or "idle",
+        "scan_status": existing.get("scan_status") or ScanStatus.IDLE.value,
         "scan_started_at": existing.get("scan_started_at"),
         "scan_updated_at": existing.get("scan_updated_at"),
         "scan_pid": existing.get("scan_pid"),

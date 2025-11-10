@@ -1,4 +1,4 @@
-"""Test that server_status is set to 'stopped' with error when validation fails."""
+"""Test that server_status is set to 'error' with error when validation fails."""
 
 import os
 import signal
@@ -19,7 +19,7 @@ def read_status(workdir: Path) -> dict:
 
 
 def test_server_status_validation_error():
-    """Test that server_status='stopped' with error when validation fails."""
+    """Test that server_status='error' with error when validation fails."""
     # Create temp workdir
     with tempfile.TemporaryDirectory() as tmpdir:
         workdir = Path(tmpdir)

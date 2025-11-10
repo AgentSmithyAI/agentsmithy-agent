@@ -143,10 +143,8 @@ if __name__ == "__main__":
 
         # Delegate port selection and status.json management to project runtime
         from agentsmithy.core.project import get_current_project
-        from agentsmithy.core.project_runtime import (
-            ensure_singleton_and_select_port,
-            set_server_status,
-        )
+        from agentsmithy.core.project_runtime import ensure_singleton_and_select_port
+        from agentsmithy.core.status_manager import ServerStatus
 
         # Validate required settings (strict models + API key)
         # If validation fails, we'll mark server as stopped before exiting
@@ -156,9 +154,11 @@ if __name__ == "__main__":
             startup_logger.error("Invalid configuration", error=str(e))
             # Write status as error (not stopped - this is a config failure)
             try:
+                from agentsmithy.core.project_runtime import set_server_status
+
                 set_server_status(
                     get_current_project(),
-                    "error",
+                    ServerStatus.ERROR,
                     error=f"Configuration validation failed: {str(e)}",
                 )
             except Exception:
@@ -244,21 +244,26 @@ if __name__ == "__main__":
         server = uvicorn.Server(config)
         # We'll manage signals ourselves; avoid double-handling in packaged builds
         try:
+            # Uvicorn runtime attribute, not in type stubs - safe to set dynamically
             server.install_signal_handlers = False  # type: ignore[attr-defined]
         except Exception:
             pass
 
         # Monkey-patch server.startup to set status to 'ready' after server starts
+        # This is necessary because lifespan="off" so startup events don't work
         original_startup = server.startup
 
         async def patched_startup(sockets=None):
             await original_startup(sockets=sockets)
             # Server is now listening, mark as ready
             from agentsmithy.core.project_runtime import set_server_status
+            from agentsmithy.core.status_manager import ServerStatus
 
-            set_server_status(get_current_project(), "ready")
+            set_server_status(get_current_project(), ServerStatus.READY)
             startup_logger.info("Server status updated to 'ready'")
 
+        # Monkey-patch startup to inject status='ready' after server starts listening
+        # Required because lifespan="off" disables normal startup events
         server.startup = patched_startup  # type: ignore[method-assign]
 
         async def run_server():
@@ -300,6 +305,7 @@ if __name__ == "__main__":
 
                 async def _run_inspector():
                     from agentsmithy.core.project_runtime import set_scan_status
+                    from agentsmithy.core.status_manager import ScanStatus
 
                     try:
                         # Check if model is configured
@@ -319,12 +325,12 @@ if __name__ == "__main__":
                             )
                             set_scan_status(
                                 project,
-                                status="error",
+                                ScanStatus.ERROR,
                                 error=error_msg,
                             )
                             return
 
-                        set_scan_status(project, status="scanning", progress=0)
+                        set_scan_status(project, ScanStatus.SCANNING, progress=0)
 
                         inspector = ProjectInspectorAgent(
                             OpenAIProvider(
@@ -335,7 +341,7 @@ if __name__ == "__main__":
                         )
                         await inspector.inspect_and_save(project)
 
-                        set_scan_status(project, status="done", progress=100)
+                        set_scan_status(project, ScanStatus.DONE, progress=100)
 
                         startup_logger.info(
                             "Project analyzed by inspector agent and metadata saved",
@@ -350,7 +356,7 @@ if __name__ == "__main__":
                             error_type="configuration",
                             error=error_msg,
                         )
-                        set_scan_status(project, status="error", error=error_msg)
+                        set_scan_status(project, ScanStatus.ERROR, error=error_msg)
                     except Exception as e:
                         import traceback as _tb
 
@@ -362,7 +368,7 @@ if __name__ == "__main__":
                                 _tb.format_exception(type(e), e, e.__traceback__)
                             ),
                         )
-                        set_scan_status(project, status="error", error=error_msg)
+                        set_scan_status(project, ScanStatus.ERROR, error=error_msg)
 
                 inspector_task = asyncio.create_task(_run_inspector())
                 app.state.inspector_task = inspector_task
@@ -405,9 +411,12 @@ if __name__ == "__main__":
                 # Mark server as error on startup failure
                 from agentsmithy.core.project import get_current_project
                 from agentsmithy.core.project_runtime import set_server_status
+                from agentsmithy.core.status_manager import ServerStatus
 
                 set_server_status(
-                    get_current_project(), "error", error=f"Startup failed: {str(e)}"
+                    get_current_project(),
+                    ServerStatus.ERROR,
+                    error=f"Startup failed: {str(e)}",
                 )
                 raise
 
@@ -429,8 +438,9 @@ if __name__ == "__main__":
                 # Update status to stopping before actually stopping
                 from agentsmithy.core.project import get_current_project
                 from agentsmithy.core.project_runtime import set_server_status
+                from agentsmithy.core.status_manager import ServerStatus
 
-                set_server_status(get_current_project(), "stopping")
+                set_server_status(get_current_project(), ServerStatus.STOPPING)
                 server.should_exit = True
                 try:
                     await serve_task
@@ -465,7 +475,7 @@ if __name__ == "__main__":
                 startup_logger.info("Chat service shutdown completed")
 
                 # Mark server as stopped
-                set_server_status(get_current_project(), "stopped")
+                set_server_status(get_current_project(), ServerStatus.STOPPED)
                 startup_logger.info("Server status updated to 'stopped'")
             except Exception as e:
                 startup_logger.error("Shutdown cleanup failed", error=str(e))
@@ -473,8 +483,9 @@ if __name__ == "__main__":
                 try:
                     from agentsmithy.core.project import get_current_project
                     from agentsmithy.core.project_runtime import set_server_status
+                    from agentsmithy.core.status_manager import ServerStatus
 
-                    set_server_status(get_current_project(), "stopped")
+                    set_server_status(get_current_project(), ServerStatus.STOPPED)
                 except Exception:
                     pass
 
