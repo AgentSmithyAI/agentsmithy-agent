@@ -8,7 +8,7 @@ altgraph==0.17.4
     # via pyinstaller
 annotated-types==0.7.0
     # via pydantic
-black==25.9.0
+black==25.11.0
     # via -r requirements-dev.in
 build==1.3.0
     # via pip-tools
@@ -105,7 +105,7 @@ python-gitlab==6.5.0
     # via python-semantic-release
 python-semantic-release==10.4.1
     # via -r requirements-dev.in
-pytokens==0.2.0
+pytokens==0.3.0
     # via black
 requests==2.32.5
     # via
@@ -116,7 +116,7 @@ requests-toolbelt==1.0.0
     # via python-gitlab
 rich==14.2.0
     # via python-semantic-release
-ruff==0.14.3
+ruff==0.14.4
     # via -r requirements-dev.in
 shellingham==1.5.4
     # via python-semantic-release
