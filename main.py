@@ -229,19 +229,29 @@ if __name__ == "__main__":
         reload_enabled_env = os.getenv("SERVER_RELOAD", "false").lower()
         reload_enabled = reload_enabled_env in {"1", "true", "yes", "on"}
 
-        # Create custom server to pass shutdown event
-        # Disable ASGI lifespan to avoid starlette lifespan CancelledError on shutdown
-        # Manual startup/shutdown hooks are used instead (see below)
+        # Custom Server subclass to set status to 'ready' after server starts listening
+        class AgentSmithyServer(uvicorn.Server):
+            async def startup(self, sockets=None):
+                """Override startup to set status to 'ready' after server starts listening."""
+                await super().startup(sockets=sockets)
+                # Server is now listening, mark as ready
+                from agentsmithy.core.project_runtime import set_server_status
+                from agentsmithy.core.status_manager import ServerStatus
+
+                set_server_status(get_current_project(), ServerStatus.READY)
+                startup_logger.info("Server status updated to 'ready'")
+
+        # Create custom server with lifespan enabled for proper startup/shutdown
         config = uvicorn.Config(
             "agentsmithy.api.server:app",
             host=settings.server_host,
             port=chosen_port,
             reload=reload_enabled,
             log_config=LOGGING_CONFIG,
-            lifespan="off",
+            lifespan="on",
             timeout_graceful_shutdown=5,
         )
-        server = uvicorn.Server(config)
+        server = AgentSmithyServer(config)
         # We'll manage signals ourselves; avoid double-handling in packaged builds
         try:
             # Uvicorn runtime attribute, not in type stubs - safe to set dynamically
@@ -249,25 +259,8 @@ if __name__ == "__main__":
         except Exception:
             pass
 
-        # Monkey-patch server.startup to set status to 'ready' after server starts
-        # This is necessary because lifespan="off" so startup events don't work
-        original_startup = server.startup
-
-        async def patched_startup(sockets=None):
-            await original_startup(sockets=sockets)
-            # Server is now listening, mark as ready
-            from agentsmithy.core.project_runtime import set_server_status
-            from agentsmithy.core.status_manager import ServerStatus
-
-            set_server_status(get_current_project(), ServerStatus.READY)
-            startup_logger.info("Server status updated to 'ready'")
-
-        # Monkey-patch startup to inject status='ready' after server starts listening
-        # Required because lifespan="off" disables normal startup events
-        server.startup = patched_startup  # type: ignore[method-assign]
-
         async def run_server():
-            # Pass shutdown event to the app
+            # Pass shutdown event and other state to the app before lifespan starts
             from agentsmithy.api.server import app
 
             app.state.shutdown_event = shutdown_event
@@ -373,55 +366,7 @@ if __name__ == "__main__":
                 inspector_task = asyncio.create_task(_run_inspector())
                 app.state.inspector_task = inspector_task
 
-            # --- Manual startup (since lifespan is off) ---
-            try:
-                # Ensure dialogs state and default dialog
-                from agentsmithy.api.deps import (
-                    get_chat_service,
-                    set_shutdown_event,
-                )
-                from agentsmithy.core.project import get_current_project
-                from agentsmithy.core.project_runtime import set_server_status
-
-                project_obj = get_current_project()
-                project_obj.ensure_dialogs_dir()
-                index = project_obj.load_dialogs_index()
-                dialogs = index.get("dialogs") or []
-                if not dialogs:
-                    project_obj.create_dialog(title=None, set_current=True)
-
-                # Propagate shutdown event to chat service
-                set_shutdown_event(shutdown_event)
-
-                # Start config watcher and register change callback
-                if hasattr(app.state, "config_manager") and app.state.config_manager:
-
-                    def on_config_change(new_config):
-                        # Invalidate orchestrator on config change
-                        chat_service_local = get_chat_service()
-                        chat_service_local.invalidate_orchestrator()
-
-                    app.state.config_manager.register_change_callback(on_config_change)
-                    await app.state.config_manager.start_watching()
-                    startup_logger.info(
-                        "Config file watcher started with change callback"
-                    )
-            except Exception as e:
-                startup_logger.error("Startup initialization failed", error=str(e))
-                # Mark server as error on startup failure
-                from agentsmithy.core.project import get_current_project
-                from agentsmithy.core.project_runtime import set_server_status
-                from agentsmithy.core.status_manager import ServerStatus
-
-                set_server_status(
-                    get_current_project(),
-                    ServerStatus.ERROR,
-                    error=f"Startup failed: {str(e)}",
-                )
-                raise
-
-            # Start uvicorn server
-            # Note: server.startup() is monkey-patched above to set status='ready' after listening
+            # Start uvicorn server (lifespan context manager handles startup/shutdown)
             serve_task = asyncio.create_task(server.serve())
 
             # Monitor shutdown event
@@ -436,7 +381,6 @@ if __name__ == "__main__":
             if shutdown_task in done:
                 startup_logger.info("Stopping server due to shutdown signal...")
                 # Update status to stopping before actually stopping
-                from agentsmithy.core.project import get_current_project
                 from agentsmithy.core.project_runtime import set_server_status
                 from agentsmithy.core.status_manager import ServerStatus
 
@@ -448,46 +392,12 @@ if __name__ == "__main__":
                     # Ignore cancellation/transport errors during shutdown
                     pass
 
-            # --- Manual shutdown (since lifespan is off) ---
-            try:
-                from agentsmithy.api.deps import (
-                    dispose_db_engine,
-                    get_chat_service,
-                )
-                from agentsmithy.core.project import get_current_project
-                from agentsmithy.core.project_runtime import set_server_status
+            # Mark server as stopped after shutdown completes
+            from agentsmithy.core.project_runtime import set_server_status
+            from agentsmithy.core.status_manager import ServerStatus
 
-                # Stop config watcher
-                if hasattr(app.state, "config_manager") and app.state.config_manager:
-                    try:
-                        await app.state.config_manager.stop_watching()
-                        startup_logger.info("Config file watcher stopped")
-                    except Exception:
-                        pass
-
-                chat_service = get_chat_service()
-                try:
-                    await chat_service.shutdown()
-                except Exception:
-                    pass
-
-                dispose_db_engine()
-                startup_logger.info("Chat service shutdown completed")
-
-                # Mark server as stopped
-                set_server_status(get_current_project(), ServerStatus.STOPPED)
-                startup_logger.info("Server status updated to 'stopped'")
-            except Exception as e:
-                startup_logger.error("Shutdown cleanup failed", error=str(e))
-                # Best effort: try to mark as stopped even on error
-                try:
-                    from agentsmithy.core.project import get_current_project
-                    from agentsmithy.core.project_runtime import set_server_status
-                    from agentsmithy.core.status_manager import ServerStatus
-
-                    set_server_status(get_current_project(), ServerStatus.STOPPED)
-                except Exception:
-                    pass
+            set_server_status(get_current_project(), ServerStatus.STOPPED)
+            startup_logger.info("Server status updated to 'stopped'")
 
         # Run server with asyncio
         asyncio.run(run_server())
