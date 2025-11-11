@@ -124,6 +124,7 @@ def create_app() -> FastAPI:
 
         _ = get_db_engine()
     except Exception:
+        # DB engine creation is optional warmup - safe to skip if it fails
         pass
 
     app.include_router(chat_router)
