@@ -259,7 +259,6 @@ if __name__ == "__main__":
             # Uvicorn runtime attribute, not in type stubs - safe to set dynamically
             server.install_signal_handlers = False  # type: ignore[attr-defined]
         except Exception:
-            # Attribute may not exist in some uvicorn versions - safe to ignore
             pass
 
         async def run_server():
