@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import os
 import socket
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -134,15 +133,12 @@ def ensure_singleton_and_select_port(
         and existing_status in running_states
     ):
         # Mark as crashed before starting new server
-        status_doc = existing.copy()
-        status_doc["server_status"] = ServerStatus.CRASHED.value
-        status_doc["server_updated_at"] = datetime.now(UTC).isoformat()
-        status_doc["server_error"] = (
-            f"Server process (pid {existing_pid}) terminated unexpectedly while in '{existing_status}' state"
+        # Use StatusManager for atomic update with proper locking
+        manager = get_status_manager(project)
+        manager.update_server_status(
+            ServerStatus.CRASHED,
+            error=f"Server process (pid {existing_pid}) terminated unexpectedly while in '{existing_status}' state",
         )
-        status_doc.pop("server_pid", None)
-        status_doc.pop("port", None)
-        write_status(project, status_doc)
 
     # Only block if process is alive AND status indicates server is running/starting
     # "error", "crashed", and "stopped" states don't block new server startup
@@ -177,20 +173,12 @@ def ensure_singleton_and_select_port(
 
     # Write initial status with server_status="starting"
     # Server is NOT ready yet - still need to initialize dialogs, config, etc.
-    now = datetime.now(UTC).isoformat()
-    new_status_doc: dict[str, Any] = {
-        "server_status": ServerStatus.STARTING.value,
-        "server_pid": os.getpid(),
-        "port": chosen,
-        "server_started_at": now,
-        "server_updated_at": now,
-        "scan_status": existing.get("scan_status") or ScanStatus.IDLE.value,
-        "scan_started_at": existing.get("scan_started_at"),
-        "scan_updated_at": existing.get("scan_updated_at"),
-        "scan_pid": existing.get("scan_pid"),
-        "scan_task_id": existing.get("scan_task_id"),
-        "error": existing.get("error"),
-        "scan_progress": existing.get("scan_progress"),
-    }
-    write_status(project, new_status_doc)
+    # Use StatusManager for atomic update with proper locking
+    # StatusManager preserves scan fields automatically
+    manager = get_status_manager(project)
+    manager.update_server_status(
+        ServerStatus.STARTING,
+        pid=os.getpid(),
+        port=chosen,
+    )
     return chosen

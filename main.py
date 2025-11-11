@@ -232,19 +232,19 @@ if __name__ == "__main__":
         reload_enabled_env = os.getenv("SERVER_RELOAD", "false").lower()
         reload_enabled = reload_enabled_env in {"1", "true", "yes", "on"}
 
-        # Custom Server subclass to set status to 'ready' after server starts listening
+        # Override server.startup() to mark status='ready' after port is listening.
+        # Can't use lifespan startup hook - it runs before server binds the socket.
         class AgentSmithyServer(uvicorn.Server):
             async def startup(self, sockets=None):
-                """Override startup to set status to 'ready' after server starts listening."""
                 await super().startup(sockets=sockets)
-                # Server is now listening, mark as ready
                 from agentsmithy.core.project_runtime import set_server_status
                 from agentsmithy.core.status_manager import ServerStatus
 
                 set_server_status(get_current_project(), ServerStatus.READY)
                 startup_logger.info("Server status updated to 'ready'")
 
-        # Create custom server with lifespan enabled for proper startup/shutdown
+        # lifespan="on" enables app.py startup/shutdown hooks.
+        # Note: CancelledError in logs during shutdown is expected (uvicorn/starlette), ignore it.
         config = uvicorn.Config(
             "agentsmithy.api.server:app",
             host=settings.server_host,
