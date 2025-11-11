@@ -77,20 +77,9 @@ The status file is located at:
 ### 1. `starting`
 **Description**: Server process started, initializing (dialogs, config, etc.) but not yet listening on port.
 
-**When Set**:
-- Right after `ensure_singleton_and_select_port()` selects a free port
-- Before server begins listening
+**When Set**: Right after port selection, before server begins listening
 
-**Status Fields**:
-```json
-{
-  "server_status": "starting",
-  "server_pid": 12345,
-  "port": 8765,
-  "server_started_at": "2025-11-08T12:00:00.000Z",
-  "server_updated_at": "2025-11-08T12:00:00.000Z"
-}
-```
+**Fields Present**: `server_pid`, `port`, `server_started_at`, `server_updated_at`
 
 **Client Action**: Wait - server is not ready yet
 
@@ -99,20 +88,9 @@ The status file is located at:
 ### 2. `ready`
 **Description**: Server is listening on port and ready to accept requests.
 
-**When Set**:
-- After `uvicorn.Server.startup()` completes (port is listening)
-- All initialization (dialogs, config watcher) completed successfully
+**When Set**: After server startup completes (port is listening, all initialization done)
 
-**Status Fields**:
-```json
-{
-  "server_status": "ready",
-  "server_pid": 12345,
-  "port": 8765,
-  "server_started_at": "2025-11-08T12:00:00.000Z",
-  "server_updated_at": "2025-11-08T12:00:05.123Z"
-}
-```
+**Fields Present**: `server_pid`, `port`, `server_started_at`, `server_updated_at`
 
 **Client Action**: Safe to make requests
 
@@ -121,20 +99,9 @@ The status file is located at:
 ### 3. `stopping`
 **Description**: Server received shutdown signal and is gracefully stopping.
 
-**When Set**:
-- After receiving SIGTERM or SIGINT
-- Before cleanup begins
+**When Set**: After receiving SIGTERM or SIGINT, before cleanup begins
 
-**Status Fields**:
-```json
-{
-  "server_status": "stopping",
-  "server_pid": 12345,
-  "port": 8765,
-  "server_started_at": "2025-11-08T12:00:00.000Z",
-  "server_updated_at": "2025-11-08T12:05:00.000Z"
-}
-```
+**Fields Present**: `server_pid`, `port`, `server_started_at`, `server_updated_at`
 
 **Client Action**: Server is shutting down, wait or restart
 
@@ -143,19 +110,9 @@ The status file is located at:
 ### 4. `stopped`
 **Description**: Server shut down normally (graceful shutdown completed).
 
-**When Set**:
-- After successful cleanup (config watcher stopped, DB closed, etc.)
-- All server fields cleared
+**When Set**: After successful cleanup completes
 
-**Status Fields**:
-```json
-{
-  "server_status": "stopped",
-  "server_updated_at": "2025-11-08T12:05:01.000Z",
-  "scan_status": "idle"
-}
-```
-Note: `server_pid`, `port`, `server_started_at`, and `server_error` are cleared.
+**Fields Present**: `server_updated_at` only (all server fields cleared)
 
 **Client Action**: Can start new server instance
 
@@ -164,20 +121,9 @@ Note: `server_pid`, `port`, `server_started_at`, and `server_error` are cleared.
 ### 5. `error`
 **Description**: Server failed to start due to configuration or initialization error.
 
-**When Set**:
-- Configuration validation failed (missing API keys, invalid settings)
-- Initialization failed (dialogs creation, config loading, etc.)
+**When Set**: Configuration validation or initialization failed
 
-**Status Fields**:
-```json
-{
-  "server_status": "error",
-  "server_updated_at": "2025-11-08T12:00:02.000Z",
-  "server_error": "Configuration validation failed: OPENAI_API_KEY not set",
-  "scan_status": "idle"
-}
-```
-Note: `server_pid` and `port` are cleared when entering error state.
+**Fields Present**: `server_updated_at`, `server_error` (server_pid and port cleared)
 
 **Client Action**: **Fix configuration before restart**. Status `error` does not block new server startup, but retrying without fixing the issue is pointless.
 
@@ -186,20 +132,9 @@ Note: `server_pid` and `port` are cleared when entering error state.
 ### 6. `crashed`
 **Description**: Server terminated unexpectedly (segfault, kill -9, unhandled exception).
 
-**When Set**:
-- Detected by next server start: if previous status was `starting`/`ready`/`stopping` but PID is dead
-- Automatically marked as `crashed` before new server starts
+**When Set**: Detected by next server start when previous status was running but PID is dead
 
-**Status Fields**:
-```json
-{
-  "server_status": "crashed",
-  "server_updated_at": "2025-11-08T12:05:00.000Z",
-  "server_error": "Server process (pid 12345) terminated unexpectedly while in 'ready' state",
-  "scan_status": "idle"
-}
-```
-Note: `server_pid` and `port` are cleared.
+**Fields Present**: `server_updated_at`, `server_error` (server_pid and port cleared)
 
 **Client Action**: **Safe to retry immediately**. Unlike `error` state, this is not a configuration issue - could be transient failure, OOM, etc. Automatic restart is reasonable.
 
@@ -207,85 +142,21 @@ Note: `server_pid` and `port` are cleared.
 
 ### Starting Server
 
-```python
-def wait_for_server_ready(status_path: Path, timeout: float = 10.0) -> bool:
-    """Wait for server to reach 'ready' state.
-    
-    Returns:
-        True if ready, False if error/timeout
-    """
-    start = time.time()
-    
-    while time.time() - start < timeout:
-        status = read_status_json(status_path)
-        server_status = status.get("server_status")
-        
-        if server_status == "ready":
-            # Verify PID is alive
-            pid = status.get("server_pid")
-            if pid and is_pid_alive(pid):
-                return True
-        
-        elif server_status == "error":
-            # Server failed to start
-            error = status.get("server_error", "Unknown error")
-            raise ServerStartupError(error)
-        
-        elif server_status in ("stopped", None):
-            # Not started or crashed
-            continue
-        
-        time.sleep(0.1)
-    
-    return False
-```
+When starting a server, poll `status.json` until:
+- `server_status` becomes `"ready"` AND `server_pid` is alive → proceed
+- `server_status` becomes `"error"` → fix configuration before retrying
+- Timeout expires → check logs for issues
 
 ### Checking Server Status
 
-```python
-def check_server_status(status_path: Path) -> ServerState:
-    """Check current server state."""
-    status = read_status_json(status_path)
-    server_status = status.get("server_status")
-    pid = status.get("server_pid")
-    
-    # Check for undetected crash (will be marked as crashed on next start)
-    if server_status in ("starting", "ready", "stopping"):
-        if pid and not is_pid_alive(pid):
-            return ServerState.CRASHED
-    
-    # Map status to state
-    status_map = {
-        "starting": ServerState.STARTING,
-        "ready": ServerState.READY,
-        "stopping": ServerState.STOPPING,
-        "stopped": ServerState.STOPPED,
-        "error": ServerState.ERROR,
-        "crashed": ServerState.CRASHED,
-    }
-    
-    return status_map.get(server_status, ServerState.UNKNOWN)
-```
+Clients should:
+1. Read `status.json` to get `server_status` and `server_pid`
+2. If status is `starting`/`ready`/`stopping`, verify PID is alive
+3. If PID is dead but status indicates running → treat as crashed
 
 ### Health Check Endpoint
 
-Clients can also query `/health` endpoint:
-
-```bash
-curl http://localhost:8765/health
-```
-
-Response:
-```json
-{
-  "status": "ok",
-  "service": "agentsmithy-server",
-  "server_status": "ready",
-  "port": 8765,
-  "pid": 12345,
-  "server_error": null
-}
-```
+Use the `/health` endpoint to query server status over HTTP (e.g., `GET http://localhost:8765/health`).
 
 ## Singleton Enforcement
 
@@ -304,84 +175,11 @@ Only one server instance per project is allowed:
 
 ## Thread Safety
 
-All status updates are atomic using:
+Status updates are atomic using:
 1. **Lock**: Python threading Lock for in-process atomicity
 2. **Temp file + rename**: Atomic file writes to prevent corruption
 
-```python
-# StatusManager ensures atomic updates
-with self._lock:
-    doc = self._read()
-    doc["server_status"] = "ready"
-    self._write(doc)  # Writes to .tmp then renames
-```
-
-## Examples
-
-### Example 1: Normal Startup
-
-```json
-// Step 1: Starting (port selected but not listening yet)
-{
-  "server_status": "starting",
-  "server_pid": 12345,
-  "port": 8765,
-  "server_started_at": "2025-11-08T12:00:00.000Z",
-  "server_updated_at": "2025-11-08T12:00:00.000Z"
-}
-
-// Step 2: Ready (port now listening)
-{
-  "server_status": "ready",
-  "server_pid": 12345,
-  "port": 8765,
-  "server_started_at": "2025-11-08T12:00:00.000Z",
-  "server_updated_at": "2025-11-08T12:00:05.123Z"
-}
-```
-
-### Example 2: Configuration Error
-
-```json
-{
-  "server_status": "error",
-  "server_updated_at": "2025-11-08T12:00:02.000Z",
-  "server_error": "Configuration validation failed: OPENAI_API_KEY not set",
-  "scan_status": "idle"
-}
-```
-
-### Example 3: Crash Detected
-
-```json
-// Server crashed while running, detected on next start
-{
-  "server_status": "crashed",
-  "server_updated_at": "2025-11-08T12:10:00.000Z",
-  "server_error": "Server process (pid 12345) terminated unexpectedly while in 'ready' state",
-  "scan_status": "idle"
-}
-```
-
-### Example 4: Graceful Shutdown
-
-```json
-// Stopping
-{
-  "server_status": "stopping",
-  "server_pid": 12345,
-  "port": 8765,
-  "server_started_at": "2025-11-08T12:00:00.000Z",
-  "server_updated_at": "2025-11-08T12:05:00.000Z"
-}
-
-// Stopped
-{
-  "server_status": "stopped",
-  "server_updated_at": "2025-11-08T12:05:01.000Z",
-  "scan_status": "idle"
-}
-```
+The `StatusManager` class in `agentsmithy/core/status_manager.py` handles all atomic operations.
 
 ## See Also
 
