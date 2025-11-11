@@ -7,11 +7,11 @@ Loads .env file from --workdir if present to populate environment variables.
 Requires --workdir path and proper configuration (model and API key).
 """
 
+import argparse
 import asyncio
 import os
 import signal
 import sys
-from argparse import ArgumentParser
 from pathlib import Path
 
 # Add the project root to Python path
@@ -22,7 +22,7 @@ shutdown_event = asyncio.Event()
 
 if __name__ == "__main__":
     # Parse arguments FIRST (before any config validation) so --help works always
-    parser = ArgumentParser(description="Start AgentSmithy server")
+    parser = argparse.ArgumentParser(description="Start AgentSmithy server")
     parser.add_argument(
         "--workdir",
         required=True,
@@ -40,8 +40,9 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--log-colors",
-        type=lambda x: x.lower() in ("true", "1", "yes", "on"),
-        help="Enable colored logs (true/false). Overrides config and LOG_COLORS env var.",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Enable/disable colored logs (use --log-colors or --no-log-colors). Overrides config and LOG_COLORS env var.",
     )
     # No --project: workdir is the project
     args, _ = parser.parse_known_args()
