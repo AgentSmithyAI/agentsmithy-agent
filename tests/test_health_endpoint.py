@@ -130,5 +130,21 @@ def test_health_endpoint_no_status_file(client, temp_workspace):
     assert data["server_status"] is None  # No status file = None
 
 
+def test_health_endpoint_corrupted_status_file(client, temp_workspace):
+    """Test health endpoint when status.json is corrupted."""
+    # Write invalid JSON to status file
+    status_file = temp_workspace.root_state_dir / "status.json"
+    status_file.parent.mkdir(parents=True, exist_ok=True)
+    status_file.write_text("{ invalid json }")
+
+    response = client.get("/health")
+    assert response.status_code == 200
+
+    data = response.json()
+    assert data["status"] == "ok"
+    # When file is corrupted, read_status returns {}, so server_status is None
+    assert data["server_status"] is None
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

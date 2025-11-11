@@ -8,6 +8,7 @@ from agentsmithy.api.deps import get_project
 from agentsmithy.api.schemas import HealthResponse
 from agentsmithy.core.project import Project
 from agentsmithy.core.project_runtime import read_status
+from agentsmithy.utils.logger import api_logger
 
 router = APIRouter()
 
@@ -31,10 +32,16 @@ async def health(project: Project = Depends(get_project)):  # noqa: B008
             pid=os.getpid(),  # Current process PID
             server_error=status_doc.get("server_error"),
         )
-    except Exception:
-        # Fallback if status can't be read
+    except Exception as e:
+        # Log the error - this might indicate permissions issues, corrupt file, etc.
+        api_logger.error(
+            "Failed to read server status file",
+            error=str(e),
+            exc_info=True,
+        )
         return HealthResponse(
             status="ok",
             service="agentsmithy-server",
             server_status="unknown",
+            server_error=f"Failed to read status: {str(e)}",
         )
