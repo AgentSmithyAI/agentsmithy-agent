@@ -54,6 +54,14 @@ async def lifespan(app: FastAPI):
             api_logger.info("Config file watcher started with change callback")
     except Exception as e:
         api_logger.error("Startup initialization failed", exc_info=True, error=str(e))
+        # Mark server as error on startup failure
+        from agentsmithy.core.project_runtime import set_server_status
+        from agentsmithy.core.status_manager import ServerStatus
+
+        set_server_status(
+            get_current_project(), ServerStatus.ERROR, error=f"Startup failed: {str(e)}"
+        )
+        raise
 
     yield
 
@@ -116,6 +124,7 @@ def create_app() -> FastAPI:
 
         _ = get_db_engine()
     except Exception:
+        # DB engine creation is optional warmup - safe to skip if it fails
         pass
 
     app.include_router(chat_router)

@@ -32,6 +32,12 @@ class ChatResponse(BaseModel):
 class HealthResponse(BaseModel):
     status: str = "ok"
     service: str = "agentsmithy-server"
+    server_status: str | None = (
+        None  # starting | ready | stopping | stopped | error | crashed
+    )
+    port: int | None = None
+    pid: int | None = None
+    server_error: str | None = None  # Error message if server failed
 
 
 class DialogCreateRequest(BaseModel):

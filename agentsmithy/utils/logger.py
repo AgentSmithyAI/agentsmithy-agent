@@ -15,12 +15,14 @@ def configure_structlog():
     and controllable by levels. No stdout/stderr suppression hacks needed.
     """
     log_format = os.getenv("LOG_FORMAT", "pretty").lower()
+    log_colors_env = os.getenv("LOG_COLORS", "true").lower()
+    log_colors = log_colors_env in ("true", "1", "yes", "on")
 
     # Choose renderer for final output
     if log_format == "json":
         renderer = structlog.processors.JSONRenderer()
     else:
-        renderer = structlog.dev.ConsoleRenderer(colors=True)
+        renderer = structlog.dev.ConsoleRenderer(colors=log_colors)
 
     # Root logger + handler with ProcessorFormatter
     logging.root.handlers = []

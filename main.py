@@ -7,11 +7,11 @@ Loads .env file from --workdir if present to populate environment variables.
 Requires --workdir path and proper configuration (model and API key).
 """
 
+import argparse
 import asyncio
 import os
 import signal
 import sys
-from argparse import ArgumentParser
 from pathlib import Path
 
 # Add the project root to Python path
@@ -22,7 +22,7 @@ shutdown_event = asyncio.Event()
 
 if __name__ == "__main__":
     # Parse arguments FIRST (before any config validation) so --help works always
-    parser = ArgumentParser(description="Start AgentSmithy server")
+    parser = argparse.ArgumentParser(description="Start AgentSmithy server")
     parser.add_argument(
         "--workdir",
         required=True,
@@ -33,8 +33,26 @@ if __name__ == "__main__":
         required=False,
         help="IDE identifier (e.g., 'vscode', 'jetbrains', 'vim')",
     )
+    parser.add_argument(
+        "--log-format",
+        choices=["pretty", "json"],
+        help="Log format (pretty or json). Overrides config and LOG_FORMAT env var.",
+    )
+    parser.add_argument(
+        "--log-colors",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Enable/disable colored logs (use --log-colors or --no-log-colors). Overrides config and LOG_COLORS env var.",
+    )
     # No --project: workdir is the project
     args, _ = parser.parse_known_args()
+
+    # Set logging env vars from CLI flags before logger import
+    # These override config and env vars, providing command-line precedence
+    if args.log_format:
+        os.environ["LOG_FORMAT"] = args.log_format
+    if args.log_colors is not None:
+        os.environ["LOG_COLORS"] = "true" if args.log_colors else "false"
 
     # Setup logging for startup (after argparse, so --help doesn't need logger)
     from agentsmithy.utils.logger import get_logger
@@ -109,15 +127,9 @@ if __name__ == "__main__":
         startup_logger.error("Failed to initialize configuration", error=str(e))
         sys.exit(1)
 
-    # Validate required settings (strict models + API key)
     try:
-        settings.validate_or_raise()
-    except ValueError as e:
-        startup_logger.error("Invalid configuration", error=str(e))
-        sys.exit(1)
-
-    try:
-        # Ensure hidden state directory exists
+        # Ensure hidden state directory exists FIRST
+        # We need this to write status.json even on early failures
         try:
             # Initialize a workspace entity to own directory management
             from agentsmithy.core.project import set_workspace
@@ -132,9 +144,29 @@ if __name__ == "__main__":
 
         # Delegate port selection and status.json management to project runtime
         from agentsmithy.core.project import get_current_project
-        from agentsmithy.core.project_runtime import (
-            ensure_singleton_and_select_port,
-        )
+        from agentsmithy.core.project_runtime import ensure_singleton_and_select_port
+        from agentsmithy.core.status_manager import ServerStatus
+
+        # Validate required settings (strict models + API key)
+        # If validation fails, we'll mark server as stopped before exiting
+        try:
+            settings.validate_or_raise()
+        except ValueError as e:
+            startup_logger.error("Invalid configuration", error=str(e))
+            # Write status as error (not stopped - this is a config failure)
+            try:
+                from agentsmithy.core.project_runtime import set_server_status
+
+                set_server_status(
+                    get_current_project(),
+                    ServerStatus.ERROR,
+                    error=f"Configuration validation failed: {str(e)}",
+                )
+            except Exception:
+                # Best effort status update - if this fails, just exit
+                # (project runtime may not be initialized yet)
+                pass
+            sys.exit(1)
 
         chosen_port = ensure_singleton_and_select_port(
             get_current_project(),
@@ -142,6 +174,7 @@ if __name__ == "__main__":
             host=settings.server_host,
             max_probe=20,
         )
+        # Status is now "starting" - server not ready yet
         # Update config with the chosen port
         if config_manager:
             asyncio.run(config_manager.set("server_port", chosen_port))
@@ -190,34 +223,47 @@ if __name__ == "__main__":
             state_dir=str(state_dir),
         )
 
-        # Use custom logging configuration for consistent JSON output
-        from agentsmithy.config import LOGGING_CONFIG
+        # Use custom logging configuration for consistent output
+        from agentsmithy.config.logging_config import get_logging_config
+
+        LOGGING_CONFIG = get_logging_config()
 
         # Allow reload to be controlled via env (default False for prod)
         reload_enabled_env = os.getenv("SERVER_RELOAD", "false").lower()
         reload_enabled = reload_enabled_env in {"1", "true", "yes", "on"}
 
-        # Create custom server to pass shutdown event
-        # Disable ASGI lifespan to avoid starlette lifespan CancelledError on shutdown
-        # Manual startup/shutdown hooks are used instead (see below)
+        # Override server.startup() to mark status='ready' after port is listening.
+        # Can't use lifespan startup hook - it runs before server binds the socket.
+        class AgentSmithyServer(uvicorn.Server):
+            async def startup(self, sockets=None):
+                await super().startup(sockets=sockets)
+                from agentsmithy.core.project_runtime import set_server_status
+                from agentsmithy.core.status_manager import ServerStatus
+
+                set_server_status(get_current_project(), ServerStatus.READY)
+                startup_logger.info("Server status updated to 'ready'")
+
+        # lifespan="on" enables app.py startup/shutdown hooks.
+        # Note: CancelledError in logs during shutdown is expected (uvicorn/starlette), ignore it.
         config = uvicorn.Config(
             "agentsmithy.api.server:app",
             host=settings.server_host,
             port=chosen_port,
             reload=reload_enabled,
             log_config=LOGGING_CONFIG,
-            lifespan="off",
+            lifespan="on",
             timeout_graceful_shutdown=5,
         )
-        server = uvicorn.Server(config)
+        server = AgentSmithyServer(config)
         # We'll manage signals ourselves; avoid double-handling in packaged builds
         try:
+            # Uvicorn runtime attribute, not in type stubs - safe to set dynamically
             server.install_signal_handlers = False  # type: ignore[attr-defined]
         except Exception:
             pass
 
         async def run_server():
-            # Pass shutdown event to the app
+            # Pass shutdown event and other state to the app before lifespan starts
             from agentsmithy.api.server import app
 
             app.state.shutdown_event = shutdown_event
@@ -227,6 +273,7 @@ if __name__ == "__main__":
             app.state.config_manager = config_manager
 
             # Log runtime environment information
+            from agentsmithy import __version__
             from agentsmithy.platforms import get_os_adapter
 
             adapter = get_os_adapter()
@@ -239,12 +286,13 @@ if __name__ == "__main__":
 
             startup_logger.info(
                 "Runtime environment",
+                version=__version__,
+                ide=args.ide or "unknown",
                 system=os_ctx.get("system", "Unknown"),
                 release=os_ctx.get("release", "unknown"),
                 machine=os_ctx.get("machine", "unknown"),
                 python=os_ctx.get("python", "unknown"),
                 shell=shell,
-                ide=args.ide or "unknown",
             )
 
             # Optionally run project inspector in background (non-blocking)
@@ -253,6 +301,7 @@ if __name__ == "__main__":
 
                 async def _run_inspector():
                     from agentsmithy.core.project_runtime import set_scan_status
+                    from agentsmithy.core.status_manager import ScanStatus
 
                     try:
                         # Check if model is configured
@@ -272,12 +321,12 @@ if __name__ == "__main__":
                             )
                             set_scan_status(
                                 project,
-                                status="error",
+                                ScanStatus.ERROR,
                                 error=error_msg,
                             )
                             return
 
-                        set_scan_status(project, status="scanning", progress=0)
+                        set_scan_status(project, ScanStatus.SCANNING, progress=0)
 
                         inspector = ProjectInspectorAgent(
                             OpenAIProvider(
@@ -288,7 +337,7 @@ if __name__ == "__main__":
                         )
                         await inspector.inspect_and_save(project)
 
-                        set_scan_status(project, status="done", progress=100)
+                        set_scan_status(project, ScanStatus.DONE, progress=100)
 
                         startup_logger.info(
                             "Project analyzed by inspector agent and metadata saved",
@@ -303,7 +352,7 @@ if __name__ == "__main__":
                             error_type="configuration",
                             error=error_msg,
                         )
-                        set_scan_status(project, status="error", error=error_msg)
+                        set_scan_status(project, ScanStatus.ERROR, error=error_msg)
                     except Exception as e:
                         import traceback as _tb
 
@@ -315,49 +364,16 @@ if __name__ == "__main__":
                                 _tb.format_exception(type(e), e, e.__traceback__)
                             ),
                         )
-                        set_scan_status(project, status="error", error=error_msg)
+                        set_scan_status(project, ScanStatus.ERROR, error=error_msg)
 
                 inspector_task = asyncio.create_task(_run_inspector())
                 app.state.inspector_task = inspector_task
 
-            # --- Manual startup (since lifespan is off) ---
-            try:
-                # Ensure dialogs state and default dialog
-                from agentsmithy.api.deps import (
-                    get_chat_service,
-                    set_shutdown_event,
-                )
-                from agentsmithy.core.project import get_current_project
-
-                project_obj = get_current_project()
-                project_obj.ensure_dialogs_dir()
-                index = project_obj.load_dialogs_index()
-                dialogs = index.get("dialogs") or []
-                if not dialogs:
-                    project_obj.create_dialog(title=None, set_current=True)
-
-                # Propagate shutdown event to chat service
-                set_shutdown_event(shutdown_event)
-
-                # Start config watcher and register change callback
-                if hasattr(app.state, "config_manager") and app.state.config_manager:
-
-                    def on_config_change(new_config):
-                        # Invalidate orchestrator on config change
-                        chat_service_local = get_chat_service()
-                        chat_service_local.invalidate_orchestrator()
-
-                    app.state.config_manager.register_change_callback(on_config_change)
-                    await app.state.config_manager.start_watching()
-                    startup_logger.info(
-                        "Config file watcher started with change callback"
-                    )
-            except Exception as e:
-                startup_logger.error("Startup initialization failed", error=str(e))
-
-            # Monitor shutdown event and uvicorn serve()
-            shutdown_task = asyncio.create_task(shutdown_event.wait())
+            # Start uvicorn server (lifespan context manager handles startup/shutdown)
             serve_task = asyncio.create_task(server.serve())
+
+            # Monitor shutdown event
+            shutdown_task = asyncio.create_task(shutdown_event.wait())
 
             # Wait for either shutdown or server to complete
             done, _pending = await asyncio.wait(
@@ -367,6 +383,11 @@ if __name__ == "__main__":
             # If shutdown was triggered, stop the server
             if shutdown_task in done:
                 startup_logger.info("Stopping server due to shutdown signal...")
+                # Update status to stopping before actually stopping
+                from agentsmithy.core.project_runtime import set_server_status
+                from agentsmithy.core.status_manager import ServerStatus
+
+                set_server_status(get_current_project(), ServerStatus.STOPPING)
                 server.should_exit = True
                 try:
                     await serve_task
@@ -374,31 +395,12 @@ if __name__ == "__main__":
                     # Ignore cancellation/transport errors during shutdown
                     pass
 
-            # --- Manual shutdown (since lifespan is off) ---
-            try:
-                from agentsmithy.api.deps import (
-                    dispose_db_engine,
-                    get_chat_service,
-                )
+            # Mark server as stopped after shutdown completes
+            from agentsmithy.core.project_runtime import set_server_status
+            from agentsmithy.core.status_manager import ServerStatus
 
-                # Stop config watcher
-                if hasattr(app.state, "config_manager") and app.state.config_manager:
-                    try:
-                        await app.state.config_manager.stop_watching()
-                        startup_logger.info("Config file watcher stopped")
-                    except Exception:
-                        pass
-
-                chat_service = get_chat_service()
-                try:
-                    await chat_service.shutdown()
-                except Exception:
-                    pass
-
-                dispose_db_engine()
-                startup_logger.info("Chat service shutdown completed")
-            except Exception as e:
-                startup_logger.error("Shutdown cleanup failed", error=str(e))
+            set_server_status(get_current_project(), ServerStatus.STOPPED)
+            startup_logger.info("Server status updated to 'stopped'")
 
         # Run server with asyncio
         asyncio.run(run_server())

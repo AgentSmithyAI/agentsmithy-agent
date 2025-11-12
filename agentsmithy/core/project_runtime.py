@@ -3,11 +3,11 @@ from __future__ import annotations
 import json
 import os
 import socket
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from .project import Project
+from .status_manager import ScanStatus, ServerStatus, StatusManager
 
 
 def _pid_alive(pid: int) -> bool:
@@ -20,6 +20,11 @@ def _pid_alive(pid: int) -> bool:
 
 def _status_path(project: Project) -> Path:
     return (project.state_dir / "status.json").resolve()
+
+
+def get_status_manager(project: Project) -> StatusManager:
+    """Get StatusManager instance for a project."""
+    return StatusManager(_status_path(project))
 
 
 def read_status(project: Project) -> dict[str, Any]:
@@ -46,7 +51,7 @@ def write_status(project: Project, status_doc: dict[str, Any]) -> None:
 
 def set_scan_status(
     project: Project,
-    status: str,
+    status: ScanStatus | str,
     *,
     progress: int | None = None,
     error: str | None = None,
@@ -55,26 +60,49 @@ def set_scan_status(
 ) -> None:
     """Update scan-related fields in status.json atomically.
 
-    - status: idle | scanning | done | error | canceled
-    - progress: optional 0..100
-    - error: optional error message
-    - pid/task_id: optional identifiers for the scanning routine
+    Args:
+        status: Scan status enum value or string
+        progress: Optional progress 0-100
+        error: Optional error message
+        pid: Optional scan process PID
+        task_id: Optional scan task identifier
     """
-    doc = read_status(project)
-    now = datetime.now(UTC).isoformat()
-    doc["scan_status"] = status
-    if status == "scanning" and not doc.get("scan_started_at"):
-        doc["scan_started_at"] = now
-    doc["scan_updated_at"] = now
-    if progress is not None:
-        doc["scan_progress"] = max(0, min(100, int(progress)))
-    if error is not None:
-        doc["error"] = error
-    if pid is not None:
-        doc["scan_pid"] = pid
-    if task_id is not None:
-        doc["scan_task_id"] = task_id
-    write_status(project, doc)
+    # Convert string to enum if needed (for backward compatibility)
+    if isinstance(status, str):
+        status = ScanStatus(status)
+
+    manager = get_status_manager(project)
+    manager.update_scan_status(
+        status,
+        progress=progress,
+        error=error,
+        pid=pid,
+        task_id=task_id,
+    )
+
+
+def set_server_status(
+    project: Project,
+    status: ServerStatus | str,
+    *,
+    pid: int | None = None,
+    port: int | None = None,
+    error: str | None = None,
+) -> None:
+    """Update server-related fields in status.json atomically.
+
+    Args:
+        status: Server status enum value or string
+        pid: Optional server PID (set on starting)
+        port: Optional server port (set on starting)
+        error: Optional error message for server failures
+    """
+    # Convert string to enum if needed (for backward compatibility)
+    if isinstance(status, str):
+        status = ServerStatus(status)
+
+    manager = get_status_manager(project)
+    manager.update_server_status(status, pid=pid, port=port, error=error)
 
 
 def ensure_singleton_and_select_port(
@@ -85,15 +113,42 @@ def ensure_singleton_and_select_port(
 ) -> int:
     """Ensure only one server per project and pick a free port.
 
-    - If existing status has a live server_pid, raise RuntimeError
+    - If existing status has a live server_pid with status starting/ready, raise RuntimeError
     - Otherwise pick a free port (starting at base_port), set SERVER_PORT env, and
-      write initial status.json with server_pid/port/timestamp, preserving scan fields.
+      write initial status.json with server_status=starting, preserving scan fields.
     """
     existing = read_status(project)
     existing_pid = existing.get("server_pid")
-    if isinstance(existing_pid, int) and _pid_alive(existing_pid):
+    existing_status = existing.get("server_status")
+
+    # Detect crash: status indicates running but PID is dead
+    running_states = {
+        ServerStatus.STARTING.value,
+        ServerStatus.READY.value,
+        ServerStatus.STOPPING.value,
+    }
+    if (
+        isinstance(existing_pid, int)
+        and not _pid_alive(existing_pid)
+        and existing_status in running_states
+    ):
+        # Mark as crashed before starting new server
+        # Use StatusManager for atomic update with proper locking
+        manager = get_status_manager(project)
+        manager.update_server_status(
+            ServerStatus.CRASHED,
+            error=f"Server process (pid {existing_pid}) terminated unexpectedly while in '{existing_status}' state",
+        )
+
+    # Only block if process is alive AND status indicates server is running/starting
+    # "error", "crashed", and "stopped" states don't block new server startup
+    if (
+        isinstance(existing_pid, int)
+        and _pid_alive(existing_pid)
+        and existing_status in running_states
+    ):
         raise RuntimeError(
-            f"Server already running for project {project.name} at port {existing.get('port')} (pid {existing_pid})"
+            f"Server already running for project {project.name} at port {existing.get('port')} (pid {existing_pid}, status {existing_status})"
         )
 
     def _port_free(port: int) -> bool:
@@ -116,19 +171,14 @@ def ensure_singleton_and_select_port(
     # Export to env so settings pick it up
     os.environ["SERVER_PORT"] = str(chosen)
 
-    # Write initial status
-    now = datetime.now(UTC).isoformat()
-    status_doc: dict[str, Any] = {
-        "server_pid": os.getpid(),
-        "port": chosen,
-        "server_started_at": now,
-        "scan_status": existing.get("scan_status") or "idle",
-        "scan_started_at": existing.get("scan_started_at"),
-        "scan_updated_at": existing.get("scan_updated_at"),
-        "scan_pid": existing.get("scan_pid"),
-        "scan_task_id": existing.get("scan_task_id"),
-        "error": existing.get("error"),
-        "scan_progress": existing.get("scan_progress"),
-    }
-    write_status(project, status_doc)
+    # Write initial status with server_status="starting"
+    # Server is NOT ready yet - still need to initialize dialogs, config, etc.
+    # Use StatusManager for atomic update with proper locking
+    # StatusManager preserves scan fields automatically
+    manager = get_status_manager(project)
+    manager.update_server_status(
+        ServerStatus.STARTING,
+        pid=os.getpid(),
+        port=chosen,
+    )
     return chosen
