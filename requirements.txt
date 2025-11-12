@@ -71,7 +71,7 @@ dulwich==0.24.8
     # via -r requirements.in
 durationpy==0.10
     # via kubernetes
-fastapi==0.121.0
+fastapi==0.121.1
     # via -r requirements.in
 filelock==3.20.0
     # via huggingface-hub
