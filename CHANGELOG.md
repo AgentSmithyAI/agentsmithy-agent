@@ -1,5 +1,14 @@
 <!-- version list -->
 
+## v1.10.0 (2025-11-12)
+
+### Features
+
+- State manager to help IDE track current state
+  ([#59](https://github.com/AgentSmithyAI/agentsmithy-agent/pull/59),
+  [`606f7c7`](https://github.com/AgentSmithyAI/agentsmithy-agent/commit/606f7c793c6754c7bbe50d0e26c2874a0f29d91f))
+
+
 ## v1.9.0 (2025-11-08)
 
 ### Features
