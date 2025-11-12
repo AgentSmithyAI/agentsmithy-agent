@@ -13,6 +13,10 @@ from pathlib import Path
 from threading import Lock
 from typing import Any
 
+from agentsmithy.utils.logger import get_logger
+
+logger = get_logger("status_manager")
+
 
 class ServerStatus(str, Enum):
     """Server status states."""
@@ -55,7 +59,11 @@ class StatusManager:
         """Read current status document."""
         try:
             return json.loads(self.path.read_text(encoding="utf-8"))
-        except Exception:
+        except FileNotFoundError:
+            return {}  # Normal case - file doesn't exist yet
+        except Exception as e:
+            # Corrupted file or other issue - log it for debugging
+            logger.warning("Failed to read status.json", path=str(self.path), error=str(e))
             return {}
 
     def _write(self, doc: dict[str, Any]) -> None:
@@ -67,8 +75,9 @@ class StatusManager:
                 json.dumps(doc, ensure_ascii=False, indent=2), encoding="utf-8"
             )
             tmp.replace(self.path)
-        except Exception:
-            # Best-effort; avoid raising at this layer
+        except Exception as e:
+            # Best-effort; don't crash on write failures (non-critical, clients can use /health)
+            logger.error("Failed to write status.json", path=str(self.path), error=str(e))
             pass
 
     def update_server_status(
