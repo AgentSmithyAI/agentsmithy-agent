@@ -196,9 +196,9 @@ def test_crashed_status_does_not_block_startup():
                 status.get("server_status") == "ready"
             ), f"Expected status 'ready', got {status.get('server_status')}"
 
-            # Verify error is cleared
+            # Verify error is cleared (StatusManager uses .pop() to remove the key)
             assert (
-                "server_error" not in status or status["server_error"] is None
+                "server_error" not in status
             ), "Error should be cleared on successful start"
 
             print("✅ Test passed: Server started successfully after crashed state")

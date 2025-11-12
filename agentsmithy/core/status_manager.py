@@ -63,7 +63,9 @@ class StatusManager:
             return {}  # Normal case - file doesn't exist yet
         except Exception as e:
             # Corrupted file or other issue - log it for debugging
-            logger.warning("Failed to read status.json", path=str(self.path), error=str(e))
+            logger.warning(
+                "Failed to read status.json", path=str(self.path), error=str(e)
+            )
             return {}
 
     def _write(self, doc: dict[str, Any]) -> None:
@@ -77,7 +79,9 @@ class StatusManager:
             tmp.replace(self.path)
         except Exception as e:
             # Best-effort; don't crash on write failures (non-critical, clients can use /health)
-            logger.error("Failed to write status.json", path=str(self.path), error=str(e))
+            logger.error(
+                "Failed to write status.json", path=str(self.path), error=str(e)
+            )
             pass
 
     def update_server_status(
