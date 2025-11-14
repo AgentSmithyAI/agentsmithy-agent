@@ -65,6 +65,7 @@ exclude = [
     "^tests/",
     "^chroma_db/",
     "^venv/",
+    "^examples/",
 ]
 
 [tool.pytest.ini_options]

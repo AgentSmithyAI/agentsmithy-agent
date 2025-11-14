@@ -42,6 +42,8 @@ AgentSmithy is a local server that brings an AI coding assistant to your IDE. It
 - Architecture overview: [docs/architecture.md](./docs/architecture.md)
 - SSE protocol: [docs/sse-protocol.md](./docs/sse-protocol.md)
 - Checkpoints & transactions: [docs/checkpoints-and-transactions.md](./docs/checkpoints-and-transactions.md)
+- Configuration API: [docs/config-endpoint.md](./docs/config-endpoint.md)
+- Provider configuration: [docs/provider-configuration.md](./docs/provider-configuration.md)
 
 ## Getting started
 

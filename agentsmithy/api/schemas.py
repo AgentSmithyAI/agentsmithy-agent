@@ -128,3 +128,23 @@ class DialogHistoryResponse(BaseModel):
     has_more: bool  # Whether there are more events before the returned ones
     first_idx: int  # Index of the first event in the returned list
     last_idx: int  # Index of the last event in the returned list
+
+
+class ConfigResponse(BaseModel):
+    """Response for GET /api/config."""
+
+    config: dict[str, Any]
+
+
+class ConfigUpdateRequest(BaseModel):
+    """Request for PUT /api/config."""
+
+    config: dict[str, Any]
+
+
+class ConfigUpdateResponse(BaseModel):
+    """Response for PUT /api/config."""
+
+    success: bool
+    message: str
+    config: dict[str, Any]
