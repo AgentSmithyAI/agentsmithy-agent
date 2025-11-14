@@ -6,13 +6,14 @@ Welcome to the AgentSmithy documentation.
 
 - [SSE Protocol](./sse-protocol.md) — POST-based SSE streaming, event taxonomy
 - [Server Status Management](./server-status.md) — Server status lifecycle and client integration
+- [Configuration API](./config-endpoint.md) — Runtime configuration management via HTTP
+- [Provider configuration](./provider-configuration.md) and [OpenAI config](./openai-config.md)
 - [Project structure and runtime files](./project-structure.md)
 - [Architecture](./architecture.md)
 - [Dialog History endpoint](./history-endpoint.md)
 - [Checkpoints and Transactions](./checkpoints-and-transactions.md)
 - [Tool results storage design](./tool-results-storage-design.md)
 - [Tool results lazy loading](./tool-results-lazy-loading.md)
-- [Provider configuration](./provider-configuration.md) and [OpenAI config](./openai-config.md)
 - [Graceful shutdown](./graceful-shutdown.md)
 - [Web search tool](./web-search-tool.md)
 
@@ -53,6 +54,8 @@ curl -X POST http://localhost:8765/api/chat \
 
 - `POST /api/chat` — main chat endpoint (supports SSE when `stream=true`)
 - `GET /health` — health check with server status information
+- `GET /api/config` — get current configuration
+- `PUT /api/config` — update configuration (e.g., set API keys)
 - Dialogs API under `/api/dialogs` for managing conversations
 
 If you're integrating a client/editor, start with the [SSE Protocol](./sse-protocol.md) and [Server Status Management](./server-status.md).
