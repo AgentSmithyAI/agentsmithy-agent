@@ -2,6 +2,46 @@
 
 Retrieve and update AgentSmithy configuration at runtime via HTTP.
 
+## Server Startup Without API Key
+
+**Server can start without API keys configured.**
+
+- Server starts successfully even if no API key is set
+- Shows warning in logs but doesn't crash
+- `/api/config` endpoint is available immediately
+- Set API key via endpoint, changes apply instantly via hot reload
+- LLM requests will fail until API key is configured
+
+**Check configuration status:**
+
+Via HTTP:
+```bash
+curl http://localhost:8765/health
+```
+
+Or directly from `status.json` file:
+```bash
+cat .agentsmithy/status.json
+```
+
+Response includes configuration validation:
+
+```json
+{
+  "server_status": "ready",
+  "port": 8765,
+  "config_valid": false,
+  "config_errors": ["API key not configured"],
+  ...
+}
+```
+
+When `config_valid` is `false`, client should prompt user to configure API keys via `/api/config`.
+
+**Config validation is updated automatically:**
+- On server startup → checks config, writes to status.json
+- On config change via `/api/config` → rechecks, updates status.json
+
 ## Hot Reload
 
 **Configuration changes apply immediately without server restart.**

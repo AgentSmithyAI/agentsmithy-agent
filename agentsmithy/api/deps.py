@@ -13,8 +13,13 @@ _chat_service: ChatService | None = None
 _db_engine: Engine | None = None
 
 
-def get_project() -> Project:
-    return get_current_project()
+def get_project() -> Project | None:
+    """Get current project, or None if workspace not initialized."""
+    try:
+        return get_current_project()
+    except RuntimeError:
+        # Workspace not initialized - happens in tests or early startup
+        return None
 
 
 def get_chat_service() -> ChatService:

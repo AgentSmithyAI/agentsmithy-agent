@@ -81,7 +81,9 @@ def test_config_update_triggers_callback(config_manager: ConfigManager):
     assert callback_config.get("test_key") == "test_value"
 
 
-def test_api_endpoint_triggers_callback(client: TestClient, config_manager: ConfigManager):
+def test_api_endpoint_triggers_callback(
+    client: TestClient, config_manager: ConfigManager
+):
     """Test that config update via API endpoint triggers callbacks."""
     callback_called = False
     callback_keys = []
@@ -168,4 +170,3 @@ def test_multiple_callbacks_all_triggered(config_manager: ConfigManager):
 
     assert callback1_called is True
     assert callback2_called is True
-

@@ -38,6 +38,10 @@ class HealthResponse(BaseModel):
     port: int | None = None
     pid: int | None = None
     server_error: str | None = None  # Error message if server failed
+    config_valid: bool | None = (
+        None  # Whether configuration is valid (has API keys, etc)
+    )
+    config_errors: list[str] | None = None  # List of configuration issues if any
 
 
 class DialogCreateRequest(BaseModel):

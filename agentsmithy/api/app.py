@@ -50,6 +50,49 @@ async def lifespan(app: FastAPI):
                 chat_service = get_chat_service()
                 chat_service.invalidate_orchestrator()
 
+                # Update config validity in status.json
+                from agentsmithy.config import settings
+                from agentsmithy.core.project_runtime import read_status, write_status
+
+                try:
+                    project = get_current_project()
+                    status_doc = read_status(project)
+
+                    # Check config validity
+                    config_valid = True
+                    config_errors = []
+                    try:
+                        settings.validate_or_raise()
+                    except ValueError as e:
+                        config_valid = False
+                        error_msg = str(e)
+                        if (
+                            "OPENAI_API_KEY" in error_msg
+                            or "api_key" in error_msg.lower()
+                        ):
+                            config_errors.append("API key not configured")
+                        if "model" in error_msg.lower():
+                            config_errors.append("Model not configured or unsupported")
+                        if not config_errors:
+                            config_errors.append(error_msg)
+
+                    # Update status.json with config validation
+                    status_doc["config_valid"] = config_valid
+                    if config_errors:
+                        status_doc["config_errors"] = config_errors
+                    else:
+                        status_doc.pop("config_errors", None)
+
+                    write_status(project, status_doc)
+                    api_logger.info(
+                        "Updated config validity in status.json",
+                        config_valid=config_valid,
+                    )
+                except Exception as e:
+                    api_logger.warning(
+                        "Failed to update config validity in status.json", error=str(e)
+                    )
+
             app.state.config_manager.register_change_callback(on_config_change)
             await app.state.config_manager.start_watching()
             api_logger.info("Config file watcher started with change callback")

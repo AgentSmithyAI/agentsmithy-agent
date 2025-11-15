@@ -145,28 +145,16 @@ if __name__ == "__main__":
         # Delegate port selection and status.json management to project runtime
         from agentsmithy.core.project import get_current_project
         from agentsmithy.core.project_runtime import ensure_singleton_and_select_port
-        from agentsmithy.core.status_manager import ServerStatus
 
-        # Validate required settings (strict models + API key)
-        # If validation fails, we'll mark server as stopped before exiting
+        # Validate required settings (soft check - warn but don't block startup)
+        # This allows server to start without API keys, which can be configured via /api/config
         try:
             settings.validate_or_raise()
         except ValueError as e:
-            startup_logger.error("Invalid configuration", error=str(e))
-            # Write status as error (not stopped - this is a config failure)
-            try:
-                from agentsmithy.core.project_runtime import set_server_status
-
-                set_server_status(
-                    get_current_project(),
-                    ServerStatus.ERROR,
-                    error=f"Configuration validation failed: {str(e)}",
-                )
-            except Exception:
-                # Best effort status update - if this fails, just exit
-                # (project runtime may not be initialized yet)
-                pass
-            sys.exit(1)
+            startup_logger.warning(
+                "Configuration incomplete - server will start but LLM requests will fail until configured",
+                error=str(e),
+            )
 
         chosen_port = ensure_singleton_and_select_port(
             get_current_project(),
@@ -240,8 +228,32 @@ if __name__ == "__main__":
                 from agentsmithy.core.project_runtime import set_server_status
                 from agentsmithy.core.status_manager import ServerStatus
 
-                set_server_status(get_current_project(), ServerStatus.READY)
-                startup_logger.info("Server status updated to 'ready'")
+                # Check config validity and write to status.json
+                config_valid = True
+                config_errors = []
+                try:
+                    settings.validate_or_raise()
+                except ValueError as e:
+                    config_valid = False
+                    error_msg = str(e)
+                    if "OPENAI_API_KEY" in error_msg or "api_key" in error_msg.lower():
+                        config_errors.append("API key not configured")
+                    if "model" in error_msg.lower():
+                        config_errors.append("Model not configured or unsupported")
+                    if not config_errors:
+                        config_errors.append(error_msg)
+
+                set_server_status(
+                    get_current_project(),
+                    ServerStatus.READY,
+                    config_valid=config_valid,
+                    config_errors=config_errors if config_errors else None,
+                )
+                startup_logger.info(
+                    "Server status updated to 'ready'",
+                    config_valid=config_valid,
+                    config_errors=config_errors if config_errors else None,
+                )
 
         # lifespan="on" enables app.py startup/shutdown hooks.
         # Note: CancelledError in logs during shutdown is expected (uvicorn/starlette), ignore it.

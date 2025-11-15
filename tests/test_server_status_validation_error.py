@@ -19,16 +19,16 @@ def read_status(workdir: Path) -> dict:
 
 
 def test_server_status_validation_error():
-    """Test that server_status='error' with error when validation fails."""
+    """Test that server starts with warning when validation fails (soft validation)."""
     # Create temp workdir
     with tempfile.TemporaryDirectory() as tmpdir:
         workdir = Path(tmpdir)
 
-        # Create .env WITHOUT API key - will fail validation
+        # Create .env WITHOUT API key - will produce validation warning but server starts
         env_file = workdir / ".env"
         env_file.write_text("AGENTSMITHY_MODEL=gpt-4o\n")  # No API key!
 
-        # Start server process - should fail validation
+        # Start server process - should start despite validation warning
         port = 18766  # Different port
         env = os.environ.copy()
         env["SERVER_PORT"] = str(port)
@@ -51,27 +51,25 @@ def test_server_status_validation_error():
         )
 
         try:
-            # Wait for process to exit (should fail fast)
-            exit_code = proc.wait(timeout=10)
+            # Wait for server to start (should succeed now with soft validation)
+            import time
 
-            # Should exit with error code
-            assert exit_code != 0, f"Expected non-zero exit code, got {exit_code}"
+            time.sleep(3)  # Give server time to start
 
-            # Check status file was created with error state
+            # Server should be running
+            assert proc.poll() is None, "Server should still be running"
+
+            # Check status file shows ready (not error)
             status = read_status(workdir)
-            assert status.get("server_status") == "error", (
-                f"Expected server_status='error' after validation error, "
+            # Server should be in 'ready' state, not 'error'
+            # (validation is soft - just a warning)
+            assert status.get("server_status") in ["ready", "starting"], (
+                f"Expected server_status='ready' or 'starting' with soft validation, "
                 f"got: {status.get('server_status')}"
             )
 
-            assert "server_error" in status, "Expected server_error in status"
-            assert (
-                "Configuration validation failed" in status["server_error"]
-                or "API key" in status["server_error"]
-            ), f"Expected validation error message, got: {status.get('server_error')}"
-
             print(
-                "✅ Test passed: server_status='error' with error message on validation failure"
+                "✅ Test passed: server starts successfully with soft validation (missing API key)"
             )
 
         finally:

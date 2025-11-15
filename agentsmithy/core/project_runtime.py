@@ -88,6 +88,8 @@ def set_server_status(
     pid: int | None = None,
     port: int | None = None,
     error: str | None = None,
+    config_valid: bool | None = None,
+    config_errors: list[str] | None = None,
 ) -> None:
     """Update server-related fields in status.json atomically.
 
@@ -96,13 +98,22 @@ def set_server_status(
         pid: Optional server PID (set on starting)
         port: Optional server port (set on starting)
         error: Optional error message for server failures
+        config_valid: Optional flag indicating if configuration is valid
+        config_errors: Optional list of configuration error messages
     """
     # Convert string to enum if needed (for backward compatibility)
     if isinstance(status, str):
         status = ServerStatus(status)
 
     manager = get_status_manager(project)
-    manager.update_server_status(status, pid=pid, port=port, error=error)
+    manager.update_server_status(
+        status,
+        pid=pid,
+        port=port,
+        error=error,
+        config_valid=config_valid,
+        config_errors=config_errors,
+    )
 
 
 def ensure_singleton_and_select_port(
