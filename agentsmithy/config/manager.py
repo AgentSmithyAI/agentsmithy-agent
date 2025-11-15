@@ -6,7 +6,11 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, TypeVar
 
-from agentsmithy.config.providers import ConfigProvider, LocalFileConfigProvider
+from agentsmithy.config.providers import (
+    ConfigProvider,
+    LayeredConfigProvider,
+    LocalFileConfigProvider,
+)
 from agentsmithy.utils.logger import get_logger
 
 logger = get_logger("config.manager")
@@ -158,19 +162,34 @@ _config_manager: ConfigManager | None = None
 
 
 def create_config_manager(
-    config_dir: Path,
+    global_config_dir: Path,
+    *,
+    local_config_path: Path | None = None,
     defaults: dict[str, Any] | None = None,
 ) -> ConfigManager:
     """Create and initialize the global config manager.
 
     Args:
-        config_dir: Directory to store config.json
+        global_config_dir: Directory to store global config.json
+        local_config_path: Optional project-scoped config.json for overrides
         defaults: Default configuration values
     """
     global _config_manager
 
-    config_path = config_dir / "config.json"
-    provider = LocalFileConfigProvider(config_path, defaults=defaults)
+    config_path = global_config_dir / "config.json"
+    base_provider = LocalFileConfigProvider(config_path, defaults=defaults)
+    providers: list[ConfigProvider] = [base_provider]
+    if local_config_path:
+        providers.append(
+            LocalFileConfigProvider(
+                local_config_path, defaults={}, create_if_missing=False
+            )
+        )
+
+    if len(providers) == 1:
+        provider: ConfigProvider = base_provider
+    else:
+        provider = LayeredConfigProvider(providers, primary_index=0)
     _config_manager = ConfigManager(provider)
 
     logger.info("Config manager created", config_path=str(config_path))

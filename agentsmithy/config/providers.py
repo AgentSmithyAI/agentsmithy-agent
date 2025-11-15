@@ -42,7 +42,13 @@ class ConfigProvider(ABC):
 class LocalFileConfigProvider(ConfigProvider):
     """Configuration provider that stores config in a local JSON file."""
 
-    def __init__(self, config_path: Path, defaults: dict[str, Any] | None = None):
+    def __init__(
+        self,
+        config_path: Path,
+        defaults: dict[str, Any] | None = None,
+        *,
+        create_if_missing: bool = True,
+    ):
         self.config_path = config_path
         self.defaults = defaults or {}
         self._observer: Any = None  # Observer from watchdog
@@ -53,10 +59,20 @@ class LocalFileConfigProvider(ConfigProvider):
             None  # Original user config without defaults
         )
         self._loop: asyncio.AbstractEventLoop | None = None
+        self.create_if_missing = create_if_missing
 
     async def load(self) -> dict[str, Any]:
         """Load configuration from file, creating with defaults if not exists."""
         if not self.config_path.exists():
+            if not self.create_if_missing:
+                logger.info(
+                    "Config file not found, skipping auto-create",
+                    path=str(self.config_path),
+                )
+                merged = self.defaults.copy()
+                self._last_valid_config = merged.copy()
+                self._user_config = {}
+                return merged
             logger.info(
                 "Config file not found, creating with defaults",
                 path=str(self.config_path),
@@ -165,7 +181,7 @@ class LocalFileConfigProvider(ConfigProvider):
             def __init__(self, provider: LocalFileConfigProvider):
                 self.provider = provider
 
-            def on_modified(self, event):
+            def _handle_event(self, event):
                 if event.is_directory:
                     return
 
@@ -182,15 +198,25 @@ class LocalFileConfigProvider(ConfigProvider):
                     if self.provider._last_mtime == current_mtime:
                         return
                 except FileNotFoundError:
-                    return
+                    if not self.provider.create_if_missing:
+                        # File might not exist yet; allow load() to handle
+                        pass
+                    else:
+                        return
 
-                logger.debug("Config file modified, reloading", path=event.src_path)
+                logger.debug("Config file changed, reloading", path=event.src_path)
 
                 # Schedule coroutine in the main event loop from this thread
                 if self.provider._loop and not self.provider._loop.is_closed():
                     asyncio.run_coroutine_threadsafe(
                         self.provider._handle_file_change(), self.provider._loop
                     )
+
+            def on_modified(self, event):
+                self._handle_event(event)
+
+            def on_created(self, event):
+                self._handle_event(event)
 
         self._observer = Observer()
         event_handler = ConfigFileHandler(self)
@@ -269,3 +295,70 @@ class RemoteConfigProvider(ConfigProvider):
 
     async def stop_watching(self) -> None:
         raise NotImplementedError("RemoteConfigProvider not yet implemented")
+
+
+class LayeredConfigProvider(ConfigProvider):
+    """Configuration provider that merges multiple config sources.
+
+    Each layer is a ConfigProvider implementation ordered from lowest to highest
+    precedence. By default, writes go to the first provider (typically the
+    global/user-level config). Additional providers can represent per-project
+    overrides, remote configs, etc.
+    """
+
+    def __init__(
+        self,
+        providers: list[ConfigProvider],
+        *,
+        primary_index: int = 0,
+    ):
+        if not providers:
+            raise ValueError("LayeredConfigProvider requires at least one provider")
+        if primary_index < 0 or primary_index >= len(providers):
+            raise ValueError("primary_index must point to an existing provider layer")
+
+        self.providers = providers
+        self.primary_index = primary_index
+        self._layer_configs: list[dict[str, Any]] = [{} for _ in providers]
+        self._callback: Callable[[dict[str, Any]], None] | None = None
+
+    def _merge(self) -> dict[str, Any]:
+        merged: dict[str, Any] = {}
+        for cfg in self._layer_configs:
+            merged.update(cfg)
+        return merged
+
+    def _emit(self) -> None:
+        if self._callback:
+            self._callback(self._merge())
+
+    async def load(self) -> dict[str, Any]:
+        for idx, provider in enumerate(self.providers):
+            cfg = await provider.load()
+            self._layer_configs[idx] = cfg
+        return self._merge()
+
+    async def save(self, config: dict[str, Any]) -> None:
+        """Persist updates via the primary (writable) provider."""
+        primary = self.providers[self.primary_index]
+        await primary.save(config)
+        # Refresh primary cache and emit merged view
+        self._layer_configs[self.primary_index] = await primary.load()
+        self._emit()
+
+    async def watch(self, callback: Callable[[dict[str, Any]], None]) -> None:
+        self._callback = callback
+
+        async def _attach(idx: int, provider: ConfigProvider) -> None:
+            def handle_change(new_config: dict[str, Any]) -> None:
+                self._layer_configs[idx] = new_config
+                self._emit()
+
+            await provider.watch(handle_change)
+
+        for idx, provider in enumerate(self.providers):
+            await _attach(idx, provider)
+
+    async def stop_watching(self) -> None:
+        for provider in self.providers:
+            await provider.stop_watching()

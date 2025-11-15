@@ -4,7 +4,31 @@ import json
 import tempfile
 from pathlib import Path
 
-from agentsmithy.core.status_manager import StatusManager
+from agentsmithy.core.status_manager import ServerStatus, StatusManager
+
+
+def test_status_manager_updates_config_fields(tmp_path):
+    """Config validity fields should be stored and cleared correctly."""
+    status_path = tmp_path / "status.json"
+    manager = StatusManager(status_path)
+
+    manager.update_server_status(
+        ServerStatus.READY,
+        config_valid=False,
+        config_errors=["API key not configured"],
+    )
+    status = json.loads(status_path.read_text())
+    assert status["config_valid"] is False
+    assert status["config_errors"] == ["API key not configured"]
+
+    manager.update_server_status(
+        ServerStatus.READY,
+        config_valid=True,
+        config_errors=None,
+    )
+    status = json.loads(status_path.read_text())
+    assert status["config_valid"] is True
+    assert "config_errors" not in status
 
 
 def test_status_manager_server_status_starting():
@@ -258,6 +282,7 @@ if __name__ == "__main__":
 
     # Run all tests
     test_functions = [
+        test_status_manager_updates_config_fields,
         test_status_manager_server_status_starting,
         test_status_manager_server_status_ready,
         test_status_manager_server_status_error,

@@ -2,6 +2,17 @@
 
 Retrieve and update AgentSmithy configuration at runtime via HTTP.
 
+## Config File Location
+
+Configuration is stored in a user-level directory so it can be shared across all projects:
+
+- **Linux**: `~/.config/agentsmithy/config.json` (respects `XDG_CONFIG_HOME`)
+- **macOS**: `~/Library/Application Support/AgentSmithy/config.json`
+- **Windows**: `%APPDATA%\AgentSmithy\config.json`
+
+Override the location with the `AGENTSMITHY_CONFIG_DIR` environment variable if needed.
+Legacy per-project configs under `<workdir>/.agentsmithy/config.json` are migrated automatically on first run.
+
 ## Server Startup Without API Key
 
 **Server can start without API keys configured.**
@@ -41,6 +52,28 @@ When `config_valid` is `false`, client should prompt user to configure API keys 
 **Config validation is updated automatically:**
 - On server startup → checks config, writes to status.json
 - On config change via `/api/config` → rechecks, updates status.json
+
+## Configuration Storage
+
+- **Global config (updated via `/api/config`):**
+  - Linux: `${XDG_CONFIG_HOME:-~/.config}/agentsmithy/config.json`
+  - macOS: `~/Library/Application Support/AgentSmithy/config.json`
+  - Windows: `%APPDATA%\AgentSmithy\config.json`
+  - Override path via `AGENTSMITHY_CONFIG_DIR`
+
+- **Per-project overrides:** `.agentsmithy/config.json` in the project directory.
+  - Optional file; merged on top of global config
+  - Useful for project-specific API keys/models
+  - Loosely treated as read-only (edit manually or via version control)
+
+**Precedence:** defaults → global config → local project config.
+The `/api/config` endpoint always writes to the global config file so changes apply to all projects.
+
+**Как это устроено внутри:**
+- Конфиг читается «слоями» через список `ConfigProvider` (глобальный файл, затем проектные оверрайды, позже можно добавить удалённые источники)
+- Все слои горячо мерджатся, а записываем мы только в первый слой (глобальный)
+- При изменении любого слоя watcher пересчитывает итоговый конфиг и триггерит инвалидацию на сервере
+- В `providers` всегда присутствуют базовые секции `openai` и `anthropic` с `null`‑значениями, чтобы клиент мог отрисовать «общие» поля (API key, base URL и т.д.) даже до первого сохранения
 
 ## Hot Reload
 

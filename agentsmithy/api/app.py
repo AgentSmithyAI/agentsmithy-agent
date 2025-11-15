@@ -56,33 +56,15 @@ async def lifespan(app: FastAPI):
 
                 try:
                     project = get_current_project()
+                    if not project:
+                        return
                     status_doc = read_status(project)
-
-                    # Check config validity
-                    config_valid = True
-                    config_errors = []
-                    try:
-                        settings.validate_or_raise()
-                    except ValueError as e:
-                        config_valid = False
-                        error_msg = str(e)
-                        if (
-                            "OPENAI_API_KEY" in error_msg
-                            or "api_key" in error_msg.lower()
-                        ):
-                            config_errors.append("API key not configured")
-                        if "model" in error_msg.lower():
-                            config_errors.append("Model not configured or unsupported")
-                        if not config_errors:
-                            config_errors.append(error_msg)
-
-                    # Update status.json with config validation
+                    config_valid, config_errors = settings.validation_status()
                     status_doc["config_valid"] = config_valid
                     if config_errors:
                         status_doc["config_errors"] = config_errors
                     else:
                         status_doc.pop("config_errors", None)
-
                     write_status(project, status_doc)
                     api_logger.info(
                         "Updated config validity in status.json",

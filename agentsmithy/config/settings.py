@@ -30,6 +30,29 @@ class Settings:
 
         _v(self.model, self.embedding_model, self.openai_api_key)
 
+    def validation_status(self) -> tuple[bool, list[str]]:
+        """Return (is_valid, errors) without raising."""
+        try:
+            self.validate_or_raise()
+            return True, []
+        except ValueError as e:
+            return False, self._format_validation_errors(str(e))
+
+    @staticmethod
+    def _format_validation_errors(message: str) -> list[str]:
+        """Convert validation error message into structured list."""
+        errors: list[str] = []
+        lower_msg = message.lower()
+        if "api key" in lower_msg:
+            errors.append("API key not configured")
+        if "embedding" in lower_msg:
+            errors.append("Embedding model not configured or unsupported")
+        if "model" in lower_msg and "embedding" not in lower_msg:
+            errors.append("Model not configured or unsupported")
+        if not errors:
+            errors.append(message)
+        return errors
+
     def _get(
         self,
         key: str,

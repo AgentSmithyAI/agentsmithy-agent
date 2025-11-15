@@ -148,7 +148,14 @@ class StatusManager:
             # Update config validation info if provided
             if config_valid is not None:
                 doc["config_valid"] = config_valid
-            if config_errors is not None:
+                if config_valid:
+                    doc.pop("config_errors", None)
+                elif config_errors is not None:
+                    if config_errors:
+                        doc["config_errors"] = config_errors
+                    else:
+                        doc.pop("config_errors", None)
+            elif config_errors is not None:
                 if config_errors:
                     doc["config_errors"] = config_errors
                 else:

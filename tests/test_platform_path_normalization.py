@@ -55,3 +55,28 @@ def test_root_paths():
     windows_adapter = WindowsAdapter()
     assert windows_adapter.normalize_path("C:\\") == "C:/"
     assert windows_adapter.normalize_path("\\\\server\\share") == "//server/share"
+
+
+def test_posix_global_config_dir_with_xdg(monkeypatch, tmp_path):
+    adapter = PosixAdapter()
+    xdg_dir = tmp_path / "xdg_config"
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg_dir))
+    path = adapter.get_global_config_dir("AgentSmithy")
+    assert path == xdg_dir / "agentsmithy"
+
+
+def test_posix_global_config_dir_macos(monkeypatch, tmp_path):
+    adapter = PosixAdapter()
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.setattr("sys.platform", "darwin", raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    path = adapter.get_global_config_dir("AgentSmithy")
+    assert path == tmp_path / "Library" / "Application Support" / "AgentSmithy"
+
+
+def test_windows_global_config_dir(monkeypatch, tmp_path):
+    adapter = WindowsAdapter()
+    appdata = tmp_path / "AppData" / "Roaming"
+    monkeypatch.setenv("APPDATA", str(appdata))
+    path = adapter.get_global_config_dir("AgentSmithy")
+    assert path == appdata / "AgentSmithy"

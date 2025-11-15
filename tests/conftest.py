@@ -31,6 +31,14 @@ def cleanup_background_tasks():
         pass
 
 
+@pytest.fixture(autouse=True)
+def temp_global_config_dir(monkeypatch, tmp_path_factory):
+    """Use a temporary directory for global config during tests."""
+    config_dir = Path(tmp_path_factory.mktemp("global_config"))
+    monkeypatch.setenv("AGENTSMITHY_CONFIG_DIR", str(config_dir))
+    return config_dir
+
+
 @pytest.fixture
 def temp_project():
     """Create a temporary project for testing.

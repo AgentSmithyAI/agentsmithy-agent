@@ -9,6 +9,22 @@ def get_default_config() -> dict[str, Any]:
         # Provider definitions - each provider is a complete configuration
         # including type, model, credentials, and options
         "providers": {
+            # Global OpenAI section (shared API key/base URL for new configs)
+            "openai": {
+                "type": "openai",
+                "model": None,
+                "api_key": None,
+                "base_url": "https://api.openai.com/v1",
+                "options": {},
+            },
+            # Placeholder for Anthropic (can be configured via /api/config)
+            "anthropic": {
+                "type": "anthropic",
+                "model": None,
+                "api_key": None,
+                "base_url": "https://api.anthropic.com",
+                "options": {},
+            },
             "gpt5": {
                 "type": "openai",
                 "model": "gpt-5",

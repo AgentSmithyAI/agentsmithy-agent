@@ -49,6 +49,14 @@ AgentSmithy is a local server that brings an AI coding assistant to your IDE. It
 
 See Quickstart in [docs/README.md](./docs/README.md). It covers env setup, running the server, and example requests.
 
+### Configuration storage
+
+- Linux: `~/.config/agentsmithy/config.json`
+- macOS: `~/Library/Application Support/AgentSmithy/config.json`
+- Windows: `%APPDATA%\AgentSmithy\config.json`
+
+Override via `AGENTSMITHY_CONFIG_DIR` if needed. Project-local `.agentsmithy/config.json` is no longer required (existing files are migrated automatically).
+
 ## License
 
 Apache 2.0 — see LICENSE.

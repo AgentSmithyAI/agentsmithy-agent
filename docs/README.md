@@ -28,7 +28,13 @@ OPENAI_API_KEY=sk-your-api-key-here
 # EMBEDDING_MODEL=text-embedding-3-small
 ```
 
-Alternatively, you can configure via `.agentsmithy/config.json` (see [Provider configuration](./provider-configuration.md)).
+Global configuration lives under the user profile and is shared across projects:
+
+- Linux: `~/.config/agentsmithy/config.json` (respects `XDG_CONFIG_HOME`)
+- macOS: `~/Library/Application Support/AgentSmithy/config.json`
+- Windows: `%APPDATA%\AgentSmithy\config.json`
+
+Override with `AGENTSMITHY_CONFIG_DIR` if needed. Existing project `.agentsmithy/config.json` files are migrated automatically the first time the new global config is used.
 
 2) Start the server with your project directory as `--workdir`:
 

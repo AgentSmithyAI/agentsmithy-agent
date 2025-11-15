@@ -10,6 +10,7 @@ Requires --workdir path and proper configuration (model and API key).
 import argparse
 import asyncio
 import os
+import shutil
 import signal
 import sys
 from pathlib import Path
@@ -55,6 +56,7 @@ if __name__ == "__main__":
         os.environ["LOG_COLORS"] = "true" if args.log_colors else "false"
 
     # Setup logging for startup (after argparse, so --help doesn't need logger)
+    from agentsmithy.platforms import get_os_adapter
     from agentsmithy.utils.logger import get_logger
 
     startup_logger = get_logger("server.startup")
@@ -101,13 +103,44 @@ if __name__ == "__main__":
     )
 
     try:
-        # Create .agentsmithy directory if it doesn't exist
-        config_dir = workdir_path / ".agentsmithy"
-        config_dir.mkdir(parents=True, exist_ok=True)
+        # Ensure per-project state directory exists (for dialogs/status/RAG)
+        state_dir = workdir_path / ".agentsmithy"
+        state_dir.mkdir(parents=True, exist_ok=True)
 
-        # Create and initialize config manager
+        # Determine global config directory (user-level, shared across projects)
+        config_dir_override = os.getenv("AGENTSMITHY_CONFIG_DIR")
+        if config_dir_override:
+            global_config_dir = Path(config_dir_override).expanduser().resolve()
+        else:
+            global_config_dir = (
+                Path(get_os_adapter().get_global_config_dir("AgentSmithy"))
+                .expanduser()
+                .resolve()
+            )
+        global_config_dir.mkdir(parents=True, exist_ok=True)
+
+        local_config_path = state_dir / "config.json"
+        global_config_path = global_config_dir / "config.json"
+
+        if local_config_path.exists():
+            if not global_config_path.exists():
+                shutil.copy2(local_config_path, global_config_path)
+                startup_logger.info(
+                    "Migrated project config to global config directory",
+                    source=str(local_config_path),
+                    target=str(global_config_path),
+                )
+            else:
+                startup_logger.info(
+                    "Global config already exists; project-scoped config will be ignored",
+                    project_config=str(local_config_path),
+                )
+
+        # Create and initialize config manager with global config path
         config_manager = create_config_manager(
-            config_dir, defaults=get_default_config()
+            global_config_dir,
+            local_config_path=local_config_path,
+            defaults=get_default_config(),
         )
 
         # Run async initialization (watch will start later in manual startup to use correct event loop)
@@ -121,7 +154,7 @@ if __name__ == "__main__":
 
         startup_logger.info(
             "Configuration initialized",
-            config_file=str(config_dir / "config.json"),
+            config_file=str(global_config_dir / "config.json"),
         )
     except Exception as e:
         startup_logger.error("Failed to initialize configuration", error=str(e))
@@ -148,12 +181,11 @@ if __name__ == "__main__":
 
         # Validate required settings (soft check - warn but don't block startup)
         # This allows server to start without API keys, which can be configured via /api/config
-        try:
-            settings.validate_or_raise()
-        except ValueError as e:
+        config_valid, config_errors = settings.validation_status()
+        if not config_valid:
             startup_logger.warning(
                 "Configuration incomplete - server will start but LLM requests will fail until configured",
-                error=str(e),
+                errors=config_errors,
             )
 
         chosen_port = ensure_singleton_and_select_port(
@@ -229,30 +261,25 @@ if __name__ == "__main__":
                 from agentsmithy.core.status_manager import ServerStatus
 
                 # Check config validity and write to status.json
-                config_valid = True
-                config_errors = []
+                config_valid, config_errors = settings.validation_status()
                 try:
-                    settings.validate_or_raise()
-                except ValueError as e:
-                    config_valid = False
-                    error_msg = str(e)
-                    if "OPENAI_API_KEY" in error_msg or "api_key" in error_msg.lower():
-                        config_errors.append("API key not configured")
-                    if "model" in error_msg.lower():
-                        config_errors.append("Model not configured or unsupported")
-                    if not config_errors:
-                        config_errors.append(error_msg)
-
+                    project = get_current_project()
+                except RuntimeError as exc:
+                    startup_logger.warning(
+                        "Project not initialized; skipping server status update",
+                        error=str(exc),
+                    )
+                    return
                 set_server_status(
-                    get_current_project(),
+                    project,
                     ServerStatus.READY,
                     config_valid=config_valid,
-                    config_errors=config_errors if config_errors else None,
+                    config_errors=config_errors if not config_valid else None,
                 )
                 startup_logger.info(
                     "Server status updated to 'ready'",
                     config_valid=config_valid,
-                    config_errors=config_errors if config_errors else None,
+                    config_errors=config_errors if not config_valid else None,
                 )
 
         # lifespan="on" enables app.py startup/shutdown hooks.
@@ -286,7 +313,6 @@ if __name__ == "__main__":
 
             # Log runtime environment information
             from agentsmithy import __version__
-            from agentsmithy.platforms import get_os_adapter
 
             adapter = get_os_adapter()
             os_ctx = adapter.os_context()

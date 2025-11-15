@@ -8,6 +8,7 @@ import pytest
 
 from agentsmithy.config import (
     ConfigManager,
+    LayeredConfigProvider,
     LocalFileConfigProvider,
     Settings,
     get_default_config,
@@ -247,3 +248,67 @@ async def test_json_decode_error_logging():
         # Should not raise, but log the error
         config = await provider.load()
         assert config == {}  # Returns defaults
+
+
+@pytest.mark.asyncio
+async def test_layered_config_provider_merges_global_and_local(tmp_path: Path):
+    """Ensure LayeredConfigProvider merges global and local configs correctly."""
+    global_path = tmp_path / "global.json"
+    local_path = tmp_path / "local.json"
+
+    defaults = {"key": "default", "shared": "base"}
+    provider = LayeredConfigProvider(
+        [
+            LocalFileConfigProvider(global_path, defaults=defaults),
+            LocalFileConfigProvider(local_path, defaults={}, create_if_missing=False),
+        ]
+    )
+
+    merged = await provider.load()
+    assert merged["key"] == "default"
+    assert merged["shared"] == "base"
+
+    # Update global config via provider.save
+    await provider.save({"key": "global", "global_only": "g"})
+    merged = await provider.load()
+    assert merged["key"] == "global"
+    assert merged["global_only"] == "g"
+
+    # Write local override directly
+    local_path.write_text(json.dumps({"key": "local", "local_only": "l"}))
+    merged = await provider.load()
+    assert merged["key"] == "local"
+    assert merged["local_only"] == "l"
+    # Global-only field should still exist
+    assert merged["global_only"] == "g"
+
+
+@pytest.mark.asyncio
+async def test_config_manager_with_local_overrides(tmp_path: Path):
+    """ConfigManager should respect local overrides via layered provider."""
+    global_dir = tmp_path / "global"
+    global_dir.mkdir()
+    global_path = global_dir / "config.json"
+    local_path = tmp_path / "project" / "config.json"
+    local_path.parent.mkdir()
+
+    defaults = {"value": "default"}
+    provider = LayeredConfigProvider(
+        [
+            LocalFileConfigProvider(global_path, defaults=defaults),
+            LocalFileConfigProvider(local_path, defaults={}, create_if_missing=False),
+        ]
+    )
+    manager = ConfigManager(provider)
+    await manager.initialize()
+
+    # Update via manager -> should persist to global config
+    await manager.set("value", "global")
+    saved_global = json.loads(global_path.read_text(encoding="utf-8"))
+    assert saved_global["value"] == "global"
+
+    # Local override should take precedence after reload
+    local_path.write_text(json.dumps({"value": "local"}), encoding="utf-8")
+    new_config = await provider.load()
+    manager._config = new_config
+    assert manager.get("value") == "local"
