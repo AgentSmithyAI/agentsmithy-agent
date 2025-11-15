@@ -152,9 +152,11 @@ if __name__ == "__main__":
         # Update global settings instance to use config manager
         settings._config_manager = config_manager
 
+        global_config_file = global_config_dir / "config.json"
         startup_logger.info(
             "Configuration initialized",
-            config_file=str(global_config_dir / "config.json"),
+            config_file=str(global_config_file),
+            local_override=str(local_config_path),
         )
     except Exception as e:
         startup_logger.error("Failed to initialize configuration", error=str(e))
@@ -186,6 +188,8 @@ if __name__ == "__main__":
             startup_logger.warning(
                 "Configuration incomplete - server will start but LLM requests will fail until configured",
                 errors=config_errors,
+                config_file=str(global_config_file),
+                configure_via="/api/config",
             )
 
         chosen_port = ensure_singleton_and_select_port(
@@ -193,6 +197,13 @@ if __name__ == "__main__":
             base_port=settings.server_port,
             host=settings.server_host,
             max_probe=20,
+        )
+
+        startup_logger.info(
+            "Selected server port",
+            host=settings.server_host,
+            port=chosen_port,
+            status_file=str(state_dir / "status.json"),
         )
         # Status is now "starting" - server not ready yet
         # Update config with the chosen port

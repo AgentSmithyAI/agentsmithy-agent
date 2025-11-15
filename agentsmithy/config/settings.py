@@ -35,8 +35,8 @@ class Settings:
         try:
             self.validate_or_raise()
             return True, []
-        except ValueError as e:
-            return False, self._format_validation_errors(str(e))
+        except ValueError as exc:
+            return False, self._format_validation_errors(str(exc))
 
     @staticmethod
     def _format_validation_errors(message: str) -> list[str]:
@@ -49,7 +49,8 @@ class Settings:
             errors.append("Embedding model not configured or unsupported")
         if "model" in lower_msg and "embedding" not in lower_msg:
             errors.append("Model not configured or unsupported")
-        if not errors:
+        # Always include the original validation message for diagnostics
+        if message and message not in errors:
             errors.append(message)
         return errors
 
