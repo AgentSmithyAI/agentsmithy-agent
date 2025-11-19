@@ -134,10 +134,38 @@ class DialogHistoryResponse(BaseModel):
     last_idx: int  # Index of the last event in the returned list
 
 
+class ProviderMetadata(BaseModel):
+    name: str
+    type: str | None = None
+    has_api_key: bool | None = None
+    model: str | None = None
+
+
+class AgentProviderSlot(BaseModel):
+    path: str
+    provider: str | None = None
+    workload: str | None = None
+
+
+class WorkloadMetadata(BaseModel):
+    name: str
+    provider: str | None = None
+    model: str | None = None
+
+
+class ConfigMetadata(BaseModel):
+    provider_types: list[str]
+    providers: list[ProviderMetadata] = []
+    agent_provider_slots: list[AgentProviderSlot] = []
+    workloads: list[WorkloadMetadata] = []
+    model_catalog: dict[str, dict[str, list[str]]] = {}
+
+
 class ConfigResponse(BaseModel):
     """Response for GET /api/config."""
 
     config: dict[str, Any]
+    metadata: ConfigMetadata
 
 
 class ConfigUpdateRequest(BaseModel):
@@ -152,3 +180,4 @@ class ConfigUpdateResponse(BaseModel):
     success: bool
     message: str
     config: dict[str, Any]
+    metadata: ConfigMetadata

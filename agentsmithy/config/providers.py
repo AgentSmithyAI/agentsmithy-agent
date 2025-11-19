@@ -10,6 +10,7 @@ from typing import Any
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
+from agentsmithy.config.schema import deep_merge, normalize_config
 from agentsmithy.utils.logger import get_logger
 
 logger = get_logger("config.providers")
@@ -87,18 +88,20 @@ class LocalFileConfigProvider(ConfigProvider):
             config = json.loads(content)
             self._last_mtime = self.config_path.stat().st_mtime
 
-            # Store original user config (without defaults)
+            merged = deep_merge(self.defaults, config)
+            normalized = normalize_config(merged)
+
+            if normalized != merged:
+                logger.info(
+                    "Loaded legacy config; applying normalized view in memory only",
+                    path=str(self.config_path),
+                )
+
+            self._last_valid_config = normalized.copy()
             self._user_config = config.copy()
 
-            # Merge with defaults to ensure all keys exist (for runtime use)
-            merged = self.defaults.copy()
-            merged.update(config)
-
-            # Store as last valid config
-            self._last_valid_config = merged
-
             logger.debug("Config loaded from file", path=str(self.config_path))
-            return merged
+            return normalized
         except json.JSONDecodeError as e:
             logger.error(
                 "Invalid JSON syntax in config file",
@@ -120,6 +123,13 @@ class LocalFileConfigProvider(ConfigProvider):
                     path=str(self.config_path),
                 )
                 return self.defaults.copy()
+        except ValueError as exc:
+            logger.error(
+                "Invalid configuration structure",
+                error=str(exc),
+                path=str(self.config_path),
+            )
+            raise
         except Exception as e:
             logger.error(
                 "Failed to load config",
@@ -143,25 +153,25 @@ class LocalFileConfigProvider(ConfigProvider):
     async def save(self, config: dict[str, Any]) -> None:
         """Atomically save configuration to file."""
         try:
-            # Validate JSON before saving
-            json.dumps(config)  # This will raise if config is not serializable
+            merged = normalize_config(deep_merge(self.defaults, config))
+        except ValueError as exc:
+            logger.error(
+                "Refusing to save invalid configuration",
+                error=str(exc),
+                path=str(self.config_path),
+            )
+            raise
 
-            # Ensure parent directory exists
+        try:
             self.config_path.parent.mkdir(parents=True, exist_ok=True)
-
-            # Atomic write using temp file
             tmp_path = self.config_path.with_suffix(".tmp")
-            content = json.dumps(config, ensure_ascii=False, indent=2)
+            content = json.dumps(merged, ensure_ascii=False, indent=2)
             tmp_path.write_text(content, encoding="utf-8")
             tmp_path.replace(self.config_path)
 
             self._last_mtime = self.config_path.stat().st_mtime
-            # Update both user_config and last_valid_config
-            self._user_config = config.copy()
-            # Merge with defaults for runtime use
-            merged = self.defaults.copy()
-            merged.update(config)
-            self._last_valid_config = merged
+            self._user_config = merged.copy()
+            self._last_valid_config = merged.copy()
             logger.debug("Config saved to file", path=str(self.config_path))
         except Exception as e:
             logger.error(

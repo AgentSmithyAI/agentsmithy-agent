@@ -9,7 +9,7 @@ Recommended `.agentsmithy/config.json` structure:
   "providers": {
     "openai": {
       "api_key": "${OPENAI_API_KEY}", // or set via env
-      "base_url": null, // e.g. "http://localhost:1234/v1" for local servers
+      "base_url": "https://api.openai.com/v1",
       "options": {
         // Provider-wide options forwarded to OpenAI chat SDK
       },
@@ -20,12 +20,18 @@ Recommended `.agentsmithy/config.json` structure:
       }
     }
   },
+  "workloads": {
+    "reasoning":    { "provider": "openai", "model": "gpt-5" },
+    "execution":    { "provider": "openai", "model": "gpt-5-mini" },
+    "summarization":{ "provider": "openai", "model": "gpt-5-mini" },
+    "embeddings":   { "provider": "openai", "model": "text-embedding-3-small" }
+  },
   "models": {
     "agents": {
-      "universal": { "model": "gpt-5" },
-      "inspector": { "model": "gpt-5-mini" }
+      "universal": { "workload": "reasoning" },
+      "inspector": { "workload": "execution" }
     },
-    "embeddings": { "model": "text-embedding-3-small" }
+    "embeddings": { "workload": "embeddings" }
   }
 }
 ```

@@ -118,16 +118,6 @@ class Settings:
         return v if isinstance(v, str) else None
 
     @property
-    def openai_chat_temperature(self) -> float | None:
-        v = self._get("openai.chat.temperature", None)
-        return v if v is not None else self.temperature
-
-    @property
-    def openai_chat_max_tokens(self) -> int | None:
-        v = self._get("openai.chat.max_tokens", None)
-        return v if v is not None else self.max_tokens
-
-    @property
     def openai_chat_options(self) -> dict:
         prov = self.get_provider_config("openai")
         opts = prov.get("options") if isinstance(prov, dict) else None
@@ -210,18 +200,6 @@ class Settings:
         return str(legacy)
 
     @property
-    def temperature(self) -> float:
-        # Deprecated: kept for back-compat; not part of agents anymore
-        v = self._get("temperature", 0.7, "TEMPERATURE")
-        return float(v)
-
-    @property
-    def reasoning_effort(self) -> str:
-        # Deprecated: move to providers.openai.chat.options
-        v = self._get("reasoning_effort", "low", "REASONING_EFFORT")
-        return str(v)
-
-    @property
     def embedding_model(self) -> str:
         v = self._get("embedding_model", "text-embedding-3-small", "EMBEDDING_MODEL")
         return str(v)
@@ -232,12 +210,6 @@ class Settings:
         if isinstance(m, str) and m:
             return m
         return self.embedding_model
-
-    @property
-    def max_tokens(self) -> int:
-        # Deprecated: kept for back-compat; not part of agents anymore
-        v = self._get("max_tokens", 4000, "MAX_TOKENS")
-        return int(v)
 
     @property
     def streaming_enabled(self) -> bool:

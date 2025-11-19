@@ -20,7 +20,7 @@ def config_file(tmp_path: Path):
     config_path = tmp_path / "config.json"
     initial_config = {
         "providers": {
-            "gpt5": {
+            "openai": {
                 "api_key": "sk-initial-key",
                 "base_url": "https://api.openai.com/v1",
             }
@@ -99,7 +99,7 @@ def test_api_endpoint_triggers_callback(
     update_data = {
         "config": {
             "providers": {
-                "gpt5": {
+                "openai": {
                     "api_key": "sk-new-key-via-api",
                 }
             }
@@ -120,14 +120,14 @@ def test_config_changes_accessible_immediately(
     """Test that config changes are immediately accessible."""
     # Get initial config
     response1 = client.get("/api/config")
-    initial_key = response1.json()["config"]["providers"]["gpt5"]["api_key"]
+    initial_key = response1.json()["config"]["providers"]["openai"]["api_key"]
     assert initial_key == "sk-initial-key"
 
     # Update config
     update_data = {
         "config": {
             "providers": {
-                "gpt5": {
+                "openai": {
                     "api_key": "sk-updated-key",
                 }
             }
@@ -138,12 +138,12 @@ def test_config_changes_accessible_immediately(
 
     # Get config again - should see new value immediately
     response3 = client.get("/api/config")
-    updated_key = response3.json()["config"]["providers"]["gpt5"]["api_key"]
+    updated_key = response3.json()["config"]["providers"]["openai"]["api_key"]
     assert updated_key == "sk-updated-key"
 
     # Also verify via Settings
     settings = Settings(config_manager)
-    provider_config = settings.get_provider_config("gpt5")
+    provider_config = settings.get_provider_config("openai")
     assert provider_config.get("api_key") == "sk-updated-key"
 
 

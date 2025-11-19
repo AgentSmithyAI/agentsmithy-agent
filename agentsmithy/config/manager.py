@@ -11,6 +11,7 @@ from agentsmithy.config.providers import (
     LayeredConfigProvider,
     LocalFileConfigProvider,
 )
+from agentsmithy.config.schema import deep_merge
 from agentsmithy.utils.logger import get_logger
 
 logger = get_logger("config.manager")
@@ -99,16 +100,20 @@ class ConfigManager:
 
     async def update(self, updates: dict[str, Any]) -> None:
         """Update multiple configuration values at once."""
-        # Update in-memory config
-        self._config.update(updates)
+        # Update in-memory config with deep merge
+        self._config = deep_merge(self._config, updates)
 
         # Update only user config (without defaults)
         if (
             hasattr(self.provider, "_user_config")
             and self.provider._user_config is not None
         ):
-            self.provider._user_config.update(updates)
-            await self.provider.save(self.provider._user_config)
+            user_cfg = self.provider._user_config
+            if not isinstance(user_cfg, dict):
+                user_cfg = {}
+            user_cfg = deep_merge(user_cfg, updates)
+            self.provider._user_config = user_cfg
+            await self.provider.save(user_cfg)
         else:
             # Fallback for providers without user_config tracking
             await self.provider.save(self._config)

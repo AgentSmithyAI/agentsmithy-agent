@@ -28,7 +28,7 @@ High level:
 - Instantiate providers directly (e.g., `OpenAIProvider`) — factory removed
 - Provider integrates with `langchain_openai.ChatOpenAI`
 - Supports `bind_tools` for native function calling
-- Agent model/temperature resolved via pluggable `AgentConfigProvider`
+- Agent model resolved via pluggable `AgentConfigProvider`
 
 ### Universal Agent (`agentsmithy/agents/universal_agent.py`)
 - Single agent handling all tasks

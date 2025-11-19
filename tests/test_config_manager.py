@@ -2,6 +2,7 @@
 
 import json
 import tempfile
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
@@ -60,7 +61,69 @@ async def test_local_file_provider_saves_config():
 
         assert config_path.exists()
         saved_config = json.loads(config_path.read_text(encoding="utf-8"))
-        assert saved_config == config
+        assert saved_config["key"] == "value"
+        assert "providers" in saved_config
+        assert "workloads" in saved_config
+
+
+@pytest.mark.asyncio
+async def test_local_file_provider_normalizes_legacy_providers():
+    """Legacy provider entries should be dropped in favour of workloads."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        config_path = Path(tmpdir) / "config.json"
+        defaults = get_default_config()
+
+        legacy_config = {
+            "providers": {
+                "openai": deepcopy(defaults["providers"]["openai"]),
+                "gpt5": {
+                    "type": "openai",
+                    "model": "gpt-5",
+                    "options": {},
+                },
+            },
+            "models": {
+                "agents": {
+                    "universal": {"provider": "gpt5"},
+                }
+            },
+        }
+        config_path.write_text(json.dumps(legacy_config), encoding="utf-8")
+
+        provider = LocalFileConfigProvider(config_path, defaults=defaults)
+        config = await provider.load()
+
+        assert "gpt5" not in config["providers"]
+        assert "provider" not in config["models"]["agents"]["universal"]
+
+        persisted = json.loads(config_path.read_text(encoding="utf-8"))
+        assert "gpt5" in persisted["providers"]
+        assert persisted["models"]["agents"]["universal"]["provider"] == "gpt5"
+
+
+@pytest.mark.asyncio
+async def test_local_file_provider_rejects_invalid_workload_refs():
+    """Configs referencing unknown providers should fail to load."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        config_path = Path(tmpdir) / "config.json"
+        defaults = get_default_config()
+
+        invalid_config = {
+            "providers": deepcopy(defaults["providers"]),
+            "workloads": {
+                "custom": {"provider": "missing", "model": "foo"},
+            },
+            "models": {
+                "agents": {
+                    "universal": {"workload": "custom"},
+                }
+            },
+        }
+        config_path.write_text(json.dumps(invalid_config), encoding="utf-8")
+
+        provider = LocalFileConfigProvider(config_path, defaults=defaults)
+        with pytest.raises(ValueError):
+            await provider.load()
 
 
 @pytest.mark.asyncio
@@ -76,8 +139,8 @@ async def test_config_manager_initialization():
         await manager.initialize()
 
         assert (
-            manager.get("models")["agents"]["universal"]["provider"]
-            == defaults["models"]["agents"]["universal"]["provider"]
+            manager.get("models")["agents"]["universal"]["workload"]
+            == defaults["models"]["agents"]["universal"]["workload"]
         )
 
 
@@ -169,9 +232,9 @@ async def test_settings_with_config_manager():
         settings = Settings(config_manager=manager)
 
         # Test property access
-        # With new structure, model is resolved from provider definition
-        provider_name = defaults["models"]["agents"]["universal"]["provider"]
-        expected_model = defaults["providers"][provider_name]["model"]
+        # With new structure, model is resolved from workload definition
+        workload_name = defaults["models"]["agents"]["universal"]["workload"]
+        expected_model = defaults["workloads"][workload_name]["model"]
         assert settings.model == expected_model
         assert settings.streaming_enabled == defaults["streaming_enabled"]
 

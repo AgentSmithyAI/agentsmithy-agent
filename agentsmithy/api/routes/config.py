@@ -5,11 +5,17 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 
 from agentsmithy.api.schemas import (
+    ConfigMetadata,
     ConfigResponse,
     ConfigUpdateRequest,
     ConfigUpdateResponse,
 )
 from agentsmithy.config.manager import get_config_manager
+from agentsmithy.config.schema import (
+    build_config_metadata,
+    deep_merge,
+    validate_config_structure,
+)
 from agentsmithy.utils.logger import api_logger
 
 router = APIRouter()
@@ -25,9 +31,12 @@ async def get_config():
     try:
         config_manager = get_config_manager()
         config_dict = config_manager.get_all()
+        metadata = ConfigMetadata(**build_config_metadata(config_dict))
 
         api_logger.info("Configuration retrieved", num_keys=len(config_dict))
-        return ConfigResponse(config=config_dict)
+        return ConfigResponse(config=config_dict, metadata=metadata)
+    except HTTPException:
+        raise
     except RuntimeError as e:
         api_logger.error("Config manager not initialized", error=str(e))
         raise HTTPException(
@@ -60,11 +69,22 @@ async def update_config(request: ConfigUpdateRequest):
     try:
         config_manager = get_config_manager()
 
-        # Update configuration
+        current_config = config_manager.get_all()
+        merged_config = deep_merge(current_config, request.config)
+        validation_errors = validate_config_structure(merged_config)
+        if validation_errors:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "message": "Invalid configuration",
+                    "errors": validation_errors,
+                },
+            )
+
         await config_manager.update(request.config)
 
-        # Get updated config
         updated_config = config_manager.get_all()
+        metadata = ConfigMetadata(**build_config_metadata(updated_config))
 
         api_logger.info(
             "Configuration updated",
@@ -76,7 +96,10 @@ async def update_config(request: ConfigUpdateRequest):
             success=True,
             message=f"Successfully updated {len(request.config)} configuration key(s)",
             config=updated_config,
+            metadata=metadata,
         )
+    except HTTPException:
+        raise
     except RuntimeError as e:
         api_logger.error("Config manager not initialized", error=str(e))
         raise HTTPException(

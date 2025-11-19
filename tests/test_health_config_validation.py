@@ -22,17 +22,7 @@ def config_file_with_key(tmp_path: Path):
             "openai": {
                 "api_key": "sk-valid-key",
                 "base_url": "https://api.openai.com/v1",
-            },
-            # Set key for named providers too (from defaults)
-            "gpt5": {
-                "api_key": "sk-valid-key",
-            },
-            "gpt5-mini": {
-                "api_key": "sk-valid-key",
-            },
-            "embeddings": {
-                "api_key": "sk-valid-key",
-            },
+            }
         }
     }
     config_path.write_text(json.dumps(config, indent=2))
@@ -164,9 +154,7 @@ def test_health_config_becomes_valid_after_update(
     response2 = client.put("/api/config", json=update_data)
     assert response2.status_code == 200
 
-    # Check again - config_valid may still be false if using named providers
-    # (because defaults use gpt5/gpt5-mini, not openai)
-    # Just verify the endpoint works and returns config validation info
+    # Check again - endpoint should reflect updated status
     response3 = client.get("/health")
     data3 = response3.json()
     assert "config_valid" in data3

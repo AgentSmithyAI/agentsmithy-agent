@@ -20,6 +20,10 @@ from agentsmithy.llm.providers.openai.models import get_model_spec
 from agentsmithy.llm.providers.registry import get_adapter
 from agentsmithy.utils.logger import agent_logger
 
+DEFAULT_CHAT_TEMPERATURE = 0.7
+DEFAULT_CHAT_MAX_TOKENS = 4000
+DEFAULT_REASONING_EFFORT = "low"
+
 
 class OpenAIProvider:
     """OpenAI LLM provider implementation.
@@ -95,10 +99,10 @@ class OpenAIProvider:
 
         # Temperature and max_tokens are not in provider definition; use explicit or settings defaults
         self.temperature = (
-            temperature if temperature is not None else settings.openai_chat_temperature
+            temperature if temperature is not None else DEFAULT_CHAT_TEMPERATURE
         )
         self.max_tokens = (
-            max_tokens if max_tokens is not None else settings.openai_chat_max_tokens
+            max_tokens if max_tokens is not None else DEFAULT_CHAT_MAX_TOKENS
         )
 
         if not self.model:
@@ -121,7 +125,7 @@ class OpenAIProvider:
         class_path, kwargs = adapter.build_langchain(
             temperature=self.temperature,
             max_tokens=self.max_tokens,
-            reasoning_effort=settings.reasoning_effort,
+            reasoning_effort=DEFAULT_REASONING_EFFORT,
         )
 
         # Apply extended OpenAI per-model options from provider config

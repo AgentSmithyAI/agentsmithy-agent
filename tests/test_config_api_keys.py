@@ -251,9 +251,14 @@ def test_set_model_with_provider_config(client: TestClient):
             "models": {
                 "agents": {
                     "universal": {
-                        "provider": "openai",
-                        "model": "gpt-4-turbo",
+                        "workload": "reasoning",
                     }
+                }
+            },
+            "workloads": {
+                "reasoning": {
+                    "provider": "openai",
+                    "model": "gpt-4-turbo",
                 }
             },
             "providers": {
@@ -270,6 +275,9 @@ def test_set_model_with_provider_config(client: TestClient):
     assert response.status_code == 200
     config = response.json()["config"]
 
-    assert config["models"]["agents"]["universal"]["model"] == "gpt-4-turbo"
-    assert config["models"]["agents"]["universal"]["provider"] == "openai"
+    assert config["models"]["agents"]["universal"]["workload"] == "reasoning"
+    assert (
+        config["workloads"]["reasoning"]["model"] == "gpt-4-turbo"
+    ), "workload model should be updated"
+    assert config["workloads"]["reasoning"]["provider"] == "openai"
     assert config["providers"]["openai"]["api_key"] == "sk-model-key"
