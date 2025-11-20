@@ -70,7 +70,7 @@ When `config_valid` is `false`, client should prompt user to configure API keys 
 - The runtime loads the global file, then overlays any project-level overrides (defaults → global → local).
 - Only the global layer is writable via `/api/config`, so new providers and model bindings apply to every workspace that shares the same user config.
 - A filesystem watcher re-validates the merged result after each change and updates `status.json`.
-- Baseline provider entries such as `providers.openai` and `providers.anthropic` are always present (with `null` values) so the UI can render empty fields before anything is configured.
+- A baseline `providers.openai` entry is always present (with `null` values) so the UI can render empty fields before anything is configured. Additional providers only appear after you create them.
 
 ## Hot Reload
 
@@ -125,8 +125,7 @@ Returns the current provider catalog plus the model → provider map. Nothing el
   "metadata": {
     "provider_types": ["openai", "anthropic", "xai", "deepseek", "other"],
     "providers": [
-      { "name": "openai", "type": "openai", "has_api_key": true },
-      { "name": "anthropic", "type": "anthropic", "has_api_key": false }
+      { "name": "openai", "type": "openai", "has_api_key": true }
     ],
     "workloads": [
       { "name": "reasoning", "provider": "openai", "model": "gpt-5" },

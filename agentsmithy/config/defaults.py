@@ -16,13 +16,6 @@ def get_default_config() -> dict[str, Any]:
                 "base_url": "https://api.openai.com/v1",
                 "options": {},
             },
-            # Placeholder for future Anthropic adapter
-            "anthropic": {
-                "type": "anthropic",
-                "api_key": None,
-                "base_url": "https://api.anthropic.com",
-                "options": {},
-            },
         },
         "workloads": {
             "reasoning": {
