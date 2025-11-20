@@ -1,5 +1,35 @@
 <!-- version list -->
 
+## v1.11.0 (2025-11-20)
+
+### Chores
+
+- **deps**: Bump chromadb from 1.3.2 to 1.3.4 in the chromadb group
+  ([#63](https://github.com/AgentSmithyAI/agentsmithy-agent/pull/63),
+  [`21b9e60`](https://github.com/AgentSmithyAI/agentsmithy-agent/commit/21b9e600428115df6f168deed2fb31ced2492d3d))
+
+- **deps**: Bump fastapi from 0.121.0 to 0.121.1 in the fastapi group
+  ([#61](https://github.com/AgentSmithyAI/agentsmithy-agent/pull/61),
+  [`d7e3db4`](https://github.com/AgentSmithyAI/agentsmithy-agent/commit/d7e3db4aefeeccab3f7d0adfa797592f910bd55f))
+
+- **deps**: Bump pydantic from 2.12.3 to 2.12.4 in the pydantic group
+  ([#62](https://github.com/AgentSmithyAI/agentsmithy-agent/pull/62),
+  [`db8d4ab`](https://github.com/AgentSmithyAI/agentsmithy-agent/commit/db8d4abb30376ed2915b6c818d4db2be557d94b8))
+
+- **deps**: Bump the langchain group with 2 updates
+  ([#60](https://github.com/AgentSmithyAI/agentsmithy-agent/pull/60),
+  [`47c4f13`](https://github.com/AgentSmithyAI/agentsmithy-agent/commit/47c4f13c478b9ec45df7057c877eae5bddcf2914))
+
+- **deps-dev**: Bump the linters group with 2 updates
+  ([#64](https://github.com/AgentSmithyAI/agentsmithy-agent/pull/64),
+  [`4c161da`](https://github.com/AgentSmithyAI/agentsmithy-agent/commit/4c161dadd46397f7b4ff8e24acf3077726466b5a))
+
+### Features
+
+- Add config endpoint ([#65](https://github.com/AgentSmithyAI/agentsmithy-agent/pull/65),
+  [`78733cd`](https://github.com/AgentSmithyAI/agentsmithy-agent/commit/78733cd1c40864351a7189b885e497665a4c5dfa))
+
+
 ## v1.10.0 (2025-11-12)
 
 ### Features
