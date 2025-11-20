@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import platform
 import sys
+from pathlib import Path
 from typing import Any, Protocol
 
 
@@ -17,6 +18,8 @@ class OSAdapter(Protocol):
     def terminate_process(self, proc: Any) -> None: ...
     def normalize_path(self, path: str) -> str:
         """Normalize path to use forward slashes (for storage in git/DB)."""
+
+    def get_global_config_dir(self, app_name: str = "AgentSmithy") -> Path: ...
 
 
 class BaseOSAdapter:
@@ -71,3 +74,7 @@ class BaseOSAdapter:
         Windows adapter should override to replace backslashes.
         """
         return path
+
+    def get_global_config_dir(self, app_name: str = "AgentSmithy") -> Path:
+        """Return user-level config directory for this OS."""
+        return Path.home() / f".{app_name.lower()}"

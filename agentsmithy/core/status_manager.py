@@ -91,6 +91,8 @@ class StatusManager:
         pid: int | None = None,
         port: int | None = None,
         error: str | None = None,
+        config_valid: bool | None = None,
+        config_errors: list[str] | None = None,
     ) -> None:
         """Atomically update server status fields.
 
@@ -99,6 +101,8 @@ class StatusManager:
             pid: Optional server PID (set on starting)
             port: Optional server port (set on starting)
             error: Optional error message for server failures
+            config_valid: Optional flag indicating if configuration is valid
+            config_errors: Optional list of configuration error messages
         """
         # Convert string to enum if needed
         if isinstance(status, str):
@@ -140,6 +144,22 @@ class StatusManager:
             else:
                 # For other states (ready, stopping), clear error
                 doc.pop("server_error", None)
+
+            # Update config validation info if provided
+            if config_valid is not None:
+                doc["config_valid"] = config_valid
+                if config_valid:
+                    doc.pop("config_errors", None)
+                elif config_errors is not None:
+                    if config_errors:
+                        doc["config_errors"] = config_errors
+                    else:
+                        doc.pop("config_errors", None)
+            elif config_errors is not None:
+                if config_errors:
+                    doc["config_errors"] = config_errors
+                else:
+                    doc.pop("config_errors", None)
 
             self._write(doc)
 

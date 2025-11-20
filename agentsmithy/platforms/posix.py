@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -151,3 +152,15 @@ class PosixAdapter(BaseOSAdapter):
             proc.kill()
         except Exception:
             pass
+
+    def get_global_config_dir(self, app_name: str = "AgentSmithy") -> Path:
+        """Return platform-appropriate config directory for POSIX systems."""
+        # macOS uses Library/Application Support
+        if sys.platform == "darwin":
+            return Path.home() / "Library" / "Application Support" / app_name
+
+        xdg_config = os.environ.get("XDG_CONFIG_HOME")
+        if xdg_config:
+            return Path(xdg_config).expanduser() / app_name.lower()
+
+        return Path.home() / ".config" / app_name.lower()

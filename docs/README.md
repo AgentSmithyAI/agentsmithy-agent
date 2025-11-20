@@ -6,13 +6,14 @@ Welcome to the AgentSmithy documentation.
 
 - [SSE Protocol](./sse-protocol.md) — POST-based SSE streaming, event taxonomy
 - [Server Status Management](./server-status.md) — Server status lifecycle and client integration
+- [Configuration API](./config-endpoint.md) — Runtime configuration management via HTTP
+- [Provider configuration](./provider-configuration.md) and [OpenAI config](./openai-config.md)
 - [Project structure and runtime files](./project-structure.md)
 - [Architecture](./architecture.md)
 - [Dialog History endpoint](./history-endpoint.md)
 - [Checkpoints and Transactions](./checkpoints-and-transactions.md)
 - [Tool results storage design](./tool-results-storage-design.md)
 - [Tool results lazy loading](./tool-results-lazy-loading.md)
-- [Provider configuration](./provider-configuration.md) and [OpenAI config](./openai-config.md)
 - [Graceful shutdown](./graceful-shutdown.md)
 - [Web search tool](./web-search-tool.md)
 
@@ -27,7 +28,13 @@ OPENAI_API_KEY=sk-your-api-key-here
 # EMBEDDING_MODEL=text-embedding-3-small
 ```
 
-Alternatively, you can configure via `.agentsmithy/config.json` (see [Provider configuration](./provider-configuration.md)).
+Global configuration lives under the user profile and is shared across projects:
+
+- Linux: `~/.config/agentsmithy/config.json` (respects `XDG_CONFIG_HOME`)
+- macOS: `~/Library/Application Support/AgentSmithy/config.json`
+- Windows: `%APPDATA%\AgentSmithy\config.json`
+
+Override with `AGENTSMITHY_CONFIG_DIR` if needed. Existing project `.agentsmithy/config.json` files are migrated automatically the first time the new global config is used.
 
 2) Start the server with your project directory as `--workdir`:
 
@@ -53,6 +60,8 @@ curl -X POST http://localhost:8765/api/chat \
 
 - `POST /api/chat` — main chat endpoint (supports SSE when `stream=true`)
 - `GET /health` — health check with server status information
+- `GET /api/config` — get current configuration
+- `PUT /api/config` — update configuration (e.g., set API keys)
 - Dialogs API under `/api/dialogs` for managing conversations
 
 If you're integrating a client/editor, start with the [SSE Protocol](./sse-protocol.md) and [Server Status Management](./server-status.md).

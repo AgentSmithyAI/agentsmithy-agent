@@ -30,6 +30,38 @@ class Settings:
 
         _v(self.model, self.embedding_model, self.openai_api_key)
 
+    def validation_status(self) -> tuple[bool, list[str]]:
+        """Return (is_valid, errors) without raising."""
+        try:
+            self.validate_or_raise()
+            return True, []
+        except ValueError as exc:
+            return False, self._format_validation_errors(str(exc))
+
+    @staticmethod
+    def _format_validation_errors(message: str) -> list[str]:
+        """Convert validation error message into structured list."""
+        errors: list[str] = []
+        lower_msg = message.lower()
+
+        if "api key" in lower_msg or "api_key" in lower_msg:
+            errors.append("API key not configured")
+
+        if "embedding" in lower_msg:
+            errors.append("Embedding model not configured or unsupported")
+
+        if "model" in lower_msg and "embedding" not in lower_msg:
+            errors.append("Model not configured or unsupported")
+
+        # Always include the original validation message for diagnostics,
+        # unless it's a verbatim match of a friendly message we already added.
+        if message:
+            normalized_existing = {err.lower() for err in errors}
+            if message.lower() not in normalized_existing:
+                errors.append(message)
+
+        return errors
+
     def _get(
         self,
         key: str,
@@ -84,24 +116,7 @@ class Settings:
     # OpenAI Chat nested configuration (preferred)
     @property
     def openai_chat_model(self) -> str | None:
-        # models.agents.universal overrides global default model
-        agents = self._get("models.agents", None)
-        if isinstance(agents, dict):
-            uni = agents.get("universal")
-            if isinstance(uni, dict) and isinstance(uni.get("model"), str):
-                return uni.get("model")
-        v = self._get("openai.chat.model", None)
-        return v if isinstance(v, str) else None
-
-    @property
-    def openai_chat_temperature(self) -> float | None:
-        v = self._get("openai.chat.temperature", None)
-        return v if v is not None else self.temperature
-
-    @property
-    def openai_chat_max_tokens(self) -> int | None:
-        v = self._get("openai.chat.max_tokens", None)
-        return v if v is not None else self.max_tokens
+        return self.model
 
     @property
     def openai_chat_options(self) -> dict:
@@ -111,19 +126,11 @@ class Settings:
 
     # Generic provider config helpers
     def get_provider_config(self, provider: str) -> dict:
-        """Return merged provider config: providers.<name> over openai/<legacy>.
-
-        Backward compatibility: for provider=="openai", merge with `openai` section.
-        """
-        merged: dict = {}
-        if provider == "openai":
-            cfg = self._get("openai", None)
-            if isinstance(cfg, dict):
-                merged.update(cfg)
+        """Return provider config from providers.<name>."""
         prov = self._get(f"providers.{provider}", None)
         if isinstance(prov, dict):
-            merged.update(prov)
-        return merged
+            return prov
+        return {}
 
     # Agent profile helpers
     def get_agent_profile(self, name: str | None) -> dict:
@@ -167,53 +174,36 @@ class Settings:
     # LLM Configuration
     @property
     def model(self) -> str:
-        # Canonical: from models.agents.universal, supporting both old and new structure
+        # Canonical: from models.agents.universal -> workload -> model
         agents = self._get("models.agents", None)
         if isinstance(agents, dict):
             uni = agents.get("universal")
             if isinstance(uni, dict):
-                # New structure: resolve from provider
-                if "provider" in uni:
-                    provider_name = uni.get("provider")
-                    if provider_name:
-                        provider_def = self._get(f"providers.{provider_name}", None)
-                        if isinstance(provider_def, dict) and "model" in provider_def:
-                            return str(provider_def.get("model"))
-                # Old structure: direct model field
-                if "model" in uni and isinstance(uni.get("model"), str):
-                    return str(uni.get("model"))
-        legacy = self._get("model", "gpt-5", "MODEL")
-        return str(legacy)
+                workload = uni.get("workload")
+                if workload:
+                    wl_config = self._get(f"workloads.{workload}", None)
+                    if isinstance(wl_config, dict) and wl_config.get("model"):
+                        return str(wl_config.get("model"))
 
-    @property
-    def temperature(self) -> float:
-        # Deprecated: kept for back-compat; not part of agents anymore
-        v = self._get("temperature", 0.7, "TEMPERATURE")
-        return float(v)
-
-    @property
-    def reasoning_effort(self) -> str:
-        # Deprecated: move to providers.openai.chat.options
-        v = self._get("reasoning_effort", "low", "REASONING_EFFORT")
-        return str(v)
+        # Fallback for bootstrap/tests only
+        return self._get("model", "gpt-5", "MODEL")
 
     @property
     def embedding_model(self) -> str:
-        v = self._get("embedding_model", "text-embedding-3-small", "EMBEDDING_MODEL")
-        return str(v)
+        # Canonical: from models.embeddings -> workload -> model
+        models = self._get("models.embeddings", None)
+        if isinstance(models, dict):
+            workload = models.get("workload")
+            if workload:
+                wl_config = self._get(f"workloads.{workload}", None)
+                if isinstance(wl_config, dict) and wl_config.get("model"):
+                    return str(wl_config.get("model"))
+
+        return "text-embedding-3-small"
 
     @property
     def openai_embeddings_model(self) -> str:
-        m = self._get("models.embeddings.model", None)
-        if isinstance(m, str) and m:
-            return m
         return self.embedding_model
-
-    @property
-    def max_tokens(self) -> int:
-        # Deprecated: kept for back-compat; not part of agents anymore
-        v = self._get("max_tokens", 4000, "MAX_TOKENS")
-        return int(v)
 
     @property
     def streaming_enabled(self) -> bool:

@@ -38,6 +38,10 @@ class HealthResponse(BaseModel):
     port: int | None = None
     pid: int | None = None
     server_error: str | None = None  # Error message if server failed
+    config_valid: bool | None = (
+        None  # Whether configuration is valid (has API keys, etc)
+    )
+    config_errors: list[str] | None = None  # List of configuration issues if any
 
 
 class DialogCreateRequest(BaseModel):
@@ -128,3 +132,52 @@ class DialogHistoryResponse(BaseModel):
     has_more: bool  # Whether there are more events before the returned ones
     first_idx: int  # Index of the first event in the returned list
     last_idx: int  # Index of the last event in the returned list
+
+
+class ProviderMetadata(BaseModel):
+    name: str
+    type: str | None = None
+    has_api_key: bool | None = None
+    model: str | None = None
+
+
+class AgentProviderSlot(BaseModel):
+    path: str
+    provider: str | None = None
+    workload: str | None = None
+
+
+class WorkloadMetadata(BaseModel):
+    name: str
+    provider: str | None = None
+    model: str | None = None
+
+
+class ConfigMetadata(BaseModel):
+    provider_types: list[str]
+    providers: list[ProviderMetadata] = []
+    agent_provider_slots: list[AgentProviderSlot] = []
+    workloads: list[WorkloadMetadata] = []
+    model_catalog: dict[str, dict[str, list[str]]] = {}
+
+
+class ConfigResponse(BaseModel):
+    """Response for GET /api/config."""
+
+    config: dict[str, Any]
+    metadata: ConfigMetadata
+
+
+class ConfigUpdateRequest(BaseModel):
+    """Request for PUT /api/config."""
+
+    config: dict[str, Any]
+
+
+class ConfigUpdateResponse(BaseModel):
+    """Response for PUT /api/config."""
+
+    success: bool
+    message: str
+    config: dict[str, Any]
+    metadata: ConfigMetadata

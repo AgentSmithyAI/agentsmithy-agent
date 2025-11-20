@@ -40,49 +40,55 @@ For advanced scenarios (multiple providers, different models per agent, etc.), u
 
 ### Provider Definitions
 
-Each provider is defined in the `providers` section with a complete configuration:
+Each provider entry describes **credentials + transport** — API key, base URL, headers/options. Keep one entry per physical endpoint or account:
 
 ```json
 {
   "providers": {
-    "gpt5": {
+    "openai-shared": {
       "type": "openai",
-      "model": "gpt-5",
-      "api_key": "sk-your-openai-key-here",
+      "api_key": "sk-openai-key",
       "base_url": "https://api.openai.com/v1",
       "options": {}
     },
-    "embeddings": {
+    "openrouter": {
       "type": "openai",
-      "model": "text-embedding-3-small",
-      "api_key": null,
-      "base_url": null,
-      "options": {}
+      "api_key": "sk-openrouter-key",
+      "base_url": "https://openrouter.ai/api/v1",
+      "options": {
+        "default_provider": "anthropic"
+      }
     }
   }
 }
 ```
 
-### Model References
+### Workloads and Model References
 
-In the `models` section, reference providers by name:
+`workloads` connect a provider profile to a concrete model (or per-task overrides). Then `models.*` simply reference the workload by name:
 
 ```json
 {
+  "workloads": {
+    "reasoning":  { "provider": "openai-shared", "model": "gpt-5" },
+    "execution":  { "provider": "openai-shared", "model": "gpt-5-mini" },
+    "summarizer": { "provider": "openai-shared", "model": "gpt-5-mini" },
+    "embeddings": { "provider": "openai-shared", "model": "text-embedding-3-small" }
+  },
   "models": {
     "agents": {
       "universal": {
-        "provider": "gpt5"
+        "workload": "reasoning"
       },
       "inspector": {
-        "provider": "gpt5"
+        "workload": "execution"
       }
     },
     "embeddings": {
-      "provider": "embeddings"
+      "workload": "embeddings"
     },
     "summarization": {
-      "provider": "gpt5-mini"
+      "workload": "summarizer"
     }
   }
 }
@@ -134,28 +140,18 @@ The `summarization` model is used for generating dialog summaries when history b
   "providers": {
     "openai-prod": {
       "type": "openai",
-      "model": "gpt-5",
       "api_key": "sk-prod-key",
-      "base_url": "https://api.openai.com/v1",
-      "options": {}
+      "base_url": "https://api.openai.com/v1"
     },
     "openai-dev": {
       "type": "openai",
-      "model": "gpt-4.1",
       "api_key": "sk-dev-key",
-      "base_url": "https://api.openai.com/v1",
-      "options": {}
+      "base_url": "https://api.openai.com/v1"
     }
   },
-  "models": {
-    "agents": {
-      "universal": {
-        "provider": "openai-prod"
-      },
-      "inspector": {
-        "provider": "openai-dev"
-      }
-    }
+  "workloads": {
+    "reasoning": { "provider": "openai-prod", "model": "gpt-5" },
+    "execution": { "provider": "openai-dev", "model": "gpt-4.1" }
   }
 }
 ```
@@ -219,25 +215,9 @@ Example configuration:
 
 ```json
 {
-  "providers": {
-    "gpt5": {
-      "type": "openai",
-      "model": "gpt-5",
-      "api_key": "sk-your-key",
-      "base_url": "https://api.openai.com/v1"
-    },
-    "gpt5-mini": {
-      "type": "openai",
-      "model": "gpt-5-mini",
-      "api_key": "sk-your-key",
-      "base_url": "https://api.openai.com/v1"
-    }
-  },
-  "models": {
-    "agents": {
-      "universal": {"provider": "gpt5"}
-    },
-    "summarization": {"provider": "gpt5-mini"}
+  "workloads": {
+    "reasoning": { "provider": "openai-shared", "model": "gpt-5" },
+    "summarization": { "provider": "openai-shared", "model": "gpt-5-mini" }
   }
 }
 ```

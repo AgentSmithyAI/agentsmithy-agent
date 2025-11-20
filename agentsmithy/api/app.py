@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from agentsmithy import __version__
 from agentsmithy.api.routes.chat import router as chat_router
 from agentsmithy.api.routes.checkpoints import router as checkpoints_router
+from agentsmithy.api.routes.config import router as config_router
 from agentsmithy.api.routes.dialogs import router as dialogs_router
 from agentsmithy.api.routes.health import router as health_router
 from agentsmithy.api.routes.history import router as history_router
@@ -48,6 +49,31 @@ async def lifespan(app: FastAPI):
                 # Invalidate orchestrator so it picks up new config on next request
                 chat_service = get_chat_service()
                 chat_service.invalidate_orchestrator()
+
+                # Update config validity in status.json
+                from agentsmithy.config import settings
+                from agentsmithy.core.project_runtime import read_status, write_status
+
+                try:
+                    project = get_current_project()
+                    if not project:
+                        return
+                    status_doc = read_status(project)
+                    config_valid, config_errors = settings.validation_status()
+                    status_doc["config_valid"] = config_valid
+                    if config_errors:
+                        status_doc["config_errors"] = config_errors
+                    else:
+                        status_doc.pop("config_errors", None)
+                    write_status(project, status_doc)
+                    api_logger.info(
+                        "Updated config validity in status.json",
+                        config_valid=config_valid,
+                    )
+                except Exception as e:
+                    api_logger.warning(
+                        "Failed to update config validity in status.json", error=str(e)
+                    )
 
             app.state.config_manager.register_change_callback(on_config_change)
             await app.state.config_manager.start_watching()
@@ -133,6 +159,7 @@ def create_app() -> FastAPI:
     app.include_router(history_router)
     app.include_router(tool_results_router)
     app.include_router(checkpoints_router)
+    app.include_router(config_router)
 
     # Basic error handler example
     @app.middleware("http")

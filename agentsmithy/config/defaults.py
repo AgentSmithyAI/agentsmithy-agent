@@ -9,35 +9,40 @@ def get_default_config() -> dict[str, Any]:
         # Provider definitions - each provider is a complete configuration
         # including type, model, credentials, and options
         "providers": {
-            "gpt5": {
+            # Shared OpenAI credentials (default for all workloads)
+            "openai": {
                 "type": "openai",
-                "model": "gpt-5",
                 "api_key": None,
-                "base_url": None,
+                "base_url": "https://api.openai.com/v1",
                 "options": {},
             },
-            "gpt5-mini": {
-                "type": "openai",
+        },
+        "workloads": {
+            "reasoning": {
+                "provider": "openai",
+                "model": "gpt-5",
+                "options": {},
+            },
+            "execution": {
+                "provider": "openai",
                 "model": "gpt-5-mini",
-                "api_key": None,
-                "base_url": None,
+                "options": {},
+            },
+            "summarization": {
+                "provider": "openai",
+                "model": "gpt-5-mini",
                 "options": {},
             },
             "embeddings": {
-                "type": "openai",
+                "provider": "openai",
                 "model": "text-embedding-3-small",
-                "api_key": None,
-                "base_url": None,
                 "options": {},
             },
-            # Example: Local OpenAI-compatible server (Ollama)
-            # "gpt-local": {
-            #     "type": "openai",
-            #     "model": "gpt-4.1",
-            #     "api_key": None,
-            #     "base_url": "http://localhost:11434/v1",
-            #     "options": {},
-            # }
+            "inspector": {
+                "provider": "openai",
+                "model": "gpt-5-mini",
+                "options": {},
+            },
         },
         # Note: legacy flat keys (openai_api_key, openai_base_url) are not in defaults.
         # They are still read via Settings for backward compatibility if present in config/env.
@@ -53,11 +58,11 @@ def get_default_config() -> dict[str, Any]:
         # Models configuration - references to provider definitions
         "models": {
             "agents": {
-                "universal": {"provider": "gpt5"},
-                "inspector": {"provider": "gpt5-mini"},
+                "universal": {"workload": "reasoning"},
+                "inspector": {"workload": "inspector"},
             },
-            "embeddings": {"provider": "embeddings"},
-            "summarization": {"provider": "gpt5-mini"},
+            "embeddings": {"workload": "embeddings"},
+            "summarization": {"workload": "summarization"},
         },
         # Streaming toggle
         "streaming_enabled": True,

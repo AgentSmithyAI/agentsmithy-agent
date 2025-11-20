@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import shutil
+from pathlib import Path
 from typing import Any
 
 from .base import BaseOSAdapter
@@ -72,3 +73,10 @@ class WindowsAdapter(BaseOSAdapter):
         in git/database regardless of OS.
         """
         return path.replace("\\", "/")
+
+    def get_global_config_dir(self, app_name: str = "AgentSmithy") -> Path:
+        """Return roaming AppData directory for config."""
+        appdata = os.environ.get("APPDATA")
+        if appdata:
+            return Path(appdata) / app_name
+        return Path.home() / "AppData" / "Roaming" / app_name
