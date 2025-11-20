@@ -109,7 +109,7 @@ def test_update_config_persists(client: TestClient, config_file: Path):
     """Test that configuration updates are persisted to file."""
     update_data = {
         "config": {
-            "new_key": "new_value",
+            "server_port": 9999,
             "workloads": {"reasoning": {"model": "gpt-3.5-turbo"}},
         }
     }
@@ -120,7 +120,7 @@ def test_update_config_persists(client: TestClient, config_file: Path):
     # Read the config file directly
     saved_config = json.loads(config_file.read_text())
 
-    assert saved_config["new_key"] == "new_value"
+    assert saved_config["server_port"] == 9999
     assert saved_config["workloads"]["reasoning"]["model"] == "gpt-3.5-turbo"
 
 

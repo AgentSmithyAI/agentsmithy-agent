@@ -10,7 +10,7 @@ from typing import Any
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
-from agentsmithy.config.schema import deep_merge, normalize_config
+from agentsmithy.config.schema import deep_merge, validate_config
 from agentsmithy.utils.logger import get_logger
 
 logger = get_logger("config.providers")
@@ -89,19 +89,13 @@ class LocalFileConfigProvider(ConfigProvider):
             self._last_mtime = self.config_path.stat().st_mtime
 
             merged = deep_merge(self.defaults, config)
-            normalized = normalize_config(merged)
+            validated = validate_config(merged)
 
-            if normalized != merged:
-                logger.info(
-                    "Loaded legacy config; applying normalized view in memory only",
-                    path=str(self.config_path),
-                )
-
-            self._last_valid_config = normalized.copy()
+            self._last_valid_config = validated.copy()
             self._user_config = config.copy()
 
             logger.debug("Config loaded from file", path=str(self.config_path))
-            return normalized
+            return validated
         except json.JSONDecodeError as e:
             logger.error(
                 "Invalid JSON syntax in config file",
@@ -153,7 +147,7 @@ class LocalFileConfigProvider(ConfigProvider):
     async def save(self, config: dict[str, Any]) -> None:
         """Atomically save configuration to file."""
         try:
-            merged = normalize_config(deep_merge(self.defaults, config))
+            merged = validate_config(deep_merge(self.defaults, config))
         except ValueError as exc:
             logger.error(
                 "Refusing to save invalid configuration",

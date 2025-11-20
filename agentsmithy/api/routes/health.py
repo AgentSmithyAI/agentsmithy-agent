@@ -14,25 +14,6 @@ from agentsmithy.utils.logger import api_logger
 router = APIRouter()
 
 
-def check_config_validity() -> tuple[bool, list[str]]:
-    """Check if configuration is valid and return errors if any."""
-    errors = []
-    try:
-        settings.validate_or_raise()
-        return True, []
-    except ValueError as e:
-        error_msg = str(e)
-        if "OPENAI_API_KEY" in error_msg or "api_key" in error_msg.lower():
-            errors.append("API key not configured")
-        if "model" in error_msg.lower():
-            errors.append("Model not configured or unsupported")
-        if "embedding" in error_msg.lower():
-            errors.append("Embedding model not configured or unsupported")
-        if not errors:
-            errors.append(error_msg)
-        return False, errors
-
-
 @router.get("/health", response_model=HealthResponse)
 async def health(project: Project | None = Depends(get_project)):  # noqa: B008
     """Health check endpoint with server status information.
@@ -50,7 +31,7 @@ async def health(project: Project | None = Depends(get_project)):  # noqa: B008
             status_doc = read_status(project)
 
         # Check configuration validity
-        config_valid, config_errors = check_config_validity()
+        config_valid, config_errors = settings.validation_status()
 
         return HealthResponse(
             status="ok",

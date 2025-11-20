@@ -43,7 +43,7 @@ class Settings:
         """Convert validation error message into structured list."""
         errors: list[str] = []
         lower_msg = message.lower()
-        if "api key" in lower_msg:
+        if "api key" in lower_msg or "api_key" in lower_msg:
             errors.append("API key not configured")
         if "embedding" in lower_msg:
             errors.append("Embedding model not configured or unsupported")
@@ -108,14 +108,7 @@ class Settings:
     # OpenAI Chat nested configuration (preferred)
     @property
     def openai_chat_model(self) -> str | None:
-        # models.agents.universal overrides global default model
-        agents = self._get("models.agents", None)
-        if isinstance(agents, dict):
-            uni = agents.get("universal")
-            if isinstance(uni, dict) and isinstance(uni.get("model"), str):
-                return uni.get("model")
-        v = self._get("openai.chat.model", None)
-        return v if isinstance(v, str) else None
+        return self.model
 
     @property
     def openai_chat_options(self) -> dict:
@@ -125,19 +118,11 @@ class Settings:
 
     # Generic provider config helpers
     def get_provider_config(self, provider: str) -> dict:
-        """Return merged provider config: providers.<name> over openai/<legacy>.
-
-        Backward compatibility: for provider=="openai", merge with `openai` section.
-        """
-        merged: dict = {}
-        if provider == "openai":
-            cfg = self._get("openai", None)
-            if isinstance(cfg, dict):
-                merged.update(cfg)
+        """Return provider config from providers.<name>."""
         prov = self._get(f"providers.{provider}", None)
         if isinstance(prov, dict):
-            merged.update(prov)
-        return merged
+            return prov
+        return {}
 
     # Agent profile helpers
     def get_agent_profile(self, name: str | None) -> dict:
@@ -181,34 +166,35 @@ class Settings:
     # LLM Configuration
     @property
     def model(self) -> str:
-        # Canonical: from models.agents.universal, supporting both old and new structure
+        # Canonical: from models.agents.universal -> workload -> model
         agents = self._get("models.agents", None)
         if isinstance(agents, dict):
             uni = agents.get("universal")
             if isinstance(uni, dict):
-                # New structure: resolve from provider
-                if "provider" in uni:
-                    provider_name = uni.get("provider")
-                    if provider_name:
-                        provider_def = self._get(f"providers.{provider_name}", None)
-                        if isinstance(provider_def, dict) and "model" in provider_def:
-                            return str(provider_def.get("model"))
-                # Old structure: direct model field
-                if "model" in uni and isinstance(uni.get("model"), str):
-                    return str(uni.get("model"))
-        legacy = self._get("model", "gpt-5", "MODEL")
-        return str(legacy)
+                workload = uni.get("workload")
+                if workload:
+                    wl_config = self._get(f"workloads.{workload}", None)
+                    if isinstance(wl_config, dict) and wl_config.get("model"):
+                        return str(wl_config.get("model"))
+
+        # Fallback for bootstrap/tests only
+        return self._get("model", "gpt-5", "MODEL")
 
     @property
     def embedding_model(self) -> str:
-        v = self._get("embedding_model", "text-embedding-3-small", "EMBEDDING_MODEL")
-        return str(v)
+        # Canonical: from models.embeddings -> workload -> model
+        models = self._get("models.embeddings", None)
+        if isinstance(models, dict):
+            workload = models.get("workload")
+            if workload:
+                wl_config = self._get(f"workloads.{workload}", None)
+                if isinstance(wl_config, dict) and wl_config.get("model"):
+                    return str(wl_config.get("model"))
+
+        return "text-embedding-3-small"
 
     @property
     def openai_embeddings_model(self) -> str:
-        m = self._get("models.embeddings.model", None)
-        if isinstance(m, str) and m:
-            return m
         return self.embedding_model
 
     @property

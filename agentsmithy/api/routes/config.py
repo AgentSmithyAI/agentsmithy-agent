@@ -14,7 +14,7 @@ from agentsmithy.config.manager import get_config_manager
 from agentsmithy.config.schema import (
     build_config_metadata,
     deep_merge,
-    validate_config_structure,
+    validate_config,
 )
 from agentsmithy.utils.logger import api_logger
 
@@ -71,15 +71,16 @@ async def update_config(request: ConfigUpdateRequest):
 
         current_config = config_manager.get_all()
         merged_config = deep_merge(current_config, request.config)
-        validation_errors = validate_config_structure(merged_config)
-        if validation_errors:
+        try:
+            validate_config(merged_config)
+        except ValueError as e:
             raise HTTPException(
                 status_code=400,
                 detail={
                     "message": "Invalid configuration",
-                    "errors": validation_errors,
+                    "errors": str(e).split("; "),
                 },
-            )
+            ) from e
 
         await config_manager.update(request.config)
 
