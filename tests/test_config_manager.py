@@ -204,6 +204,12 @@ async def test_settings_with_config_manager():
         workload_name = defaults["models"]["agents"]["universal"]["workload"]
         expected_model = defaults["workloads"][workload_name]["model"]
         assert settings.model == expected_model
+        assert settings.openai_chat_model == expected_model
+        assert settings.embedding_model == defaults["workloads"]["embeddings"]["model"]
+        assert (
+            settings.openai_embeddings_model
+            == defaults["workloads"]["embeddings"]["model"]
+        )
         assert settings.streaming_enabled == defaults["streaming_enabled"]
 
 
@@ -220,6 +226,62 @@ def test_settings_env_fallback():
 
     # Cleanup
     del os.environ["MODEL"]
+
+
+@pytest.mark.asyncio
+async def test_settings_embedding_model_tracks_workload_updates():
+    """Embedding model property should reflect workload changes."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        config_path = Path(tmpdir) / "config.json"
+        defaults = get_default_config()
+
+        provider = LocalFileConfigProvider(config_path, defaults=defaults)
+        manager = ConfigManager(provider)
+        await manager.initialize()
+
+        settings = Settings(config_manager=manager)
+        assert settings.embedding_model == "text-embedding-3-small"
+
+        await manager.update(
+            {
+                "workloads": {
+                    "embeddings": {
+                        "provider": "openai",
+                        "model": "text-embedding-3-large",
+                    }
+                }
+            }
+        )
+
+        assert settings.embedding_model == "text-embedding-3-large"
+        assert settings.openai_embeddings_model == "text-embedding-3-large"
+
+
+def test_settings_validation_status_formats_errors(monkeypatch):
+    """validation_status should provide user-friendly error list."""
+
+    settings = Settings(config_manager=None)
+
+    def _run_case(message: str, expected: list[str]) -> None:
+        def fake_validate(model, embedding_model, api_key):
+            raise ValueError(message)
+
+        monkeypatch.setattr(
+            "agentsmithy.config.validation.validate_or_raise", fake_validate
+        )
+
+        valid, errors = settings.validation_status()
+        assert valid is False
+        for token in expected:
+            assert token in errors
+        assert message in errors
+
+    _run_case("API key missing", ["API key not configured"])
+    _run_case(
+        "Embedding selection invalid",
+        ["Embedding model not configured or unsupported"],
+    )
+    _run_case("Model misconfigured", ["Model not configured or unsupported"])
 
 
 @pytest.mark.asyncio
