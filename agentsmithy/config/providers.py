@@ -329,7 +329,7 @@ class LayeredConfigProvider(ConfigProvider):
     def _merge(self) -> dict[str, Any]:
         merged: dict[str, Any] = {}
         for cfg in self._layer_configs:
-            merged.update(cfg)
+            merged = deep_merge(merged, cfg)
         return merged
 
     def _emit(self) -> None:

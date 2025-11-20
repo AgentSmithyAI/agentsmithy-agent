@@ -130,7 +130,7 @@ def validate_config(config: dict[str, Any]) -> dict[str, Any]:
         app_config = AppConfig.model_validate(config)
 
         # Return as dict for compatibility with existing code
-        return app_config.model_dump(mode="json")
+        return app_config.model_dump(mode="json", exclude_none=True)
     except Exception as e:
         # Wrap Pydantic validation errors in ValueError for consistent error handling
         raise ValueError(str(e)) from e

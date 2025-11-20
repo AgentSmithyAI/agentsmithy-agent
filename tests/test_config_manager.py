@@ -350,7 +350,18 @@ async def test_layered_config_provider_merges_global_and_local(tmp_path: Path):
     local_path = tmp_path / "local.json"
 
     # Use valid keys
-    defaults = {"server_host": "default", "server_port": 1000}
+    defaults = {
+        "server_host": "default",
+        "server_port": 1000,
+        "providers": {
+            "openai": {
+                "type": "openai",
+                "api_key": "global",
+                "base_url": "https://api.openai.com/v1",
+                "options": {},
+            }
+        },
+    }
     provider = LayeredConfigProvider(
         [
             LocalFileConfigProvider(global_path, defaults=defaults),
@@ -361,21 +372,52 @@ async def test_layered_config_provider_merges_global_and_local(tmp_path: Path):
     merged = await provider.load()
     assert merged["server_host"] == "default"
     assert merged["server_port"] == 1000
+    assert merged["providers"]["openai"]["api_key"] == "global"
 
     # Update global config via provider.save
-    await provider.save({"server_host": "global", "log_level": "INFO"})
+    await provider.save(
+        {
+            "server_host": "global",
+            "log_level": "INFO",
+            "providers": {
+                "openai": {"api_key": "global-updated", "options": {"timeout": 30}}
+            },
+        }
+    )
     merged = await provider.load()
     assert merged["server_host"] == "global"
     assert merged["log_level"] == "INFO"
+    assert merged["providers"]["openai"]["api_key"] == "global-updated"
+    assert merged["providers"]["openai"]["options"]["timeout"] == 30
 
     # Write local override directly
     # Must use valid keys or they will be stripped
-    local_path.write_text(json.dumps({"server_host": "local", "server_port": 2000}))
+    local_path.write_text(
+        json.dumps(
+            {
+                "server_host": "local",
+                "server_port": 2000,
+                "providers": {
+                    "openai": {
+                        "options": {
+                            "timeout": 10,
+                            "max_retries": 5,
+                        },
+                        "model": "gpt-5-mini",
+                    }
+                },
+            }
+        )
+    )
     merged = await provider.load()
     assert merged["server_host"] == "local"
     assert merged["server_port"] == 2000
-    # Global-only field should still exist
+    # Both global and local nested fields should be preserved/merged
     assert merged["log_level"] == "INFO"
+    assert merged["providers"]["openai"]["api_key"] == "global-updated"
+    assert merged["providers"]["openai"]["options"]["timeout"] == 10
+    assert merged["providers"]["openai"]["options"]["max_retries"] == 5
+    assert merged["providers"]["openai"]["model"] == "gpt-5-mini"
 
 
 @pytest.mark.asyncio

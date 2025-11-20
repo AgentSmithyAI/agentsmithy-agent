@@ -132,8 +132,9 @@ if __name__ == "__main__":
                 )
             else:
                 startup_logger.info(
-                    "Global config already exists; project-scoped config will be ignored",
+                    "Global config already exists; project config will be treated as an override layer",
                     project_config=str(local_config_path),
+                    global_config=str(global_config_path),
                 )
 
         # Create and initialize config manager with global config path

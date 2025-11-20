@@ -43,15 +43,23 @@ class Settings:
         """Convert validation error message into structured list."""
         errors: list[str] = []
         lower_msg = message.lower()
+
         if "api key" in lower_msg or "api_key" in lower_msg:
             errors.append("API key not configured")
+
         if "embedding" in lower_msg:
             errors.append("Embedding model not configured or unsupported")
+
         if "model" in lower_msg and "embedding" not in lower_msg:
             errors.append("Model not configured or unsupported")
-        # Always include the original validation message for diagnostics
-        if message and message not in errors:
-            errors.append(message)
+
+        # Always include the original validation message for diagnostics,
+        # unless it's a verbatim match of a friendly message we already added.
+        if message:
+            normalized_existing = {err.lower() for err in errors}
+            if message.lower() not in normalized_existing:
+                errors.append(message)
+
         return errors
 
     def _get(
