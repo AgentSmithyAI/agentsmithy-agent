@@ -189,7 +189,7 @@ class Settings:
                         return str(wl_config.get("model"))
 
         # Fallback for bootstrap/tests only
-        return self._get("model", "gpt-5", "MODEL")
+        return self._get("model", "gpt-5.1-codex", "MODEL")
 
     @property
     def embedding_model(self) -> str:
