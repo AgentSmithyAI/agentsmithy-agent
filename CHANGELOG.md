@@ -1,5 +1,14 @@
 <!-- version list -->
 
+## v1.11.1 (2025-11-21)
+
+### Bug Fixes
+
+- Improve config and remove unnecessary fields
+  ([#66](https://github.com/AgentSmithyAI/agentsmithy-agent/pull/66),
+  [`b25ffa6`](https://github.com/AgentSmithyAI/agentsmithy-agent/commit/b25ffa69364eafa1111d9225daa9ca4391d9e783))
+
+
 ## v1.11.0 (2025-11-20)
 
 ### Chores
