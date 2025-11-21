@@ -103,6 +103,29 @@ def test_session_deleted_and_modified_files(tmp_path: Path) -> None:
     assert files_by_path["delete.py"]["status"] == "deleted"
 
 
+def test_deleted_file_becomes_ignored_after_checkpoint(tmp_path: Path) -> None:
+    """File committed before ignore update shouldn't appear as deleted afterward."""
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+
+    # Initial files (spec tracked before ignore exists)
+    (project_root / "main.py").write_text("print('hello')\n")
+    (project_root / "agentsmithy.spec").write_text("# pyinstaller spec\n")
+
+    tracker = VersioningTracker(str(project_root), dialog_id="test_dialog")
+    tracker.ensure_repo()
+    tracker.create_checkpoint("Initial files including spec")
+
+    # Introduce new ignore pattern and delete the spec locally
+    (project_root / ".gitignore").write_text("*.spec\n")
+    (project_root / "agentsmithy.spec").unlink()
+
+    staged_files = tracker.get_staged_files(include_diff=True)
+
+    # After ignore change, the spec deletion should not show up as staged change
+    assert all(f["path"] != "agentsmithy.spec" for f in staged_files)
+
+
 def test_deleted_files_not_in_index(tmp_path: Path) -> None:
     """Test that deleted files are detected even when not explicitly staged."""
     project_root = tmp_path / "project"

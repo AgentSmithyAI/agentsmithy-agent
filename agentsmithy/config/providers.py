@@ -65,23 +65,28 @@ class LocalFileConfigProvider(ConfigProvider):
     async def load(self) -> dict[str, Any]:
         """Load configuration from file, creating with defaults if not exists."""
         if not self.config_path.exists():
+            user_config: dict[str, Any] = {}
             if not self.create_if_missing:
                 logger.info(
                     "Config file not found, skipping auto-create",
                     path=str(self.config_path),
                 )
-                merged = self.defaults.copy()
-                self._last_valid_config = merged.copy()
-                self._user_config = {}
-                return merged
-            logger.info(
-                "Config file not found, creating with defaults",
-                path=str(self.config_path),
-            )
-            await self.save(self.defaults.copy())
-            self._last_valid_config = self.defaults.copy()
-            self._user_config = self.defaults.copy()
-            return self.defaults.copy()
+            else:
+                logger.info(
+                    "Config file not found, creating empty config",
+                    path=str(self.config_path),
+                )
+                self.config_path.parent.mkdir(parents=True, exist_ok=True)
+                self.config_path.write_text("{}\n", encoding="utf-8")
+                try:
+                    self._last_mtime = self.config_path.stat().st_mtime
+                except FileNotFoundError:
+                    self._last_mtime = None
+
+            merged = self.defaults.copy()
+            self._last_valid_config = merged.copy()
+            self._user_config = user_config
+            return merged
 
         try:
             content = self.config_path.read_text(encoding="utf-8")
