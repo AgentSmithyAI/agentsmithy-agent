@@ -24,6 +24,9 @@ hiddenimports += [
     'agentsmithy.llm.providers.openai.models.gpt4_1',
     'agentsmithy.llm.providers.openai.models.gpt5',
     'agentsmithy.llm.providers.openai.models.gpt5_mini',
+    'agentsmithy.llm.providers.openai.models.gpt5_1',
+    'agentsmithy.llm.providers.openai.models.gpt5_1_codex',
+    'agentsmithy.llm.providers.openai.models.gpt5_1_codex_mini',
 ]
 
 

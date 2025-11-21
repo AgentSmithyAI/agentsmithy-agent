@@ -20,17 +20,17 @@ def get_default_config() -> dict[str, Any]:
         "workloads": {
             "reasoning": {
                 "provider": "openai",
-                "model": "gpt-5",
+                "model": "gpt-5.1-codex",
                 "options": {},
             },
             "execution": {
                 "provider": "openai",
-                "model": "gpt-5-mini",
+                "model": "gpt-5.1-codex-mini",
                 "options": {},
             },
             "summarization": {
                 "provider": "openai",
-                "model": "gpt-5-mini",
+                "model": "gpt-5.1-codex-mini",
                 "options": {},
             },
             "embeddings": {
@@ -40,7 +40,7 @@ def get_default_config() -> dict[str, Any]:
             },
             "inspector": {
                 "provider": "openai",
-                "model": "gpt-5-mini",
+                "model": "gpt-5.1-codex-mini",
                 "options": {},
             },
         },
