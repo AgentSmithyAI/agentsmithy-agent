@@ -14,6 +14,7 @@ from agentsmithy.config import (
     Settings,
     get_default_config,
 )
+from agentsmithy.config.constants import DEFAULT_STREAMING_ENABLED
 
 
 @pytest.mark.asyncio
@@ -38,7 +39,7 @@ async def test_local_file_provider_loads_existing_config():
         config_path = Path(tmpdir) / "config.json"
 
         # Create config file
-        existing_config = {"server_port": 1234, "streaming_enabled": False}
+        existing_config = {"server_port": 1234}
         config_path.write_text(json.dumps(existing_config), encoding="utf-8")
 
         provider = LocalFileConfigProvider(config_path, defaults={"server_port": 8000})
@@ -46,7 +47,6 @@ async def test_local_file_provider_loads_existing_config():
 
         # Should merge with defaults
         assert config["server_port"] == 1234
-        assert config["streaming_enabled"] is False
 
 
 @pytest.mark.asyncio
@@ -210,7 +210,7 @@ async def test_settings_with_config_manager():
             settings.openai_embeddings_model
             == defaults["workloads"]["embeddings"]["model"]
         )
-        assert settings.streaming_enabled == defaults["streaming_enabled"]
+        assert settings.streaming_enabled == DEFAULT_STREAMING_ENABLED
 
 
 def test_settings_env_fallback():

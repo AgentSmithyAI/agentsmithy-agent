@@ -30,7 +30,6 @@ async def config_manager(config_file: Path):
     defaults = {
         "server_host": "localhost",
         "server_port": 8765,
-        "streaming_enabled": True,
     }
 
     provider = LocalFileConfigProvider(config_file, defaults=defaults)
@@ -75,7 +74,6 @@ def test_get_config(client: TestClient):
     # Check that defaults are present
     assert config["server_host"] == "localhost"
     assert config["server_port"] == 8765
-    assert config["streaming_enabled"] is True
 
     # Metadata should provide provider info
     assert "provider_types" in metadata
