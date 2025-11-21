@@ -16,6 +16,9 @@ def deep_merge(base: dict[str, Any], updates: dict[str, Any]) -> dict[str, Any]:
     for key, value in updates.items():
         if key in result and isinstance(result[key], dict) and isinstance(value, dict):
             result[key] = deep_merge(result[key], value)
+        elif key in result and value is None:
+            # Treat None as "not provided" so lower layers keep their values
+            continue
         else:
             result[key] = value
     return result
@@ -60,11 +63,7 @@ class AppConfig(BaseModel):
 
     server_host: str = "localhost"
     server_port: int = 8765
-    chroma_persist_directory: str = "./chroma_db"
-    max_context_length: int = 10000
-    max_open_files: int = 5
     summary_trigger_token_budget: int = 20000
-    streaming_enabled: bool = True
     web_user_agent: str = (
         "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
         "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
@@ -130,7 +129,7 @@ def validate_config(config: dict[str, Any]) -> dict[str, Any]:
         app_config = AppConfig.model_validate(config)
 
         # Return as dict for compatibility with existing code
-        return app_config.model_dump(mode="json", exclude_none=True)
+        return app_config.model_dump(mode="json")
     except Exception as e:
         # Wrap Pydantic validation errors in ValueError for consistent error handling
         raise ValueError(str(e)) from e

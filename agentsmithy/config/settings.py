@@ -7,10 +7,15 @@ providing property-based access to configuration values with hot-reload support.
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-if TYPE_CHECKING:
-    from agentsmithy.config.manager import ConfigManager
+from agentsmithy.config.constants import (
+    DEFAULT_CHROMA_PERSIST_DIRECTORY,
+    DEFAULT_MAX_CONTEXT_LENGTH,
+    DEFAULT_MAX_OPEN_FILES,
+    DEFAULT_STREAMING_ENABLED,
+)
+from agentsmithy.config.manager import ConfigManager
 
 
 class Settings:
@@ -152,17 +157,15 @@ class Settings:
     # RAG Configuration
     @property
     def chroma_persist_directory(self) -> str:
-        return self._get(
-            "chroma_persist_directory", "./chroma_db", "CHROMA_PERSIST_DIRECTORY"
-        )
+        return DEFAULT_CHROMA_PERSIST_DIRECTORY
 
     @property
     def max_context_length(self) -> int:
-        return self._get("max_context_length", 10000, "MAX_CONTEXT_LENGTH")
+        return DEFAULT_MAX_CONTEXT_LENGTH
 
     @property
     def max_open_files(self) -> int:
-        return self._get("max_open_files", 5, "MAX_OPEN_FILES")
+        return DEFAULT_MAX_OPEN_FILES
 
     # Summarization
     @property
@@ -207,7 +210,7 @@ class Settings:
 
     @property
     def streaming_enabled(self) -> bool:
-        return self._get("streaming_enabled", True, "STREAMING_ENABLED")
+        return DEFAULT_STREAMING_ENABLED
 
     # Web/HTTP Configuration
     @property
