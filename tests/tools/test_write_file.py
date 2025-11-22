@@ -14,7 +14,10 @@ async def _run(tool, **kwargs):
 
 
 async def test_write_file_create_and_overwrite(tmp_path: Path, monkeypatch):
+    # Use isolated temp directory as both HOME and project root (cwd)
+    # so versioning/checkpoints logic does not touch the real workspace.
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
     f = tmp_path / "file.txt"
     t = WriteFileTool()
     await _run(t, path=str(f), content="one")

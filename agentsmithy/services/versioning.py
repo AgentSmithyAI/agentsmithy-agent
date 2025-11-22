@@ -16,7 +16,6 @@ from typing import Any, cast
 import pathspec
 from dulwich import porcelain
 from dulwich.diff_tree import CHANGE_ADD, CHANGE_DELETE, CHANGE_MODIFY, tree_changes
-from dulwich.errors import NotGitRepository
 from dulwich.objects import Blob, Commit, Tree
 from dulwich.repo import Repo
 
@@ -426,15 +425,9 @@ class VersioningTracker:
         """
         # Use a non-bare repository that can track files in project directory
         git_dir = self.shadow_root / ".git"
-        repo: Repo | None = None
         if git_dir.exists():
-            try:
-                repo = Repo(str(self.shadow_root))
-            except NotGitRepository:
-                # Corrupted or partially initialized repo, reset by removing .git
-                shutil.rmtree(git_dir, ignore_errors=True)
-
-        if repo is None:
+            repo = Repo(str(self.shadow_root))
+        else:
             self.shadow_root.mkdir(parents=True, exist_ok=True)
             try:
                 # Create non-bare repo
@@ -442,11 +435,6 @@ class VersioningTracker:
             except FileExistsError:
                 # Partial init or concurrent init; open existing
                 repo = Repo(str(self.shadow_root))
-
-        if repo is None:
-            raise RuntimeError(
-                f"Failed to initialize versioning repository at {self.shadow_root}"
-            )
 
         # Configure git
         cfg = repo.get_config()
@@ -1709,12 +1697,7 @@ class VersioningTracker:
                         files[full_path] = sha
                 return files
 
-            ignore_spec = self._get_ignore_spec()
-            head_files = {
-                path: sha
-                for path, sha in collect_head_files(cast(Tree, head_tree)).items()
-                if not ignore_spec.match_file(path)
-            }
+            head_files = collect_head_files(cast(Tree, head_tree))
 
             # Process staged files (in index)
             staged: list[dict[str, Any]] = []

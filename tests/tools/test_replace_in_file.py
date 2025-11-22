@@ -14,7 +14,10 @@ async def _run(tool, **kwargs):
 
 
 async def test_replace_in_file_search_replace_applies(tmp_path: Path, monkeypatch):
+    # Use isolated temp directory as both HOME and project root (cwd)
+    # so versioning/checkpoints logic does not touch the real workspace.
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
     f = tmp_path / "d.txt"
     f.write_text("abc", encoding="utf-8")
     t = ReplaceInFileTool()
@@ -121,6 +124,7 @@ async def test_replace_in_file_applies_various_blocks(
     tmp_path: Path, monkeypatch, initial: str, diff_text: str, expected: str
 ):
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
     f = tmp_path / "e.txt"
     f.write_text(initial, encoding="utf-8")
     t = ReplaceInFileTool()
@@ -132,6 +136,7 @@ async def test_replace_in_file_applies_various_blocks(
 async def test_replace_in_file_marker_with_angle_brackets(tmp_path: Path, monkeypatch):
     """Test marker format with <<<<<<< SEARCH / ======= / +++++++ REPLACE"""
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
     f = tmp_path / "angle.txt"
     f.write_text("hello world", encoding="utf-8")
     t = ReplaceInFileTool()
@@ -155,6 +160,7 @@ goodbye world
 async def test_replace_in_file_no_separator_format(tmp_path: Path, monkeypatch):
     """Test marker format without ======= separator (like LLM sometimes sends)"""
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
     f = tmp_path / "nosep.txt"
     f.write_text("hello world\ngoodbye moon", encoding="utf-8")
     t = ReplaceInFileTool()
@@ -177,6 +183,7 @@ goodbye sun
 
 async def test_replace_in_file_apply_patch_style(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
     f = tmp_path / "p.txt"
     f.write_text("line1\nline2\n", encoding="utf-8")
     patch = f"""*** Begin Patch
