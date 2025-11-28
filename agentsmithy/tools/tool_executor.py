@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import uuid
 from collections.abc import AsyncGenerator, Awaitable, Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal, TypedDict, TypeGuard
 
 from langchain_core.messages import BaseMessage, ToolMessage
 
@@ -18,6 +18,40 @@ from .registry import ToolRegistry
 
 if TYPE_CHECKING:
     from agentsmithy.core.project import Project
+
+
+# --- Reasoning content block types (LangChain Responses API format) ---
+# These match what langchain-openai actually returns, not langchain-core's
+# ReasoningContentBlock which is incomplete.
+
+
+class SummaryTextItem(TypedDict, total=False):
+    """Single summary text item in reasoning block."""
+
+    index: int
+    type: Literal["summary_text"]
+    text: str
+
+
+class ReasoningBlock(TypedDict, total=False):
+    """Reasoning content block as returned by LangChain for Responses API.
+
+    LangChain-OpenAI returns reasoning in two possible formats:
+    1. Legacy: {"type": "reasoning", "reasoning": "..."}
+    2. Responses API v1: {"type": "reasoning", "summary": [...]}
+    """
+
+    type: Literal["reasoning"]
+    reasoning: str  # Legacy format
+    text: str  # Alternative legacy format
+    summary: list[SummaryTextItem]  # Responses API v1 format
+    index: int
+    id: str
+
+
+def is_reasoning_block(block: dict[str, Any]) -> TypeGuard[ReasoningBlock]:
+    """Type guard to check if a dict is a ReasoningBlock."""
+    return block.get("type") == "reasoning"
 
 
 class ToolExecutor:
@@ -202,12 +236,12 @@ class ToolExecutor:
         Returns reasoning text if found, None otherwise.
         """
         try:
-            # Check direct reasoning_content attribute (OpenAI o1/gpt-5)
+            # 1) Direct attribute exposed by some adapters (e.g., OpenAI o1/gpt-5)
             reasoning_content = getattr(chunk, "reasoning_content", None)
-            if isinstance(reasoning_content, str):
+            if isinstance(reasoning_content, str) and reasoning_content:
                 return reasoning_content
 
-            # Try nested paths for reasoning
+            # 2) Nested fields in additional_kwargs/response_metadata
             add = getattr(chunk, "additional_kwargs", {}) or {}
             meta = getattr(chunk, "response_metadata", {}) or {}
 
@@ -215,15 +249,61 @@ class ToolExecutor:
                 meta, "reasoning"
             )
 
-            # Parse reasoning based on type
-            if isinstance(reasoning, str):
+            if isinstance(reasoning, str) and reasoning:
                 return reasoning
-            elif isinstance(reasoning, dict):
-                return self._parse_reasoning_dict(reasoning)
+            if isinstance(reasoning, dict):
+                parsed = self._parse_reasoning_dict(reasoning)
+                if parsed:
+                    return parsed
+
+            # 3) Reasoning blocks inside content list (LangChain content blocks API)
+            #    Newer OpenAI models (gpt-5 family) stream content as a list of blocks.
+            #    See ReasoningBlock TypedDict for expected structure.
+            content = getattr(chunk, "content", None)
+            if isinstance(content, list):
+                parts: list[str] = []
+                for item in content:
+                    if isinstance(item, dict) and is_reasoning_block(item):
+                        text = self._extract_text_from_reasoning_block(item)
+                        if text:
+                            parts.append(text)
+                if parts:
+                    return "".join(parts)
 
             return None
         except Exception:
             return None
+
+    def _extract_text_from_reasoning_block(self, block: ReasoningBlock) -> str | None:
+        """Extract text from a reasoning content block.
+
+        Handles both legacy format (reasoning/text fields) and
+        Responses API v1 format (summary list).
+
+        Args:
+            block: A ReasoningBlock (validated by is_reasoning_block TypeGuard)
+
+        Returns:
+            Extracted text or None
+        """
+        # Legacy format: direct reasoning or text field
+        text = block.get("reasoning") or block.get("text")
+        if text:
+            return text
+
+        # Responses API v1 format: summary is a list of SummaryTextItem
+        summary = block.get("summary")
+        if summary is not None:
+            texts: list[str] = []
+            for item in summary:
+                # item is already typed as SummaryTextItem from ReasoningBlock
+                t = item.get("text")
+                if t:
+                    texts.append(t)
+            if texts:
+                return "".join(texts)
+
+        return None
 
     def _get_nested(self, obj: Any, *keys: str, default: Any = None) -> Any:
         """Safely access nested dict keys (like Optional chaining in JS).
