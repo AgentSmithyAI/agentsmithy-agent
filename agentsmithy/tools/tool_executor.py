@@ -181,10 +181,15 @@ class ToolExecutor:
         Returns NormalizedUsage with: prompt_tokens, completion_tokens, total_tokens
         """
         # Normalize prompt tokens (OpenAI vs Anthropic naming)
-        prompt_tokens = usage.get("prompt_tokens") or usage.get("input_tokens")
+        # Use explicit None check - 0 is a valid token count
+        prompt_tokens = usage.get("prompt_tokens")
+        if prompt_tokens is None:
+            prompt_tokens = usage.get("input_tokens")
 
         # Normalize completion tokens
-        completion_tokens = usage.get("completion_tokens") or usage.get("output_tokens")
+        completion_tokens = usage.get("completion_tokens")
+        if completion_tokens is None:
+            completion_tokens = usage.get("output_tokens")
 
         return {
             "prompt_tokens": prompt_tokens,
