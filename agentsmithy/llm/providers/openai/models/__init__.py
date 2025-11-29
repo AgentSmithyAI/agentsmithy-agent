@@ -6,7 +6,7 @@ from collections.abc import Callable
 
 from agentsmithy.llm.providers.model_spec import IModelSpec
 
-from ._base import OpenAIModelSpec  # re-export for typing
+from ._base import CustomChatCompletionsSpec, OpenAIModelSpec  # re-export for typing
 
 # Internal registry populated via decorator when modules are imported
 _MODEL_REGISTRY: dict[str, type[OpenAIModelSpec]] = {}
@@ -66,12 +66,14 @@ def __getattr__(name: str):
 
 
 def get_model_spec(model: str) -> IModelSpec:
-    """Factory that returns a spec instance for exact model name.
-    Raises ValueError for unsupported names.
+    """Factory that returns a spec instance for model name.
+
+    For registered models returns the specific spec class.
+    For unknown models returns CustomChatCompletionsSpec as fallback,
+    allowing use of any OpenAI-compatible endpoint (OpenRouter, LMStudio, etc.).
     """
     cls = _MODEL_REGISTRY.get(model)
-    if not cls:
-        raise ValueError(
-            f"Unsupported OpenAI model '{model}'. Supported: {sorted(_MODEL_REGISTRY.keys())}"
-        )
-    return cls()
+    if cls:
+        return cls()
+    # Fallback to generic chat completions spec for custom/unknown models
+    return CustomChatCompletionsSpec(model)
