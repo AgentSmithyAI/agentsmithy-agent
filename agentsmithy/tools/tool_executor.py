@@ -10,7 +10,19 @@ from langchain_core.messages.ai import UsageMetadata
 from langchain_core.messages.tool import ToolCallChunk
 
 from agentsmithy.dialogs.storages.usage import DialogUsageStorage
-from agentsmithy.domain.events import EventType
+from agentsmithy.domain.events import (
+    ChatEndEvent,
+    ChatEvent,
+    ChatStartEvent,
+    DoneEvent,
+    ErrorEvent,
+    FileEditEvent,
+    ReasoningEndEvent,
+    ReasoningEvent,
+    ReasoningStartEvent,
+    StreamEvent,
+    ToolCallEvent,
+)
 from agentsmithy.llm.provider import LLMProvider
 from agentsmithy.llm.providers.types import (
     AccumulatedToolCall,
@@ -22,6 +34,7 @@ from agentsmithy.llm.providers.types import (
 from agentsmithy.storage.tool_results import ToolResultsStorage
 from agentsmithy.utils.logger import agent_logger
 
+from .core.types import ToolError
 from .integration.langchain_adapter import as_langchain_tools
 from .registry import ToolRegistry
 
@@ -318,7 +331,7 @@ class ToolExecutor:
         tool_call_id: str,
         name: str,
         args: dict[str, Any],
-        result: dict[str, Any],
+        result: dict[str, Any] | ToolError,
     ) -> tuple[ToolMessage, bool]:
         """Create a ToolMessage for a tool result, optionally persisting it.
 
@@ -327,38 +340,40 @@ class ToolExecutor:
         """
         is_ephemeral = self._is_ephemeral_tool(name)
 
+        # Convert ToolError to dict for serialization
+        if isinstance(result, ToolError):
+            result_dict: dict[str, Any] = result.model_dump()
+            is_error = True
+        else:
+            result_dict = result
+            is_error = False
+
         # If storage is available and tool is not ephemeral, persist and build reference
         if self._tool_results_storage and not is_ephemeral:
             result_ref = await self._tool_results_storage.store_result(
                 tool_call_id=tool_call_id,
                 tool_name=name,
                 args=args,
-                result=result,
+                result=result_dict,
             )
             metadata = await self._tool_results_storage.get_metadata(tool_call_id)
 
-            inline_result_json = json.dumps(result, ensure_ascii=False)
+            inline_result_json = json.dumps(result_dict, ensure_ascii=False)
             content = {
                 "tool_call_id": tool_call_id,
                 "tool_name": name,
-                "status": (
-                    "error"
-                    if isinstance(result, dict)
-                    and isinstance(result.get("type"), str)
-                    and ("error" in result["type"] or result["type"] == "tool_error")
-                    else "success"
-                ),
+                "status": "error" if is_error else "success",
                 "metadata": {
                     "size_bytes": metadata.size_bytes if metadata else 0,
                     "summary": metadata.summary if metadata else "",
                     "truncated_preview": self._tool_results_storage.get_truncated_preview(
-                        result
+                        result_dict
                     ),
                     "result_present": True,
                     "result_length_bytes": len(inline_result_json.encode("utf-8")),
                 },
                 "result_ref": result_ref.to_dict(),
-                "inline_result": result,
+                "inline_result": result_dict,
                 "has_inline_result": True,
             }
             return (
@@ -370,17 +385,11 @@ class ToolExecutor:
             )
 
         # Inline-only message for ephemeral tools or when storage is unavailable
-        inline_result_json = json.dumps(result, ensure_ascii=False)
+        inline_result_json = json.dumps(result_dict, ensure_ascii=False)
         content = {
             "tool_call_id": tool_call_id,
             "tool_name": name,
-            "status": (
-                "error"
-                if isinstance(result, dict)
-                and isinstance(result.get("type"), str)
-                and ("error" in result["type"] or result["type"] == "tool_error")
-                else "success"
-            ),
+            "status": "error" if is_error else "success",
             "metadata": {
                 "size_bytes": len(inline_result_json.encode("utf-8")),
                 "summary": "",
@@ -388,7 +397,7 @@ class ToolExecutor:
                 "result_present": True,
                 "result_length_bytes": len(inline_result_json.encode("utf-8")),
             },
-            "inline_result": result,
+            "inline_result": result_dict,
             "has_inline_result": True,
         }
         return (
@@ -497,8 +506,8 @@ class ToolExecutor:
 
     def process_with_tools(
         self, messages: list[BaseMessage], stream: bool = True
-    ) -> AsyncGenerator[Any]:
-        """Streaming path: yield strings or structured dicts suitable for SSE."""
+    ) -> AsyncGenerator[StreamEvent]:
+        """Streaming path: yield typed event objects suitable for SSE."""
         return self._process_streaming(messages)
 
     async def process_with_tools_async(
@@ -569,13 +578,13 @@ class ToolExecutor:
                 result = await self.tool_manager.run_tool(name, **args)
 
                 # Check if tool execution returned an error
-                if isinstance(result, dict) and result.get("type") == "tool_error":
+                if isinstance(result, ToolError):
                     # Tool failed - increment error counter
                     consecutive_errors += 1
                     agent_logger.error(
                         "Tool execution error (recoverable)",
                         tool_name=name,
-                        error_code=result.get("code"),
+                        error_code=result.code,
                         consecutive_errors=consecutive_errors,
                     )
                 else:
@@ -601,8 +610,8 @@ class ToolExecutor:
 
     async def _process_streaming(
         self, messages: list[BaseMessage]
-    ) -> AsyncGenerator[Any]:
-        """Streaming loop: emit content chunks and tool results as they happen."""
+    ) -> AsyncGenerator[StreamEvent]:
+        """Streaming loop: emit typed event objects as they happen."""
         bound_llm = self._bind_tools()
         conversation: list[BaseMessage] = list(messages)
 
@@ -624,7 +633,7 @@ class ToolExecutor:
                     "Model is stuck in an error loop."
                 )
                 agent_logger.error(error_msg, consecutive_errors=consecutive_errors)
-                yield {"type": EventType.ERROR.value, "error": error_msg}
+                yield ErrorEvent(error=error_msg)
                 break
 
             agent_logger.info(
@@ -663,11 +672,8 @@ class ToolExecutor:
                     if reasoning_text:
                         if not reasoning_started:
                             reasoning_started = True
-                            yield {"type": EventType.REASONING_START.value}
-                        yield {
-                            "type": EventType.REASONING.value,
-                            "content": reasoning_text,
-                        }
+                            yield ReasoningStartEvent()
+                        yield ReasoningEvent(content=reasoning_text)
 
                     # Handle content chunks
                     content = chunk.content
@@ -676,9 +682,9 @@ class ToolExecutor:
                         if text:
                             if not chat_started:
                                 chat_started = True
-                                yield {"type": "chat_start"}
+                                yield ChatStartEvent()
                             accumulated_content += text
-                            yield {"type": EventType.CHAT.value, "content": text}
+                            yield ChatEvent(content=text)
 
                     # Handle tool call chunks
                     tool_call_chunks: list[ToolCallChunk] = chunk.tool_call_chunks
@@ -689,9 +695,9 @@ class ToolExecutor:
 
                 # Close boundary markers at the end of this streaming chunk
                 if reasoning_started:
-                    yield {"type": EventType.REASONING_END.value}
+                    yield ReasoningEndEvent()
                 if chat_started and accumulated_content:
-                    yield {"type": EventType.CHAT_END.value}
+                    yield ChatEndEvent()
 
                 # Add the last tool call if exists
                 if current_tool_call and current_tool_call["name"]:
@@ -706,17 +712,14 @@ class ToolExecutor:
                 )
                 # Close any open boundaries
                 if reasoning_started:
-                    yield {"type": EventType.REASONING_END.value}
+                    yield ReasoningEndEvent()
                 if chat_started:
-                    yield {"type": EventType.CHAT_END.value}
+                    yield ChatEndEvent()
                 # Yield error event to client
-                yield {
-                    "type": EventType.ERROR.value,
-                    "error": f"LLM error: {str(stream_error)}",
-                }
+                yield ErrorEvent(error=f"LLM error: {str(stream_error)}")
                 # Yield DONE event to signal end of stream
                 # (chat_service doesn't know stream ended early without this)
-                yield {"type": EventType.DONE.value}
+                yield DoneEvent()
                 return  # Stop processing
 
             # If no tool calls, we're done - model finished successfully
@@ -764,27 +767,23 @@ class ToolExecutor:
                     if not name:
                         continue
 
-                    # Emit tool_call as a structured chunk
-                    yield {
-                        "type": EventType.TOOL_CALL.value,
-                        "name": name,
-                        "args": args,
-                    }
+                    # Emit tool_call as a structured event
+                    yield ToolCallEvent(name=name, args=args)
 
                     # Execute tool (tool_manager handles all tool exceptions centrally)
                     result = await self.tool_manager.run_tool(name, **args)
 
                     # Check if tool execution returned an error
-                    # tool_manager.run_tool() catches all exceptions and returns {"type": "tool_error"}
-                    if isinstance(result, dict) and result.get("type") == "tool_error":
+                    # tool_manager.run_tool() catches all exceptions and returns ToolError
+                    if isinstance(result, ToolError):
                         # Tool failed - this is recoverable, model can retry with different approach
                         # Do NOT send to SSE (not terminal), only log and add to conversation
                         consecutive_errors += 1  # Increment error counter
                         agent_logger.error(
                             "Tool execution error (recoverable)",
                             tool_name=name,
-                            error_code=result.get("code"),
-                            error_type=result.get("error_type"),
+                            error_code=result.code,
+                            error_type=result.error_type,
                             consecutive_errors=consecutive_errors,
                         )
 
@@ -820,11 +819,7 @@ class ToolExecutor:
                         diff = result.get("diff")
                         if file_path:
                             # Yield file_edit directly in the chunk stream for immediate delivery
-                            yield {
-                                "type": EventType.FILE_EDIT.value,
-                                "file": file_path,
-                                "diff": diff,
-                            }
+                            yield FileEditEvent(file=file_path, diff=diff)
 
                     # Store result and create reference (tool_id must be present)
                     if not tool_id:
@@ -852,13 +847,12 @@ class ToolExecutor:
                     )
 
                     # Create error result to send back to model
-                    error_result = {
-                        "type": "tool_error",
-                        "name": name,
-                        "code": "args_parse_failed",
-                        "error": f"Failed to parse tool arguments: {str(e)}",
-                        "error_type": "JSONDecodeError",
-                    }
+                    error_result = ToolError(
+                        name=name,
+                        code="args_parse_failed",
+                        error=f"Failed to parse tool arguments: {str(e)}",
+                        error_type="JSONDecodeError",
+                    )
 
                     # Build tool message with error result
                     tool_message, is_ephemeral = await self._build_tool_message(
@@ -889,13 +883,12 @@ class ToolExecutor:
 
                     # Do NOT send to SSE (not terminal), only log and try to add to conversation
                     # Create error result to send back to model
-                    error_result = {
-                        "type": "tool_error",
-                        "name": name,
-                        "code": "processing_failed",
-                        "error": str(e),
-                        "error_type": type(e).__name__,
-                    }
+                    error_result = ToolError(
+                        name=name,
+                        code="processing_failed",
+                        error=str(e),
+                        error_type=type(e).__name__,
+                    )
 
                     # Try to build tool message with error result
                     try:

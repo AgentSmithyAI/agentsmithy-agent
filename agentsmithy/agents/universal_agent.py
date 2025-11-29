@@ -131,17 +131,9 @@ class UniversalAgent(BaseAgent):
             result = await self.tool_executor.process_with_tools_async(messages)
             # Try to persist usage if present in metadata
             try:
-                dialog_id = (
-                    full_context.get("dialog", {}).get("id")
-                    if isinstance(full_context, dict)
-                    else None
-                )
-                project = (
-                    full_context.get("project")
-                    if isinstance(full_context, dict)
-                    else None
-                )
-                usage = result.get("usage") if isinstance(result, dict) else None
+                dialog_id = full_context.get("dialog", {}).get("id")
+                project = full_context.get("project")
+                usage = result.get("usage")
                 if project and dialog_id and usage and hasattr(project, "dialogs_dir"):
                     with DialogUsageStorage(project, dialog_id) as storage:
                         storage.upsert(

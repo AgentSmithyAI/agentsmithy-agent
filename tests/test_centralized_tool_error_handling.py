@@ -9,7 +9,9 @@ from unittest.mock import MagicMock
 import pytest
 from langchain_core.messages import AIMessageChunk, HumanMessage
 
+from agentsmithy.domain.events import ErrorEvent
 from agentsmithy.tools.base_tool import BaseTool
+from agentsmithy.tools.core.types import ToolError
 from agentsmithy.tools.registry import ToolRegistry
 from agentsmithy.tools.tool_executor import ToolExecutor
 
@@ -68,8 +70,8 @@ async def test_tool_execution_error_centralized_handling():
 
     async for chunk in executor.process_with_tools(messages, stream=True):
         chunks.append(chunk)
-        if isinstance(chunk, dict) and chunk.get("type") == "error":
-            error_messages.append(chunk.get("error", ""))
+        if isinstance(chunk, ErrorEvent):
+            error_messages.append(chunk.error)
 
     # CRITICAL: Only TERMINAL errors should be sent to SSE
     # Tool execution errors are recoverable - should NOT be in SSE individually
@@ -127,18 +129,18 @@ async def test_tool_manager_catches_all_exceptions():
     for exc_type in ["runtime", "value", "type", "custom"]:
         result = await tool_manager.run_tool("exception_tool", exception_type=exc_type)
 
-        # tool_manager should catch exception and return error dict
-        assert isinstance(result, dict), "Result should be a dict"
+        # tool_manager should catch exception and return ToolError
+        assert isinstance(
+            result, ToolError
+        ), f"Result should be a ToolError for {exc_type}"
+        assert result.type == "tool_error", f"Should return tool_error for {exc_type}"
+        assert result.error, "ToolError should have 'error' field"
         assert (
-            result.get("type") == "tool_error"
-        ), f"Should return tool_error for {exc_type}"
-        assert "error" in result, "Error dict should have 'error' field"
-        assert (
-            result.get("code") == "execution_failed"
+            result.code == "execution_failed"
         ), "Error code should be execution_failed"
-        assert result.get("name") == "exception_tool", "Error should include tool name"
+        assert result.name == "exception_tool", "Error should include tool name"
 
-        print(f"✓ {exc_type} exception caught and converted to error dict")
+        print(f"✓ {exc_type} exception caught and converted to ToolError")
 
 
 @pytest.mark.asyncio
@@ -165,13 +167,15 @@ async def test_successful_tool_vs_error_handling():
 
     # First call - should fail
     result1 = await tool_manager.run_tool("sometimes_fails")
-    assert result1.get("type") == "tool_error", "First call should return error"
+    assert isinstance(result1, ToolError), "First call should return ToolError"
+    assert result1.type == "tool_error", "First call should return tool_error"
 
     # Second call - should succeed
     result2 = await tool_manager.run_tool("sometimes_fails")
+    assert isinstance(result2, dict), "Second call should return dict"
     assert result2.get("type") == "success", "Second call should succeed"
     assert result2.get("result") == "Second call succeeds"
 
     print("✓ Successful tools work normally")
-    print("✓ Failed tools return error dict")
+    print("✓ Failed tools return ToolError")
     print("✓ Tool can recover after failure")

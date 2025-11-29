@@ -14,8 +14,22 @@ from agentsmithy.dialogs.storages.file_edits import DialogFileEditStorage
 from agentsmithy.dialogs.storages.reasoning import DialogReasoningStorage
 from agentsmithy.dialogs.storages.summaries import DialogSummaryStorage
 from agentsmithy.dialogs.summarization.strategy import KEEP_LAST_MESSAGES
+from agentsmithy.domain.events import BaseEvent as BaseEvent
+from agentsmithy.domain.events import ChatEndEvent as ChatEndEvent
+from agentsmithy.domain.events import ChatEvent as ChatEvent
+from agentsmithy.domain.events import ChatStartEvent as ChatStartEvent
+from agentsmithy.domain.events import DoneEvent as DoneEvent
+from agentsmithy.domain.events import ErrorEvent as ErrorEvent
 from agentsmithy.domain.events import EventFactory as SSEEventFactory
-from agentsmithy.domain.events import EventType
+from agentsmithy.domain.events import EventType as EventType
+from agentsmithy.domain.events import FileEditEvent as FileEditEvent
+from agentsmithy.domain.events import ReasoningEndEvent as ReasoningEndEvent
+from agentsmithy.domain.events import ReasoningEvent as ReasoningEvent
+from agentsmithy.domain.events import ReasoningStartEvent as ReasoningStartEvent
+from agentsmithy.domain.events import StreamEvent as StreamEvent
+from agentsmithy.domain.events import SummaryEndEvent as SummaryEndEvent
+from agentsmithy.domain.events import SummaryStartEvent as SummaryStartEvent
+from agentsmithy.domain.events import ToolCallEvent as ToolCallEvent
 from agentsmithy.llm.orchestration.agent_graph import AgentOrchestrator
 from agentsmithy.utils.logger import api_logger, stream_log
 
@@ -179,128 +193,100 @@ class ChatService:
 
     async def _process_structured_chunk(
         self,
-        chunk: Any,
+        chunk: StreamEvent | BaseEvent,
         dialog_id: str | None,
         assistant_buffer: list[str],
         project_dialog: tuple[Any, str] | None = None,
         reasoning_buffer: list[str] | None = None,
     ) -> AsyncIterator[dict[str, str]]:
-        if isinstance(chunk, dict) and chunk.get("type") in {
-            EventType.FILE_EDIT.value,
-            EventType.TOOL_CALL.value,
-            EventType.ERROR.value,
-            EventType.DONE.value,
-            EventType.CHAT.value,
-            EventType.REASONING.value,
-            EventType.CHAT_START.value,
-            EventType.CHAT_END.value,
-            EventType.REASONING_START.value,
-            EventType.REASONING_END.value,
-            EventType.SUMMARY_START.value,
-            EventType.SUMMARY_END.value,
-        }:
-            if chunk["type"] == EventType.CHAT.value:
-                content = chunk.get("content", "")
-                if content:
-                    assistant_buffer.append(content)
-                    yield SSEEventFactory.chat(
-                        content=content, dialog_id=dialog_id
-                    ).to_sse()
-            elif chunk["type"] == EventType.REASONING.value:
-                content = chunk.get("content", "")
-                if content:
-                    # Accumulate reasoning in buffer for separate storage
-                    if reasoning_buffer is not None:
-                        reasoning_buffer.append(content)
-                    yield SSEEventFactory.reasoning(
-                        content=content, dialog_id=dialog_id
-                    ).to_sse()
-            elif chunk["type"] == EventType.CHAT_START.value:
-                yield SSEEventFactory.chat_start(dialog_id=dialog_id).to_sse()
-            elif chunk["type"] == EventType.CHAT_END.value:
-                # Don't flush here - tool_executor will save complete message with tool_calls
-                # If no tool_calls, will be saved by final flush at end of stream
-                yield SSEEventFactory.chat_end(dialog_id=dialog_id).to_sse()
-            elif chunk["type"] == EventType.REASONING_START.value:
-                yield SSEEventFactory.reasoning_start(dialog_id=dialog_id).to_sse()
-            elif chunk["type"] == EventType.REASONING_END.value:
-                # Save accumulated reasoning to separate storage after reasoning block ends
+        # Handle typed events from tool_executor
+        if isinstance(chunk, ChatEvent):
+            if chunk.content:
+                assistant_buffer.append(chunk.content)
+                yield SSEEventFactory.chat(
+                    content=chunk.content, dialog_id=dialog_id
+                ).to_sse()
+        elif isinstance(chunk, ReasoningEvent):
+            if chunk.content:
+                # Accumulate reasoning in buffer for separate storage
                 if reasoning_buffer is not None:
-                    self._flush_reasoning_buffer(
-                        project_dialog, dialog_id, reasoning_buffer, clear_buffer=True
-                    )
-                yield SSEEventFactory.reasoning_end(dialog_id=dialog_id).to_sse()
-            elif chunk["type"] == EventType.SUMMARY_START.value:
-                yield SSEEventFactory.summary_start(dialog_id=dialog_id).to_sse()
-            elif chunk["type"] == EventType.SUMMARY_END.value:
-                yield SSEEventFactory.summary_end(dialog_id=dialog_id).to_sse()
-            elif chunk["type"] == EventType.FILE_EDIT.value:
-                # Save file edit event to separate storage
-                if project_dialog:
-                    project_obj, pdialog_id = project_dialog
-                    target_dialog_id = dialog_id or pdialog_id
-                    if target_dialog_id:
-                        try:
-                            # Get current message index
-                            message_index = -1
-                            if hasattr(project_obj, "get_dialog_history"):
-                                history = project_obj.get_dialog_history(
-                                    target_dialog_id
-                                )
-                                messages = history.get_messages()
-                                message_index = len(messages)
+                    reasoning_buffer.append(chunk.content)
+                yield SSEEventFactory.reasoning(
+                    content=chunk.content, dialog_id=dialog_id
+                ).to_sse()
+        elif isinstance(chunk, ChatStartEvent):
+            yield SSEEventFactory.chat_start(dialog_id=dialog_id).to_sse()
+        elif isinstance(chunk, ChatEndEvent):
+            # Don't flush here - tool_executor will save complete message with tool_calls
+            # If no tool_calls, will be saved by final flush at end of stream
+            yield SSEEventFactory.chat_end(dialog_id=dialog_id).to_sse()
+        elif isinstance(chunk, ReasoningStartEvent):
+            yield SSEEventFactory.reasoning_start(dialog_id=dialog_id).to_sse()
+        elif isinstance(chunk, ReasoningEndEvent):
+            # Save accumulated reasoning to separate storage after reasoning block ends
+            if reasoning_buffer is not None:
+                self._flush_reasoning_buffer(
+                    project_dialog, dialog_id, reasoning_buffer, clear_buffer=True
+                )
+            yield SSEEventFactory.reasoning_end(dialog_id=dialog_id).to_sse()
+        elif isinstance(chunk, SummaryStartEvent):
+            yield SSEEventFactory.summary_start(dialog_id=dialog_id).to_sse()
+        elif isinstance(chunk, SummaryEndEvent):
+            yield SSEEventFactory.summary_end(dialog_id=dialog_id).to_sse()
+        elif isinstance(chunk, FileEditEvent):
+            # Save file edit event to separate storage
+            if project_dialog:
+                project_obj, pdialog_id = project_dialog
+                target_dialog_id = dialog_id or pdialog_id
+                if target_dialog_id:
+                    try:
+                        # Get current message index
+                        message_index = -1
+                        if hasattr(project_obj, "get_dialog_history"):
+                            history = project_obj.get_dialog_history(target_dialog_id)
+                            messages = history.get_messages()
+                            message_index = len(messages)
 
-                            with DialogFileEditStorage(
-                                project_obj, target_dialog_id
-                            ) as storage:
-                                storage.save(
-                                    file=chunk.get("file", ""),
-                                    diff=chunk.get("diff"),
-                                    checkpoint=None,  # Checkpoints now on user messages
-                                    message_index=message_index,
-                                )
-                        except Exception as e:
-                            api_logger.error(
-                                "Failed to save file edit event",
-                                exc_info=True,
-                                error=str(e),
+                        with DialogFileEditStorage(
+                            project_obj, target_dialog_id
+                        ) as storage:
+                            storage.save(
+                                file=chunk.file,
+                                diff=chunk.diff,
+                                checkpoint=None,  # Checkpoints now on user messages
+                                message_index=message_index,
                             )
+                    except Exception as e:
+                        api_logger.error(
+                            "Failed to save file edit event",
+                            exc_info=True,
+                            error=str(e),
+                        )
 
-                yield SSEEventFactory.file_edit(
-                    file=chunk.get("file", ""),
-                    diff=chunk.get("diff"),
-                    dialog_id=dialog_id,
-                ).to_sse()
-            elif chunk["type"] == EventType.TOOL_CALL.value:
-                yield SSEEventFactory.tool_call(
-                    name=chunk.get("name", ""),
-                    args=chunk.get("args", {}),
-                    dialog_id=dialog_id,
-                ).to_sse()
-            elif chunk["type"] == EventType.ERROR.value:
-                # Error from tool_executor (terminal - stops execution)
-                # Just forward the error to client - tool_executor will send DONE after this
-                error_msg = chunk.get("error", "Unknown error")
-                api_logger.error("Terminal error from tool_executor", error=error_msg)
+            yield SSEEventFactory.file_edit(
+                file=chunk.file, diff=chunk.diff, dialog_id=dialog_id
+            ).to_sse()
+        elif isinstance(chunk, ToolCallEvent):
+            yield SSEEventFactory.tool_call(
+                name=chunk.name, args=chunk.args, dialog_id=dialog_id
+            ).to_sse()
+        elif isinstance(chunk, ErrorEvent):
+            # Error from tool_executor (terminal - stops execution)
+            # Just forward the error to client - tool_executor will send DONE after this
+            api_logger.error("Terminal error from tool_executor", error=chunk.error)
 
-                # Send error event - tool_executor will send DONE event next
-                yield SSEEventFactory.error(
-                    message=error_msg, dialog_id=dialog_id
-                ).to_sse()
-                # DO NOT raise here - wait for DONE event from tool_executor
-            elif chunk["type"] == EventType.DONE.value:
-                # DONE event from tool_executor (early termination due to error)
-                # Simply forward it to client - this signals end of stream
-                api_logger.info("Received DONE event from tool_executor")
-                yield SSEEventFactory.done(dialog_id=dialog_id).to_sse()
-                # Raise special exception to stop processing WITHOUT sending another DONE
-                raise StreamAbortWithDone()
-            else:
-                # Emit error and signal abort
-                yield SSEEventFactory.error(
-                    message=chunk.get("error", ""), dialog_id=dialog_id
-                ).to_sse()
-                raise StreamAbortError()
+            # Send error event - tool_executor will send DONE event next
+            yield SSEEventFactory.error(
+                message=chunk.error, dialog_id=dialog_id
+            ).to_sse()
+            # DO NOT raise here - wait for DONE event from tool_executor
+        elif isinstance(chunk, DoneEvent):
+            # DONE event from tool_executor (early termination due to error)
+            # Simply forward it to client - this signals end of stream
+            api_logger.info("Received DONE event from tool_executor")
+            yield SSEEventFactory.done(dialog_id=dialog_id).to_sse()
+            # Raise special exception to stop processing WITHOUT sending another DONE
+            raise StreamAbortWithDone()
         elif isinstance(chunk, str):
             assistant_buffer.append(chunk)
             yield SSEEventFactory.chat(content=chunk, dialog_id=dialog_id).to_sse()
@@ -855,10 +841,12 @@ class ChatService:
     ) -> dict[str, Any]:
         orchestrator = self._get_orchestrator()
         # Centralize history: append user and inject dialog messages into context
-        context, user_checkpoint_id, user_session_id = (
-            await self._append_user_and_prepare_context(
-                query, context, dialog_id, project
-            )
+        (
+            context,
+            user_checkpoint_id,
+            user_session_id,
+        ) = await self._append_user_and_prepare_context(
+            query, context, dialog_id, project
         )
         result = await orchestrator.process_request(
             query=query, context=context, stream=False
