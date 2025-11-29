@@ -1,5 +1,40 @@
 <!-- version list -->
 
+## v1.12.0 (2025-11-29)
+
+### Chores
+
+- **deps**: Bump actions/checkout from 5 to 6
+  ([#68](https://github.com/AgentSmithyAI/agentsmithy-agent/pull/68),
+  [`e71f4b9`](https://github.com/AgentSmithyAI/agentsmithy-agent/commit/e71f4b9185592e062b4cd2549c20f37c3ca0d010))
+
+- **deps**: Bump chromadb from 1.3.4 to 1.3.5 in the chromadb group
+  ([#73](https://github.com/AgentSmithyAI/agentsmithy-agent/pull/73),
+  [`a22602d`](https://github.com/AgentSmithyAI/agentsmithy-agent/commit/a22602d93b58e4e9c153cdbf2a0b67925d3de981))
+
+- **deps**: Bump fastapi from 0.121.1 to 0.121.3 in the fastapi group
+  ([#71](https://github.com/AgentSmithyAI/agentsmithy-agent/pull/71),
+  [`56bb042`](https://github.com/AgentSmithyAI/agentsmithy-agent/commit/56bb042cf24c474d9ee5d4dcbdda99d73d5ea4f6))
+
+- **deps**: Bump langgraph from 1.0.2 to 1.0.3 in the langgraph group
+  ([#70](https://github.com/AgentSmithyAI/agentsmithy-agent/pull/70),
+  [`cea6219`](https://github.com/AgentSmithyAI/agentsmithy-agent/commit/cea621962359527a3b62ef866ded1f75bd978fbb))
+
+- **deps**: Bump pydantic-settings from 2.11.0 to 2.12.0 in the pydantic group
+  ([#72](https://github.com/AgentSmithyAI/agentsmithy-agent/pull/72),
+  [`4cec967`](https://github.com/AgentSmithyAI/agentsmithy-agent/commit/4cec967fa428ad1503b2f9ee5abc3a16e29659b3))
+
+- **deps**: Bump the langchain group with 3 updates
+  ([#69](https://github.com/AgentSmithyAI/agentsmithy-agent/pull/69),
+  [`2882f6c`](https://github.com/AgentSmithyAI/agentsmithy-agent/commit/2882f6c4e728e0d1c58907a6653801cec19a017b))
+
+### Features
+
+- Add OpenaAI GPT 5.1, GPT 5.1 codex, GPT 5.1 codex-mini
+  ([#67](https://github.com/AgentSmithyAI/agentsmithy-agent/pull/67),
+  [`16ac7bc`](https://github.com/AgentSmithyAI/agentsmithy-agent/commit/16ac7bc039b37a0926b9b96ed4134531a3d2e410))
+
+
 ## v1.11.1 (2025-11-21)
 
 ### Bug Fixes
