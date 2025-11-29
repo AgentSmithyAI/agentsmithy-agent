@@ -3,13 +3,22 @@ from __future__ import annotations
 import json
 import uuid
 from collections.abc import AsyncGenerator, Awaitable, Callable
-from typing import TYPE_CHECKING, Any, Literal, TypedDict, TypeGuard
+from typing import TYPE_CHECKING, Any
 
-from langchain_core.messages import BaseMessage, ToolMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, ToolMessage
+from langchain_core.messages.ai import UsageMetadata
+from langchain_core.messages.tool import ToolCallChunk
 
 from agentsmithy.dialogs.storages.usage import DialogUsageStorage
 from agentsmithy.domain.events import EventType
 from agentsmithy.llm.provider import LLMProvider
+from agentsmithy.llm.providers.types import (
+    AccumulatedToolCall,
+    MessageContent,
+    NormalizedUsage,
+    ToolCallPayload,
+    is_text_content_block,
+)
 from agentsmithy.storage.tool_results import ToolResultsStorage
 from agentsmithy.utils.logger import agent_logger
 
@@ -18,40 +27,6 @@ from .registry import ToolRegistry
 
 if TYPE_CHECKING:
     from agentsmithy.core.project import Project
-
-
-# --- Reasoning content block types (LangChain Responses API format) ---
-# These match what langchain-openai actually returns, not langchain-core's
-# ReasoningContentBlock which is incomplete.
-
-
-class SummaryTextItem(TypedDict, total=False):
-    """Single summary text item in reasoning block."""
-
-    index: int
-    type: Literal["summary_text"]
-    text: str
-
-
-class ReasoningBlock(TypedDict, total=False):
-    """Reasoning content block as returned by LangChain for Responses API.
-
-    LangChain-OpenAI returns reasoning in two possible formats:
-    1. Legacy: {"type": "reasoning", "reasoning": "..."}
-    2. Responses API v1: {"type": "reasoning", "summary": [...]}
-    """
-
-    type: Literal["reasoning"]
-    reasoning: str  # Legacy format
-    text: str  # Alternative legacy format
-    summary: list[SummaryTextItem]  # Responses API v1 format
-    index: int
-    id: str
-
-
-def is_reasoning_block(block: dict[str, Any]) -> TypeGuard[ReasoningBlock]:
-    """Type guard to check if a dict is a ReasoningBlock."""
-    return block.get("type") == "reasoning"
 
 
 class ToolExecutor:
@@ -150,56 +125,53 @@ class ToolExecutor:
         except Exception:
             return False
 
-    def _extract_usage_from_response(self, response: Any) -> dict[str, Any]:
+    def _extract_usage_from_response(
+        self, response: AIMessageChunk | AIMessage
+    ) -> dict[str, int] | None:
         """Extract usage/token information from LLM response or chunk.
 
         Supports multiple provider formats (OpenAI, Anthropic, etc).
+        Returns dict with token counts or None if not available.
         """
-        # Try multiple paths to find usage data
-        meta = getattr(response, "response_metadata", {}) or {}
-        add = getattr(response, "additional_kwargs", {}) or {}
+        # Prefer typed usage_metadata from LangChain (UsageMetadata is a TypedDict)
+        usage_metadata: UsageMetadata | None = response.usage_metadata
+        if usage_metadata is not None:
+            return {
+                "input_tokens": usage_metadata["input_tokens"],
+                "output_tokens": usage_metadata["output_tokens"],
+                "total_tokens": usage_metadata["total_tokens"],
+            }
+
+        # Fallback to nested dicts for providers that don't use usage_metadata
+        meta = response.response_metadata or {}
+        add = response.additional_kwargs or {}
 
         # Priority order for usage extraction
-        candidates = [
-            self._get_nested(meta, "token_usage"),
-            self._get_nested(add, "usage"),
-            getattr(response, "usage_metadata", None),
-            self._get_nested(meta, "finish_reason_data", "usage"),
-            self._get_nested(meta, "model_kwargs", "usage"),
+        candidates: list[dict[str, Any] | None] = [
+            (
+                meta.get("token_usage")
+                if isinstance(meta.get("token_usage"), dict)
+                else None
+            ),
+            add.get("usage") if isinstance(add.get("usage"), dict) else None,
         ]
 
-        # Return first valid dict
         for candidate in candidates:
-            if isinstance(candidate, dict) and candidate:
+            if candidate:
                 return candidate
 
-        # Check direct usage attribute (may be object)
-        if hasattr(response, "usage"):
-            direct_usage = getattr(response, "usage", None)
-            if direct_usage:
-                if hasattr(direct_usage, "__dict__"):
-                    return direct_usage.__dict__
-                elif hasattr(direct_usage, "dict") and callable(direct_usage.dict):
-                    return direct_usage.dict()
-                elif isinstance(direct_usage, dict):
-                    return direct_usage
+        return None
 
-        return {}
-
-    def _normalize_usage_tokens(self, usage: dict[str, Any]) -> dict[str, Any]:
+    def _normalize_usage_tokens(self, usage: dict[str, int]) -> NormalizedUsage:
         """Normalize token field names across different providers.
 
-        Returns dict with: prompt_tokens, completion_tokens, total_tokens
+        Returns NormalizedUsage with: prompt_tokens, completion_tokens, total_tokens
         """
         # Normalize prompt tokens (OpenAI vs Anthropic naming)
-        prompt_tokens = usage.get("prompt_tokens")
-        if prompt_tokens is None:
-            prompt_tokens = usage.get("input_tokens")
+        prompt_tokens = usage.get("prompt_tokens") or usage.get("input_tokens")
 
         # Normalize completion tokens
-        completion_tokens = usage.get("completion_tokens")
-        if completion_tokens is None:
-            completion_tokens = usage.get("output_tokens")
+        completion_tokens = usage.get("completion_tokens") or usage.get("output_tokens")
 
         return {
             "prompt_tokens": prompt_tokens,
@@ -207,7 +179,7 @@ class ToolExecutor:
             "total_tokens": usage.get("total_tokens"),
         }
 
-    def _persist_usage(self, usage: dict[str, Any]) -> None:
+    def _persist_usage(self, usage: dict[str, int] | None) -> None:
         """Persist normalized usage data to storage."""
         if not (self._project and self._dialog_id and usage):
             return
@@ -229,156 +201,37 @@ class ToolExecutor:
                 dialog_id=self._dialog_id,
             )
 
-    def _extract_reasoning_from_chunk(self, chunk: Any) -> str | None:
+    def _extract_reasoning_from_chunk(self, chunk: AIMessageChunk) -> str | None:
         """Extract reasoning text from a streaming chunk.
 
-        Handles multiple provider formats (OpenAI o1/gpt-5, etc).
+        Uses LangChain's content_blocks which normalizes reasoning across providers.
         Returns reasoning text if found, None otherwise.
         """
-        try:
-            # 1) Direct attribute exposed by some adapters (e.g., OpenAI o1/gpt-5)
-            reasoning_content = getattr(chunk, "reasoning_content", None)
-            if isinstance(reasoning_content, str) and reasoning_content:
-                return reasoning_content
-
-            # 2) Nested fields in additional_kwargs/response_metadata
-            add = getattr(chunk, "additional_kwargs", {}) or {}
-            meta = getattr(chunk, "response_metadata", {}) or {}
-
-            reasoning = self._get_nested(add, "reasoning") or self._get_nested(
-                meta, "reasoning"
-            )
-
-            if isinstance(reasoning, str) and reasoning:
-                return reasoning
-            if isinstance(reasoning, dict):
-                parsed = self._parse_reasoning_dict(reasoning)
-                if parsed:
-                    return parsed
-
-            # 3) Reasoning blocks inside content list (LangChain content blocks API)
-            #    Newer OpenAI models (gpt-5 family) stream content as a list of blocks.
-            #    See ReasoningBlock TypedDict for expected structure.
-            content = getattr(chunk, "content", None)
-            if isinstance(content, list):
-                parts: list[str] = []
-                for item in content:
-                    if isinstance(item, dict) and is_reasoning_block(item):
-                        text = self._extract_text_from_reasoning_block(item)
-                        if text:
-                            parts.append(text)
-                if parts:
-                    return "".join(parts)
-
-            return None
-        except Exception:
-            return None
-
-    def _extract_text_from_reasoning_block(self, block: ReasoningBlock) -> str | None:
-        """Extract text from a reasoning content block.
-
-        Handles both legacy format (reasoning/text fields) and
-        Responses API v1 format (summary list).
-
-        Args:
-            block: A ReasoningBlock (validated by is_reasoning_block TypeGuard)
-
-        Returns:
-            Extracted text or None
-        """
-        # Legacy format: direct reasoning or text field
-        text = block.get("reasoning") or block.get("text")
-        if text:
-            return text
-
-        # Responses API v1 format: summary is a list of SummaryTextItem
-        summary = block.get("summary")
-        if summary is not None:
-            texts: list[str] = []
-            for item in summary:
-                # item is already typed as SummaryTextItem from ReasoningBlock
-                t = item.get("text")
-                if t:
-                    texts.append(t)
-            if texts:
-                return "".join(texts)
-
-        return None
-
-    def _get_nested(self, obj: Any, *keys: str, default: Any = None) -> Any:
-        """Safely access nested dict keys (like Optional chaining in JS).
-
-        Example: _get_nested(data, "response", "metadata", "usage")
-        Returns value or default if any key is missing.
-        """
-        current = obj
-        for key in keys:
-            if isinstance(current, dict):
-                current = current.get(key)
-                if current is None:
-                    return default
-            else:
-                return default
-        return current
-
-    def _extract_text_recursive(self, obj: Any) -> list[str]:
-        """Recursively extract all text values from nested dict/list structure.
-
-        Traverses obj and collects all string values from 'text' keys.
-        Works like a lens/traversal in functional programming.
-        """
-        if isinstance(obj, str):
-            return [obj]
-        elif isinstance(obj, dict):
-            texts = []
-            # Check direct text field
-            if "text" in obj and isinstance(obj["text"], str):
-                texts.append(obj["text"])
-            # Recurse into content field
-            if "content" in obj:
-                texts.extend(self._extract_text_recursive(obj["content"]))
-            return texts
-        elif isinstance(obj, list):
-            # Flatten all texts from list items
-            return [text for item in obj for text in self._extract_text_recursive(item)]
-        else:
-            return []
-
-    def _parse_reasoning_dict(self, reasoning: dict) -> str | None:
-        """Parse reasoning from dict structure (nested content/text fields)."""
-        # Try summary field first
-        summary = reasoning.get("summary")
-
-        if isinstance(summary, str):
-            return summary
-
-        # Extract all text recursively from summary
-        if summary is not None:
-            texts = self._extract_text_recursive(summary)
-            if texts:
-                return "".join(texts)
-
-        # Fallback to content field
-        if isinstance(reasoning.get("content"), str):
-            return reasoning.get("content")
-
-        return None
+        # content_blocks normalizes all formats (summary, reasoning_content, etc.)
+        # into standard ReasoningContentBlock with 'reasoning' field
+        parts: list[str] = []
+        for block in chunk.content_blocks:
+            if block.get("type") == "reasoning":
+                reasoning = block.get("reasoning")
+                if isinstance(reasoning, str) and reasoning:
+                    parts.append(reasoning)
+        return "".join(parts) if parts else None
 
     def _build_tool_calls_payload(
-        self, accumulated_tool_calls: list[dict]
-    ) -> list[dict[str, Any]]:
+        self, accumulated_tool_calls: list[AccumulatedToolCall]
+    ) -> list[ToolCallPayload]:
         """Convert accumulated tool call chunks into standardized payload.
 
         Filters out calls without IDs to avoid API mismatches.
         """
-        tool_calls_payload = []
+        tool_calls_payload: list[ToolCallPayload] = []
         for tool_call in accumulated_tool_calls:
-            name = tool_call.get("name", "")
+            name = tool_call["name"]
             try:
-                args = json.loads(tool_call.get("args", "{}") or "{}")
-            except Exception:
+                args = json.loads(tool_call["args"] or "{}")
+            except json.JSONDecodeError:
                 args = {}
-            call_id = tool_call.get("id", "")
+            call_id = tool_call["id"]
 
             if not call_id:
                 agent_logger.error(
@@ -397,63 +250,66 @@ class ToolExecutor:
 
         return tool_calls_payload
 
-    def _extract_text_from_content(self, content: Any) -> str | None:
+    def _extract_text_from_content(self, content: MessageContent) -> str | None:
         """Extract text string from various content formats.
 
         Handles both string content and list-of-dicts formats.
         """
         if isinstance(content, str):
-            return content
-        elif isinstance(content, list):
-            # LangChain may return content as list of dicts for newer models
-            text_parts = []
-            for item in content:
-                if isinstance(item, dict) and "text" in item:
-                    text_parts.append(item["text"])
-                elif isinstance(item, str):
-                    text_parts.append(item)
-            if text_parts:
-                return "".join(text_parts)
-        return None
+            return content if content else None
+
+        # LangChain may return content as list of dicts for newer models
+        text_parts: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                text_parts.append(item)
+            elif isinstance(item, dict) and is_text_content_block(item):
+                text = item.get("text")
+                if text:
+                    text_parts.append(text)
+        return "".join(text_parts) if text_parts else None
 
     def _accumulate_tool_call_chunk(
         self,
-        tc_chunk: dict,
-        current_tool_call: dict | None,
-        accumulated_tool_calls: list[dict],
-    ) -> dict | None:
+        tc_chunk: ToolCallChunk,
+        current_tool_call: AccumulatedToolCall | None,
+        accumulated_tool_calls: list[AccumulatedToolCall],
+    ) -> AccumulatedToolCall | None:
         """Process a tool_call_chunk and update accumulation state.
 
         Returns the updated current_tool_call (or a new one if started).
         """
         chunk_index = tc_chunk.get("index")
+        chunk_id = tc_chunk.get("id")
+        chunk_name = tc_chunk.get("name")
+        chunk_args = tc_chunk.get("args")
 
         if chunk_index is not None:
             # Check if continuing current tool call
-            if current_tool_call and current_tool_call.get("index") == chunk_index:
+            if current_tool_call and current_tool_call["index"] == chunk_index:
                 # Continue accumulating
-                if tc_chunk.get("id") and not current_tool_call.get("id"):
-                    current_tool_call["id"] = tc_chunk["id"]
-                if tc_chunk.get("name"):
-                    current_tool_call["name"] += tc_chunk["name"]
-                if tc_chunk.get("args"):
-                    current_tool_call["args"] += tc_chunk["args"]
+                if chunk_id and not current_tool_call["id"]:
+                    current_tool_call["id"] = chunk_id
+                if chunk_name:
+                    current_tool_call["name"] += chunk_name
+                if chunk_args:
+                    current_tool_call["args"] += chunk_args
             else:
                 # New tool call - finalize previous one
-                if current_tool_call and "name" in current_tool_call:
+                if current_tool_call and current_tool_call["name"]:
                     accumulated_tool_calls.append(current_tool_call)
                 current_tool_call = {
                     "index": chunk_index,
-                    "id": tc_chunk.get("id", ""),
-                    "name": tc_chunk.get("name", ""),
-                    "args": tc_chunk.get("args", ""),
+                    "id": chunk_id or "",
+                    "name": chunk_name or "",
+                    "args": chunk_args or "",
                 }
         elif current_tool_call:
             # Chunks without index - accumulate to current
-            if tc_chunk.get("name"):
-                current_tool_call["name"] += tc_chunk["name"]
-            if tc_chunk.get("args"):
-                current_tool_call["args"] += tc_chunk["args"]
+            if chunk_name:
+                current_tool_call["name"] += chunk_name
+            if chunk_args:
+                current_tool_call["args"] += chunk_args
 
         return current_tool_call
 
@@ -777,14 +633,14 @@ class ToolExecutor:
 
             # Use astream for true streaming
             accumulated_content = ""
-            accumulated_tool_calls: list[dict] = []
-            current_tool_call: dict | None = None
+            accumulated_tool_calls: list[AccumulatedToolCall] = []
+            current_tool_call: AccumulatedToolCall | None = None
 
             # Boundary markers for chat and reasoning
             chat_started = False
             reasoning_started = False
 
-            last_usage: dict[str, Any] | None = None
+            last_usage: dict[str, int] | None = None
             # Get stream kwargs from provider (vendor-specific)
             stream_kwargs: dict[str, Any] = getattr(
                 self.llm_provider, "get_stream_kwargs", lambda: {}
@@ -793,6 +649,10 @@ class ToolExecutor:
 
             try:
                 async for chunk in stream_iter:
+                    # chunk is AIMessageChunk from LangChain
+                    if not isinstance(chunk, AIMessageChunk):
+                        continue
+
                     # Capture usage tokens using helper
                     usage = self._extract_usage_from_response(chunk)
                     if usage:
@@ -810,7 +670,7 @@ class ToolExecutor:
                         }
 
                     # Handle content chunks
-                    content = getattr(chunk, "content", None)
+                    content = chunk.content
                     if content:
                         text = self._extract_text_from_content(content)
                         if text:
@@ -821,7 +681,7 @@ class ToolExecutor:
                             yield {"type": EventType.CHAT.value, "content": text}
 
                     # Handle tool call chunks
-                    tool_call_chunks = getattr(chunk, "tool_call_chunks", [])
+                    tool_call_chunks: list[ToolCallChunk] = chunk.tool_call_chunks
                     for tc_chunk in tool_call_chunks:
                         current_tool_call = self._accumulate_tool_call_chunk(
                             tc_chunk, current_tool_call, accumulated_tool_calls
@@ -834,11 +694,7 @@ class ToolExecutor:
                     yield {"type": EventType.CHAT_END.value}
 
                 # Add the last tool call if exists
-                if (
-                    current_tool_call
-                    and "name" in current_tool_call
-                    and current_tool_call["name"]
-                ):
+                if current_tool_call and current_tool_call["name"]:
                     accumulated_tool_calls.append(current_tool_call)
 
             except Exception as stream_error:
@@ -899,14 +755,9 @@ class ToolExecutor:
             # Execute tools and stream results
             for tool_call in accumulated_tool_calls:
                 try:
-                    name = tool_call.get("name", "")
-                    tool_id = tool_call.get("id", "")
-
-                    # Parse accumulated args string to dict
-                    args_str = tool_call.get("args", "{}") or "{}"
-                    # Ensure it's a string; providers stream arguments as a JSON string
-                    if not isinstance(args_str, str):
-                        args_str = str(args_str)
+                    name = tool_call["name"]
+                    tool_id = tool_call["id"]
+                    args_str = tool_call["args"] or "{}"
 
                     args = json.loads(args_str)
 

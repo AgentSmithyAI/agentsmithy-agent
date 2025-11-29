@@ -1,34 +1,40 @@
 """Regression tests for reasoning extraction from LLM streaming chunks.
 
-These tests verify that reasoning content is correctly extracted from various
-formats returned by different LLM providers and LangChain versions.
+These tests verify that reasoning content is correctly extracted using
+LangChain's content_blocks API which normalizes reasoning across providers.
 
-If LangChain or OpenAI SDK changes the format of reasoning blocks, these tests
-should fail and alert us to update the extraction logic.
+If LangChain changes the content_blocks behavior, these tests should fail
+and alert us to update accordingly.
 """
 
-from dataclasses import dataclass, field
 from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+from langchain_core.messages import AIMessageChunk
 
-from agentsmithy.tools.tool_executor import (
-    ReasoningBlock,
-    SummaryTextItem,
-    ToolExecutor,
-    is_reasoning_block,
-)
+from agentsmithy.tools.tool_executor import ToolExecutor
 
 
-@dataclass
-class MockChunk:
-    """Mock LangChain AIMessageChunk for testing."""
+def make_chunk(
+    content: list[dict[str, Any]] | str | None = None,
+    additional_kwargs: dict[str, Any] | None = None,
+    response_metadata: dict[str, Any] | None = None,
+) -> AIMessageChunk:
+    """Create an AIMessageChunk for testing.
 
-    content: list[dict[str, Any]] | str | None = None
-    additional_kwargs: dict[str, Any] = field(default_factory=dict)
-    response_metadata: dict[str, Any] = field(default_factory=dict)
-    reasoning_content: str | None = None
+    Uses the real LangChain type to ensure compatibility.
+    Always includes model_provider for proper content_blocks translation.
+    """
+    meta = response_metadata or {}
+    if "model_provider" not in meta:
+        meta["model_provider"] = "openai"
+
+    return AIMessageChunk(
+        content=content or "",
+        additional_kwargs=additional_kwargs or {},
+        response_metadata=meta,
+    )
 
 
 @pytest.fixture
@@ -37,35 +43,17 @@ def executor() -> ToolExecutor:
     return ToolExecutor(MagicMock(), MagicMock())
 
 
-class TestReasoningBlockTypeGuard:
-    """Tests for is_reasoning_block TypeGuard function."""
-
-    def test_valid_reasoning_block(self) -> None:
-        """TypeGuard should return True for valid reasoning blocks."""
-        block: dict[str, Any] = {"type": "reasoning", "text": "test"}
-        assert is_reasoning_block(block) is True
-
-    def test_invalid_type(self) -> None:
-        """TypeGuard should return False for non-reasoning blocks."""
-        block: dict[str, Any] = {"type": "text", "text": "test"}
-        assert is_reasoning_block(block) is False
-
-    def test_missing_type(self) -> None:
-        """TypeGuard should return False when type is missing."""
-        block: dict[str, Any] = {"text": "test"}
-        assert is_reasoning_block(block) is False
-
-
 class TestLangChainResponsesV1Format:
     """Tests for LangChain responses/v1 format (langchain-openai >= 1.0.0).
 
     This is the current default format for OpenAI Responses API models like gpt-5.
     Reasoning comes in content as blocks with 'summary' containing text items.
+    content_blocks normalizes 'summary' -> 'reasoning'.
     """
 
     def test_single_summary_item(self, executor: ToolExecutor) -> None:
         """Extract reasoning from single summary item."""
-        chunk = MockChunk(
+        chunk = make_chunk(
             content=[
                 {
                     "type": "reasoning",
@@ -81,7 +69,7 @@ class TestLangChainResponsesV1Format:
 
     def test_multiple_summary_items(self, executor: ToolExecutor) -> None:
         """Extract and concatenate multiple summary items."""
-        chunk = MockChunk(
+        chunk = make_chunk(
             content=[
                 {
                     "type": "reasoning",
@@ -98,13 +86,13 @@ class TestLangChainResponsesV1Format:
 
     def test_empty_summary_list(self, executor: ToolExecutor) -> None:
         """Handle empty summary list gracefully."""
-        chunk = MockChunk(content=[{"type": "reasoning", "summary": [], "index": 0}])
+        chunk = make_chunk(content=[{"type": "reasoning", "summary": [], "index": 0}])
         result = executor._extract_reasoning_from_chunk(chunk)
         assert result is None
 
     def test_summary_item_without_text(self, executor: ToolExecutor) -> None:
         """Handle summary items missing text field."""
-        chunk = MockChunk(
+        chunk = make_chunk(
             content=[
                 {
                     "type": "reasoning",
@@ -118,7 +106,7 @@ class TestLangChainResponsesV1Format:
 
     def test_mixed_content_blocks(self, executor: ToolExecutor) -> None:
         """Extract reasoning when mixed with other content types."""
-        chunk = MockChunk(
+        chunk = make_chunk(
             content=[
                 {"type": "text", "text": "Hello"},
                 {
@@ -132,90 +120,52 @@ class TestLangChainResponsesV1Format:
         assert result == "Thinking..."
 
 
-class TestLangChainLegacyFormat:
-    """Tests for legacy LangChain format (langchain-openai < 1.0.0 or output_version='v0').
+class TestDirectReasoningField:
+    """Tests for content blocks with direct 'reasoning' field.
 
-    In this format, reasoning is stored in additional_kwargs['reasoning'].
-    """
-
-    def test_reasoning_string_in_additional_kwargs(
-        self, executor: ToolExecutor
-    ) -> None:
-        """Extract reasoning from additional_kwargs as string."""
-        chunk = MockChunk(additional_kwargs={"reasoning": "Direct reasoning text"})
-        result = executor._extract_reasoning_from_chunk(chunk)
-        assert result == "Direct reasoning text"
-
-    def test_reasoning_dict_with_summary_string(self, executor: ToolExecutor) -> None:
-        """Extract reasoning from dict with summary as string."""
-        chunk = MockChunk(additional_kwargs={"reasoning": {"summary": "Summary text"}})
-        result = executor._extract_reasoning_from_chunk(chunk)
-        assert result == "Summary text"
-
-    def test_reasoning_dict_with_content(self, executor: ToolExecutor) -> None:
-        """Extract reasoning from dict with content field."""
-        chunk = MockChunk(additional_kwargs={"reasoning": {"content": "Content text"}})
-        result = executor._extract_reasoning_from_chunk(chunk)
-        assert result == "Content text"
-
-    def test_reasoning_in_response_metadata(self, executor: ToolExecutor) -> None:
-        """Extract reasoning from response_metadata."""
-        chunk = MockChunk(response_metadata={"reasoning": "Metadata reasoning"})
-        result = executor._extract_reasoning_from_chunk(chunk)
-        assert result == "Metadata reasoning"
-
-
-class TestContentBlockLegacyFormat:
-    """Tests for content block format with direct reasoning/text fields.
-
-    Some providers return reasoning in content blocks with 'reasoning' or 'text' keys
-    instead of the 'summary' list format.
+    content_blocks passes through 'reasoning' field as-is.
     """
 
     def test_reasoning_key_in_content_block(self, executor: ToolExecutor) -> None:
         """Extract from content block with 'reasoning' key."""
-        chunk = MockChunk(
+        chunk = make_chunk(
             content=[{"type": "reasoning", "reasoning": "Direct reasoning"}]
         )
         result = executor._extract_reasoning_from_chunk(chunk)
         assert result == "Direct reasoning"
 
-    def test_text_key_in_content_block(self, executor: ToolExecutor) -> None:
-        """Extract from content block with 'text' key."""
-        chunk = MockChunk(content=[{"type": "reasoning", "text": "Text reasoning"}])
-        result = executor._extract_reasoning_from_chunk(chunk)
-        assert result == "Text reasoning"
-
-    def test_reasoning_key_takes_precedence(self, executor: ToolExecutor) -> None:
-        """'reasoning' key should take precedence over 'text'."""
-        chunk = MockChunk(
-            content=[{"type": "reasoning", "reasoning": "Primary", "text": "Secondary"}]
+    def test_multiple_reasoning_blocks_concatenated(
+        self, executor: ToolExecutor
+    ) -> None:
+        """Multiple reasoning blocks should be concatenated."""
+        chunk = make_chunk(
+            content=[
+                {"type": "reasoning", "reasoning": "First block. "},
+                {"type": "reasoning", "reasoning": "Second block."},
+            ]
         )
         result = executor._extract_reasoning_from_chunk(chunk)
-        assert result == "Primary"
+        assert result == "First block. Second block."
 
 
-class TestReasoningContentAttribute:
-    """Tests for direct reasoning_content attribute (OpenAI o1 style).
+class TestOtherProvidersFormat:
+    """Tests for other providers (non-OpenAI) that use additional_kwargs.
 
-    Some LangChain adapters expose reasoning directly as an attribute.
+    Some providers like Ollama, DeepSeek store reasoning in additional_kwargs.
+    content_blocks extracts this when no model_provider is set.
     """
 
-    def test_reasoning_content_attribute(self, executor: ToolExecutor) -> None:
-        """Extract from reasoning_content attribute."""
-        chunk = MockChunk(reasoning_content="Attribute reasoning")
-        result = executor._extract_reasoning_from_chunk(chunk)
-        assert result == "Attribute reasoning"
-
-    def test_reasoning_content_takes_precedence(self, executor: ToolExecutor) -> None:
-        """reasoning_content attribute should take precedence over other sources."""
-        chunk = MockChunk(
-            reasoning_content="Attribute",
-            additional_kwargs={"reasoning": "Kwargs"},
-            content=[{"type": "reasoning", "text": "Content"}],
+    def test_reasoning_content_in_additional_kwargs_no_provider(
+        self, executor: ToolExecutor
+    ) -> None:
+        """Extract reasoning from additional_kwargs when no provider set."""
+        chunk = AIMessageChunk(
+            content="",
+            additional_kwargs={"reasoning_content": "Legacy reasoning"},
+            response_metadata={},  # No model_provider
         )
         result = executor._extract_reasoning_from_chunk(chunk)
-        assert result == "Attribute"
+        assert result == "Legacy reasoning"
 
 
 class TestEdgeCases:
@@ -223,90 +173,69 @@ class TestEdgeCases:
 
     def test_none_content(self, executor: ToolExecutor) -> None:
         """Handle None content gracefully."""
-        chunk = MockChunk(content=None)
+        chunk = make_chunk(content=None)
         result = executor._extract_reasoning_from_chunk(chunk)
         assert result is None
 
     def test_string_content(self, executor: ToolExecutor) -> None:
         """Handle string content (non-list) gracefully."""
-        chunk = MockChunk(content="Just a string")
+        chunk = make_chunk(content="Just a string")
         result = executor._extract_reasoning_from_chunk(chunk)
         assert result is None
 
     def test_empty_content_list(self, executor: ToolExecutor) -> None:
         """Handle empty content list."""
-        chunk = MockChunk(content=[])
+        chunk = make_chunk(content=[])
         result = executor._extract_reasoning_from_chunk(chunk)
         assert result is None
 
     def test_empty_reasoning_string(self, executor: ToolExecutor) -> None:
         """Empty reasoning string should return None."""
-        chunk = MockChunk(additional_kwargs={"reasoning": ""})
+        chunk = make_chunk(content=[{"type": "reasoning", "reasoning": ""}])
         result = executor._extract_reasoning_from_chunk(chunk)
         assert result is None
 
-    def test_empty_reasoning_content_attribute(self, executor: ToolExecutor) -> None:
-        """Empty reasoning_content attribute should return None."""
-        chunk = MockChunk(reasoning_content="")
+    def test_no_reasoning_blocks(self, executor: ToolExecutor) -> None:
+        """No reasoning blocks should return None."""
+        chunk = make_chunk(content=[{"type": "text", "text": "Hello"}])
         result = executor._extract_reasoning_from_chunk(chunk)
         assert result is None
 
-    def test_multiple_reasoning_blocks_concatenated(
-        self, executor: ToolExecutor
-    ) -> None:
-        """Multiple reasoning blocks should be concatenated."""
-        chunk = MockChunk(
-            content=[
-                {"type": "reasoning", "text": "First block. "},
-                {"type": "reasoning", "text": "Second block."},
-            ]
-        )
-        result = executor._extract_reasoning_from_chunk(chunk)
-        assert result == "First block. Second block."
 
+class TestContentBlocksIntegration:
+    """Integration tests verifying content_blocks behavior.
 
-class TestTypeDefinitions:
-    """Tests to verify TypedDict definitions match expected structure.
-
-    These tests document the expected structure and will fail if the
-    TypedDict definitions become incompatible with actual usage.
+    These tests verify that LangChain's content_blocks API works as expected.
+    If LangChain changes behavior, these tests will catch it.
     """
 
-    def test_reasoning_block_structure(self) -> None:
-        """Verify ReasoningBlock TypedDict accepts expected keys."""
-        block: ReasoningBlock = {
-            "type": "reasoning",
-            "reasoning": "test",
-            "text": "test",
-            "summary": [{"index": 0, "type": "summary_text", "text": "test"}],
-            "index": 0,
-            "id": "test_id",
-        }
-        # All keys should be accessible
-        assert block.get("type") == "reasoning"
-        assert block.get("reasoning") == "test"
-        assert block.get("text") == "test"
-        assert block.get("summary") is not None
-        assert block.get("index") == 0
-        assert block.get("id") == "test_id"
+    def test_content_blocks_normalizes_summary_to_reasoning(self) -> None:
+        """Verify content_blocks converts summary to reasoning field."""
+        chunk = AIMessageChunk(
+            content=[
+                {
+                    "type": "reasoning",
+                    "summary": [{"text": "Test"}],
+                }
+            ],
+            response_metadata={"model_provider": "openai"},
+        )
+        blocks = chunk.content_blocks
+        reasoning_blocks = [b for b in blocks if b.get("type") == "reasoning"]
+        assert len(reasoning_blocks) == 1
+        assert reasoning_blocks[0].get("reasoning") == "Test"
 
-    def test_summary_text_item_structure(self) -> None:
-        """Verify SummaryTextItem TypedDict accepts expected keys."""
-        item: SummaryTextItem = {
-            "index": 0,
-            "type": "summary_text",
-            "text": "test text",
-        }
-        assert item.get("index") == 0
-        assert item.get("type") == "summary_text"
-        assert item.get("text") == "test text"
-
-    def test_minimal_reasoning_block(self) -> None:
-        """ReasoningBlock should work with minimal required fields."""
-        # total=False means all fields are optional
-        block: ReasoningBlock = {"type": "reasoning"}
-        assert block.get("type") == "reasoning"
-        assert block.get("summary") is None
+    def test_content_blocks_extracts_from_additional_kwargs_no_provider(self) -> None:
+        """Verify content_blocks extracts reasoning_content when no provider set."""
+        chunk = AIMessageChunk(
+            content="",
+            additional_kwargs={"reasoning_content": "From kwargs"},
+            response_metadata={},  # No model_provider - uses fallback
+        )
+        blocks = chunk.content_blocks
+        reasoning_blocks = [b for b in blocks if b.get("type") == "reasoning"]
+        assert len(reasoning_blocks) == 1
+        assert reasoning_blocks[0].get("reasoning") == "From kwargs"
 
 
 if __name__ == "__main__":
