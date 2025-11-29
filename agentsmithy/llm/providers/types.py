@@ -6,6 +6,7 @@ from typing import Any, Literal, TypedDict, TypeGuard
 
 class Vendor(str, Enum):
     OPENAI = "openai"
+    OLLAMA = "ollama"
     ANTHROPIC = "anthropic"
     XAI = "xai"
     DEEPSEEK = "deepseek"
