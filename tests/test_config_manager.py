@@ -213,21 +213,6 @@ async def test_settings_with_config_manager():
         assert settings.streaming_enabled == DEFAULT_STREAMING_ENABLED
 
 
-def test_settings_env_fallback():
-    """Test Settings falls back to environment variables."""
-    import os
-
-    # Set env var (using new key name)
-    os.environ["MODEL"] = "test-model"
-
-    # Settings without config manager should use env
-    settings = Settings(config_manager=None)
-    assert settings.model == "test-model"
-
-    # Cleanup
-    del os.environ["MODEL"]
-
-
 @pytest.mark.asyncio
 async def test_settings_embedding_model_tracks_workload_updates():
     """Embedding model property should reflect workload changes."""

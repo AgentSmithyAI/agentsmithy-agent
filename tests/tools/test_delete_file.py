@@ -14,7 +14,10 @@ async def _run(tool, **kwargs):
 
 
 async def test_delete_file_removes_file(tmp_path: Path, monkeypatch):
+    # Use isolated temp directory as both HOME and project root (cwd)
+    # so versioning/checkpoints logic does not touch the real workspace.
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
     f = tmp_path / "z.txt"
     f.write_text("bye", encoding="utf-8")
     t = DeleteFileTool()

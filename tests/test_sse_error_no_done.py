@@ -12,6 +12,14 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from agentsmithy.core.project import Project
+from agentsmithy.domain.events import (
+    ChatEvent,
+    DoneEvent,
+    ErrorEvent,
+    ReasoningEndEvent,
+    ReasoningEvent,
+    ReasoningStartEvent,
+)
 
 
 @pytest.fixture
@@ -28,17 +36,17 @@ def temp_project():
 
 async def failing_stream_after_reasoning():
     """Mock stream that yields reasoning, then error (simulating real scenario from logs)."""
-    # Yield reasoning events
-    yield {"type": "reasoning_start"}
-    yield {"type": "reasoning", "content": "Let me think..."}
-    yield {"type": "reasoning", "content": " about this problem..."}
-    yield {"type": "reasoning_end"}
+    # Yield reasoning events (now typed)
+    yield ReasoningStartEvent()
+    yield ReasoningEvent(content="Let me think...")
+    yield ReasoningEvent(content=" about this problem...")
+    yield ReasoningEndEvent()
 
     # Then yield error event (like tool_executor does)
-    yield {"type": "error", "error": "LLM error: "}
+    yield ErrorEvent(error="LLM error: ")
 
     # Yield DONE event (tool_executor now yields this after ERROR)
-    yield {"type": "done"}
+    yield DoneEvent()
 
 
 @pytest.mark.asyncio
@@ -158,11 +166,11 @@ async def test_error_with_empty_message_followed_by_done(temp_project):
 
     async def stream_with_empty_error():
         """Stream that yields error with empty/whitespace message."""
-        yield {"type": "chat", "content": "Starting..."}
+        yield ChatEvent(content="Starting...")
         # Empty error message like in real logs
-        yield {"type": "error", "error": ""}
+        yield ErrorEvent(error="")
         # Yield DONE event (tool_executor now yields this after ERROR)
-        yield {"type": "done"}
+        yield DoneEvent()
 
     mock_orchestrator = MagicMock()
     mock_graph_execution = MagicMock()

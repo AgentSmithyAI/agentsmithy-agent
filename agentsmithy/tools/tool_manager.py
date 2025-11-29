@@ -6,6 +6,7 @@ from typing import Any
 from agentsmithy.utils.logger import agent_logger
 
 from .base_tool import BaseTool, SseCallback
+from .core.types import ToolError
 
 
 class ToolManager:
@@ -103,7 +104,7 @@ class ToolManager:
         """Check if a tool is registered."""
         return name in self._tools
 
-    async def run_tool(self, name: str, **kwargs: Any) -> dict[str, Any]:
+    async def run_tool(self, name: str, **kwargs: Any) -> dict[str, Any] | ToolError:
         tool = self.get(name)
         if tool is None:
             raise ValueError(f"Tool not found: {name}")
@@ -121,13 +122,12 @@ class ToolManager:
                 parsed = schema(**kwargs)
                 args = parsed.model_dump()
         except Exception as ve:
-            return {
-                "type": "tool_error",
-                "name": name,
-                "code": "args_validation",
-                "error": str(ve),
-                "error_type": type(ve).__name__,
-            }
+            return ToolError(
+                name=name,
+                code="args_validation",
+                error=str(ve),
+                error_type=type(ve).__name__,
+            )
 
         try:
             # Pass arguments via tool_input dict to satisfy BaseTool.arun signature
@@ -139,13 +139,12 @@ class ToolManager:
                 error=str(e),
                 error_type=type(e).__name__,
             )
-            return {
-                "type": "tool_error",
-                "name": name,
-                "code": "execution_failed",
-                "error": str(e),
-                "error_type": type(e).__name__,
-            }
+            return ToolError(
+                name=name,
+                code="execution_failed",
+                error=str(e),
+                error_type=type(e).__name__,
+            )
 
         # Diagnostics: result size
         try:

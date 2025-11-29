@@ -34,25 +34,25 @@ class AgentOrchestrator:
     def __init__(
         self, llm_provider: Any | None = None, summarization_provider: Any | None = None
     ):
-        # Initialize LLM provider (allow dependency injection)
+        # Initialize LLM provider (dependency injection or from config)
         if llm_provider is not None:
             self.llm_provider = llm_provider
             provider_label = getattr(
                 llm_provider, "__class__", type(llm_provider)
             ).__name__
         else:
-            # Fallback to default provider if none injected
+            # Create provider from config (will fail if config is invalid)
             self.llm_provider = OpenAIProvider()
             provider_label = "OpenAIProvider"
 
-        # Initialize separate summarization provider (weak model)
+        # Initialize separate summarization provider
         if summarization_provider is not None:
             self.summarization_provider = summarization_provider
             summ_provider_label = getattr(
                 summarization_provider, "__class__", type(summarization_provider)
             ).__name__
         else:
-            # Create dedicated summarization provider from config
+            # Create from config (will fail if config is invalid)
             self.summarization_provider = OpenAIProvider(agent_name="summarization")
             summ_provider_label = "OpenAIProvider(summarization)"
 

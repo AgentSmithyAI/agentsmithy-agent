@@ -176,36 +176,38 @@ class Settings:
 
     # LLM Configuration
     @property
-    def model(self) -> str:
-        # Canonical: from models.agents.universal -> workload -> model
+    def model(self) -> str | None:
+        # Resolve from models.agents.universal -> workload -> model
         agents = self._get("models.agents", None)
-        if isinstance(agents, dict):
-            uni = agents.get("universal")
-            if isinstance(uni, dict):
-                workload = uni.get("workload")
-                if workload:
-                    wl_config = self._get(f"workloads.{workload}", None)
-                    if isinstance(wl_config, dict) and wl_config.get("model"):
-                        return str(wl_config.get("model"))
-
-        # Fallback for bootstrap/tests only
-        return self._get("model", "gpt-5", "MODEL")
+        if not isinstance(agents, dict):
+            return None
+        uni = agents.get("universal")
+        if not isinstance(uni, dict):
+            return None
+        workload = uni.get("workload")
+        if not workload:
+            return None
+        wl_config = self._get(f"workloads.{workload}", None)
+        if not isinstance(wl_config, dict):
+            return None
+        return wl_config.get("model")
 
     @property
-    def embedding_model(self) -> str:
-        # Canonical: from models.embeddings -> workload -> model
+    def embedding_model(self) -> str | None:
+        # Resolve from models.embeddings -> workload -> model
         models = self._get("models.embeddings", None)
-        if isinstance(models, dict):
-            workload = models.get("workload")
-            if workload:
-                wl_config = self._get(f"workloads.{workload}", None)
-                if isinstance(wl_config, dict) and wl_config.get("model"):
-                    return str(wl_config.get("model"))
-
-        return "text-embedding-3-small"
+        if not isinstance(models, dict):
+            return None
+        workload = models.get("workload")
+        if not workload:
+            return None
+        wl_config = self._get(f"workloads.{workload}", None)
+        if not isinstance(wl_config, dict):
+            return None
+        return wl_config.get("model")
 
     @property
-    def openai_embeddings_model(self) -> str:
+    def openai_embeddings_model(self) -> str | None:
         return self.embedding_model
 
     @property

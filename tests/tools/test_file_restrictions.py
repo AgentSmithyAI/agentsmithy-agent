@@ -69,19 +69,23 @@ class TestFileRestrictions:
         assert restrictions.should_include_hidden(hidden_file, True)
         assert restrictions.should_include_hidden(nested_hidden, True)
 
-    def test_restricted_paths(self):
+    def test_restricted_paths(self, tmp_path: Path, monkeypatch):
         """Test restricted path detection."""
-        restrictions = FileRestrictions(Path.cwd())
+        # Use isolated temp directory as workspace root, HOME and cwd
+        # so checks don't depend on the real project/home paths.
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("HOME", str(tmp_path))
+        restrictions = FileRestrictions(tmp_path)
 
         # Test root directory
         assert restrictions.is_restricted_path(Path("/"))
 
-        # Test home directory
-        assert restrictions.is_restricted_path(Path.home())
+        # Test home directory (now tmp_path)
+        assert restrictions.is_restricted_path(tmp_path)
 
-        # Test regular directory
-        assert not restrictions.is_restricted_path(Path("/tmp"))
-        assert not restrictions.is_restricted_path(Path.cwd())
+        # Test regular directories (not root/home)
+        assert not restrictions.is_restricted_path(Path("/tmp") / "regular_dir")
+        assert not restrictions.is_restricted_path(tmp_path / "subdir")
 
     def test_filter_paths(self, tmp_path: Path):
         """Test filtering multiple paths at once."""

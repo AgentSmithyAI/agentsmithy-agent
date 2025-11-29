@@ -5,14 +5,36 @@ import uuid
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
-from langchain_core.messages import BaseMessage, ToolMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, ToolMessage
+from langchain_core.messages.ai import UsageMetadata
+from langchain_core.messages.tool import ToolCallChunk
 
 from agentsmithy.dialogs.storages.usage import DialogUsageStorage
-from agentsmithy.domain.events import EventType
+from agentsmithy.domain.events import (
+    ChatEndEvent,
+    ChatEvent,
+    ChatStartEvent,
+    DoneEvent,
+    ErrorEvent,
+    FileEditEvent,
+    ReasoningEndEvent,
+    ReasoningEvent,
+    ReasoningStartEvent,
+    StreamEvent,
+    ToolCallEvent,
+)
 from agentsmithy.llm.provider import LLMProvider
+from agentsmithy.llm.providers.types import (
+    AccumulatedToolCall,
+    MessageContent,
+    NormalizedUsage,
+    ToolCallPayload,
+    is_text_content_block,
+)
 from agentsmithy.storage.tool_results import ToolResultsStorage
 from agentsmithy.utils.logger import agent_logger
 
+from .core.types import ToolError
 from .integration.langchain_adapter import as_langchain_tools
 from .registry import ToolRegistry
 
@@ -116,48 +138,50 @@ class ToolExecutor:
         except Exception:
             return False
 
-    def _extract_usage_from_response(self, response: Any) -> dict[str, Any]:
+    def _extract_usage_from_response(
+        self, response: AIMessageChunk | AIMessage
+    ) -> dict[str, int] | None:
         """Extract usage/token information from LLM response or chunk.
 
         Supports multiple provider formats (OpenAI, Anthropic, etc).
+        Returns dict with token counts or None if not available.
         """
-        # Try multiple paths to find usage data
-        meta = getattr(response, "response_metadata", {}) or {}
-        add = getattr(response, "additional_kwargs", {}) or {}
+        # Prefer typed usage_metadata from LangChain (UsageMetadata is a TypedDict)
+        usage_metadata: UsageMetadata | None = response.usage_metadata
+        if usage_metadata is not None:
+            return {
+                "input_tokens": usage_metadata["input_tokens"],
+                "output_tokens": usage_metadata["output_tokens"],
+                "total_tokens": usage_metadata["total_tokens"],
+            }
+
+        # Fallback to nested dicts for providers that don't use usage_metadata
+        meta = response.response_metadata or {}
+        add = response.additional_kwargs or {}
 
         # Priority order for usage extraction
-        candidates = [
-            self._get_nested(meta, "token_usage"),
-            self._get_nested(add, "usage"),
-            getattr(response, "usage_metadata", None),
-            self._get_nested(meta, "finish_reason_data", "usage"),
-            self._get_nested(meta, "model_kwargs", "usage"),
+        candidates: list[dict[str, Any] | None] = [
+            (
+                meta.get("token_usage")
+                if isinstance(meta.get("token_usage"), dict)
+                else None
+            ),
+            add.get("usage") if isinstance(add.get("usage"), dict) else None,
         ]
 
-        # Return first valid dict
         for candidate in candidates:
-            if isinstance(candidate, dict) and candidate:
+            if candidate:
                 return candidate
 
-        # Check direct usage attribute (may be object)
-        if hasattr(response, "usage"):
-            direct_usage = getattr(response, "usage", None)
-            if direct_usage:
-                if hasattr(direct_usage, "__dict__"):
-                    return direct_usage.__dict__
-                elif hasattr(direct_usage, "dict") and callable(direct_usage.dict):
-                    return direct_usage.dict()
-                elif isinstance(direct_usage, dict):
-                    return direct_usage
+        return None
 
-        return {}
-
-    def _normalize_usage_tokens(self, usage: dict[str, Any]) -> dict[str, Any]:
+    def _normalize_usage_tokens(self, usage: dict[str, int]) -> NormalizedUsage:
         """Normalize token field names across different providers.
 
-        Returns dict with: prompt_tokens, completion_tokens, total_tokens
+        Returns NormalizedUsage with: prompt_tokens, completion_tokens, total_tokens
         """
         # Normalize prompt tokens (OpenAI vs Anthropic naming)
+        # Use explicit None check - 0 is a valid token count
         prompt_tokens = usage.get("prompt_tokens")
         if prompt_tokens is None:
             prompt_tokens = usage.get("input_tokens")
@@ -173,7 +197,7 @@ class ToolExecutor:
             "total_tokens": usage.get("total_tokens"),
         }
 
-    def _persist_usage(self, usage: dict[str, Any]) -> None:
+    def _persist_usage(self, usage: dict[str, int] | None) -> None:
         """Persist normalized usage data to storage."""
         if not (self._project and self._dialog_id and usage):
             return
@@ -195,110 +219,37 @@ class ToolExecutor:
                 dialog_id=self._dialog_id,
             )
 
-    def _extract_reasoning_from_chunk(self, chunk: Any) -> str | None:
+    def _extract_reasoning_from_chunk(self, chunk: AIMessageChunk) -> str | None:
         """Extract reasoning text from a streaming chunk.
 
-        Handles multiple provider formats (OpenAI o1/gpt-5, etc).
+        Uses LangChain's content_blocks which normalizes reasoning across providers.
         Returns reasoning text if found, None otherwise.
         """
-        try:
-            # Check direct reasoning_content attribute (OpenAI o1/gpt-5)
-            reasoning_content = getattr(chunk, "reasoning_content", None)
-            if isinstance(reasoning_content, str):
-                return reasoning_content
-
-            # Try nested paths for reasoning
-            add = getattr(chunk, "additional_kwargs", {}) or {}
-            meta = getattr(chunk, "response_metadata", {}) or {}
-
-            reasoning = self._get_nested(add, "reasoning") or self._get_nested(
-                meta, "reasoning"
-            )
-
-            # Parse reasoning based on type
-            if isinstance(reasoning, str):
-                return reasoning
-            elif isinstance(reasoning, dict):
-                return self._parse_reasoning_dict(reasoning)
-
-            return None
-        except Exception:
-            return None
-
-    def _get_nested(self, obj: Any, *keys: str, default: Any = None) -> Any:
-        """Safely access nested dict keys (like Optional chaining in JS).
-
-        Example: _get_nested(data, "response", "metadata", "usage")
-        Returns value or default if any key is missing.
-        """
-        current = obj
-        for key in keys:
-            if isinstance(current, dict):
-                current = current.get(key)
-                if current is None:
-                    return default
-            else:
-                return default
-        return current
-
-    def _extract_text_recursive(self, obj: Any) -> list[str]:
-        """Recursively extract all text values from nested dict/list structure.
-
-        Traverses obj and collects all string values from 'text' keys.
-        Works like a lens/traversal in functional programming.
-        """
-        if isinstance(obj, str):
-            return [obj]
-        elif isinstance(obj, dict):
-            texts = []
-            # Check direct text field
-            if "text" in obj and isinstance(obj["text"], str):
-                texts.append(obj["text"])
-            # Recurse into content field
-            if "content" in obj:
-                texts.extend(self._extract_text_recursive(obj["content"]))
-            return texts
-        elif isinstance(obj, list):
-            # Flatten all texts from list items
-            return [text for item in obj for text in self._extract_text_recursive(item)]
-        else:
-            return []
-
-    def _parse_reasoning_dict(self, reasoning: dict) -> str | None:
-        """Parse reasoning from dict structure (nested content/text fields)."""
-        # Try summary field first
-        summary = reasoning.get("summary")
-
-        if isinstance(summary, str):
-            return summary
-
-        # Extract all text recursively from summary
-        if summary is not None:
-            texts = self._extract_text_recursive(summary)
-            if texts:
-                return "".join(texts)
-
-        # Fallback to content field
-        if isinstance(reasoning.get("content"), str):
-            return reasoning.get("content")
-
-        return None
+        # content_blocks normalizes all formats (summary, reasoning_content, etc.)
+        # into standard ReasoningContentBlock with 'reasoning' field
+        parts: list[str] = []
+        for block in chunk.content_blocks:
+            if block.get("type") == "reasoning":
+                reasoning = block.get("reasoning")
+                if isinstance(reasoning, str) and reasoning:
+                    parts.append(reasoning)
+        return "".join(parts) if parts else None
 
     def _build_tool_calls_payload(
-        self, accumulated_tool_calls: list[dict]
-    ) -> list[dict[str, Any]]:
+        self, accumulated_tool_calls: list[AccumulatedToolCall]
+    ) -> list[ToolCallPayload]:
         """Convert accumulated tool call chunks into standardized payload.
 
         Filters out calls without IDs to avoid API mismatches.
         """
-        tool_calls_payload = []
+        tool_calls_payload: list[ToolCallPayload] = []
         for tool_call in accumulated_tool_calls:
-            name = tool_call.get("name", "")
+            name = tool_call["name"]
             try:
-                args = json.loads(tool_call.get("args", "{}") or "{}")
-            except Exception:
+                args = json.loads(tool_call["args"] or "{}")
+            except json.JSONDecodeError:
                 args = {}
-            call_id = tool_call.get("id", "")
+            call_id = tool_call["id"]
 
             if not call_id:
                 agent_logger.error(
@@ -317,63 +268,66 @@ class ToolExecutor:
 
         return tool_calls_payload
 
-    def _extract_text_from_content(self, content: Any) -> str | None:
+    def _extract_text_from_content(self, content: MessageContent) -> str | None:
         """Extract text string from various content formats.
 
         Handles both string content and list-of-dicts formats.
         """
         if isinstance(content, str):
-            return content
-        elif isinstance(content, list):
-            # LangChain may return content as list of dicts for newer models
-            text_parts = []
-            for item in content:
-                if isinstance(item, dict) and "text" in item:
-                    text_parts.append(item["text"])
-                elif isinstance(item, str):
-                    text_parts.append(item)
-            if text_parts:
-                return "".join(text_parts)
-        return None
+            return content if content else None
+
+        # LangChain may return content as list of dicts for newer models
+        text_parts: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                text_parts.append(item)
+            elif isinstance(item, dict) and is_text_content_block(item):
+                text = item.get("text")
+                if text:
+                    text_parts.append(text)
+        return "".join(text_parts) if text_parts else None
 
     def _accumulate_tool_call_chunk(
         self,
-        tc_chunk: dict,
-        current_tool_call: dict | None,
-        accumulated_tool_calls: list[dict],
-    ) -> dict | None:
+        tc_chunk: ToolCallChunk,
+        current_tool_call: AccumulatedToolCall | None,
+        accumulated_tool_calls: list[AccumulatedToolCall],
+    ) -> AccumulatedToolCall | None:
         """Process a tool_call_chunk and update accumulation state.
 
         Returns the updated current_tool_call (or a new one if started).
         """
         chunk_index = tc_chunk.get("index")
+        chunk_id = tc_chunk.get("id")
+        chunk_name = tc_chunk.get("name")
+        chunk_args = tc_chunk.get("args")
 
         if chunk_index is not None:
             # Check if continuing current tool call
-            if current_tool_call and current_tool_call.get("index") == chunk_index:
+            if current_tool_call and current_tool_call["index"] == chunk_index:
                 # Continue accumulating
-                if tc_chunk.get("id") and not current_tool_call.get("id"):
-                    current_tool_call["id"] = tc_chunk["id"]
-                if tc_chunk.get("name"):
-                    current_tool_call["name"] += tc_chunk["name"]
-                if tc_chunk.get("args"):
-                    current_tool_call["args"] += tc_chunk["args"]
+                if chunk_id and not current_tool_call["id"]:
+                    current_tool_call["id"] = chunk_id
+                if chunk_name:
+                    current_tool_call["name"] += chunk_name
+                if chunk_args:
+                    current_tool_call["args"] += chunk_args
             else:
                 # New tool call - finalize previous one
-                if current_tool_call and "name" in current_tool_call:
+                if current_tool_call and current_tool_call["name"]:
                     accumulated_tool_calls.append(current_tool_call)
                 current_tool_call = {
                     "index": chunk_index,
-                    "id": tc_chunk.get("id", ""),
-                    "name": tc_chunk.get("name", ""),
-                    "args": tc_chunk.get("args", ""),
+                    "id": chunk_id or "",
+                    "name": chunk_name or "",
+                    "args": chunk_args or "",
                 }
         elif current_tool_call:
             # Chunks without index - accumulate to current
-            if tc_chunk.get("name"):
-                current_tool_call["name"] += tc_chunk["name"]
-            if tc_chunk.get("args"):
-                current_tool_call["args"] += tc_chunk["args"]
+            if chunk_name:
+                current_tool_call["name"] += chunk_name
+            if chunk_args:
+                current_tool_call["args"] += chunk_args
 
         return current_tool_call
 
@@ -382,7 +336,7 @@ class ToolExecutor:
         tool_call_id: str,
         name: str,
         args: dict[str, Any],
-        result: dict[str, Any],
+        result: dict[str, Any] | ToolError,
     ) -> tuple[ToolMessage, bool]:
         """Create a ToolMessage for a tool result, optionally persisting it.
 
@@ -391,38 +345,40 @@ class ToolExecutor:
         """
         is_ephemeral = self._is_ephemeral_tool(name)
 
+        # Convert ToolError to dict for serialization
+        if isinstance(result, ToolError):
+            result_dict: dict[str, Any] = result.model_dump()
+            is_error = True
+        else:
+            result_dict = result
+            is_error = False
+
         # If storage is available and tool is not ephemeral, persist and build reference
         if self._tool_results_storage and not is_ephemeral:
             result_ref = await self._tool_results_storage.store_result(
                 tool_call_id=tool_call_id,
                 tool_name=name,
                 args=args,
-                result=result,
+                result=result_dict,
             )
             metadata = await self._tool_results_storage.get_metadata(tool_call_id)
 
-            inline_result_json = json.dumps(result, ensure_ascii=False)
+            inline_result_json = json.dumps(result_dict, ensure_ascii=False)
             content = {
                 "tool_call_id": tool_call_id,
                 "tool_name": name,
-                "status": (
-                    "error"
-                    if isinstance(result, dict)
-                    and isinstance(result.get("type"), str)
-                    and ("error" in result["type"] or result["type"] == "tool_error")
-                    else "success"
-                ),
+                "status": "error" if is_error else "success",
                 "metadata": {
                     "size_bytes": metadata.size_bytes if metadata else 0,
                     "summary": metadata.summary if metadata else "",
                     "truncated_preview": self._tool_results_storage.get_truncated_preview(
-                        result
+                        result_dict
                     ),
                     "result_present": True,
                     "result_length_bytes": len(inline_result_json.encode("utf-8")),
                 },
                 "result_ref": result_ref.to_dict(),
-                "inline_result": result,
+                "inline_result": result_dict,
                 "has_inline_result": True,
             }
             return (
@@ -434,17 +390,11 @@ class ToolExecutor:
             )
 
         # Inline-only message for ephemeral tools or when storage is unavailable
-        inline_result_json = json.dumps(result, ensure_ascii=False)
+        inline_result_json = json.dumps(result_dict, ensure_ascii=False)
         content = {
             "tool_call_id": tool_call_id,
             "tool_name": name,
-            "status": (
-                "error"
-                if isinstance(result, dict)
-                and isinstance(result.get("type"), str)
-                and ("error" in result["type"] or result["type"] == "tool_error")
-                else "success"
-            ),
+            "status": "error" if is_error else "success",
             "metadata": {
                 "size_bytes": len(inline_result_json.encode("utf-8")),
                 "summary": "",
@@ -452,7 +402,7 @@ class ToolExecutor:
                 "result_present": True,
                 "result_length_bytes": len(inline_result_json.encode("utf-8")),
             },
-            "inline_result": result,
+            "inline_result": result_dict,
             "has_inline_result": True,
         }
         return (
@@ -561,8 +511,8 @@ class ToolExecutor:
 
     def process_with_tools(
         self, messages: list[BaseMessage], stream: bool = True
-    ) -> AsyncGenerator[Any]:
-        """Streaming path: yield strings or structured dicts suitable for SSE."""
+    ) -> AsyncGenerator[StreamEvent]:
+        """Streaming path: yield typed event objects suitable for SSE."""
         return self._process_streaming(messages)
 
     async def process_with_tools_async(
@@ -633,13 +583,13 @@ class ToolExecutor:
                 result = await self.tool_manager.run_tool(name, **args)
 
                 # Check if tool execution returned an error
-                if isinstance(result, dict) and result.get("type") == "tool_error":
+                if isinstance(result, ToolError):
                     # Tool failed - increment error counter
                     consecutive_errors += 1
                     agent_logger.error(
                         "Tool execution error (recoverable)",
                         tool_name=name,
-                        error_code=result.get("code"),
+                        error_code=result.code,
                         consecutive_errors=consecutive_errors,
                     )
                 else:
@@ -665,8 +615,8 @@ class ToolExecutor:
 
     async def _process_streaming(
         self, messages: list[BaseMessage]
-    ) -> AsyncGenerator[Any]:
-        """Streaming loop: emit content chunks and tool results as they happen."""
+    ) -> AsyncGenerator[StreamEvent]:
+        """Streaming loop: emit typed event objects as they happen."""
         bound_llm = self._bind_tools()
         conversation: list[BaseMessage] = list(messages)
 
@@ -688,7 +638,7 @@ class ToolExecutor:
                     "Model is stuck in an error loop."
                 )
                 agent_logger.error(error_msg, consecutive_errors=consecutive_errors)
-                yield {"type": EventType.ERROR.value, "error": error_msg}
+                yield ErrorEvent(error=error_msg)
                 break
 
             agent_logger.info(
@@ -697,14 +647,14 @@ class ToolExecutor:
 
             # Use astream for true streaming
             accumulated_content = ""
-            accumulated_tool_calls: list[dict] = []
-            current_tool_call: dict | None = None
+            accumulated_tool_calls: list[AccumulatedToolCall] = []
+            current_tool_call: AccumulatedToolCall | None = None
 
             # Boundary markers for chat and reasoning
             chat_started = False
             reasoning_started = False
 
-            last_usage: dict[str, Any] | None = None
+            last_usage: dict[str, int] | None = None
             # Get stream kwargs from provider (vendor-specific)
             stream_kwargs: dict[str, Any] = getattr(
                 self.llm_provider, "get_stream_kwargs", lambda: {}
@@ -713,6 +663,10 @@ class ToolExecutor:
 
             try:
                 async for chunk in stream_iter:
+                    # chunk is AIMessageChunk from LangChain
+                    if not isinstance(chunk, AIMessageChunk):
+                        continue
+
                     # Capture usage tokens using helper
                     usage = self._extract_usage_from_response(chunk)
                     if usage:
@@ -723,25 +677,22 @@ class ToolExecutor:
                     if reasoning_text:
                         if not reasoning_started:
                             reasoning_started = True
-                            yield {"type": EventType.REASONING_START.value}
-                        yield {
-                            "type": EventType.REASONING.value,
-                            "content": reasoning_text,
-                        }
+                            yield ReasoningStartEvent()
+                        yield ReasoningEvent(content=reasoning_text)
 
                     # Handle content chunks
-                    content = getattr(chunk, "content", None)
+                    content = chunk.content
                     if content:
                         text = self._extract_text_from_content(content)
                         if text:
                             if not chat_started:
                                 chat_started = True
-                                yield {"type": "chat_start"}
+                                yield ChatStartEvent()
                             accumulated_content += text
-                            yield {"type": EventType.CHAT.value, "content": text}
+                            yield ChatEvent(content=text)
 
                     # Handle tool call chunks
-                    tool_call_chunks = getattr(chunk, "tool_call_chunks", [])
+                    tool_call_chunks: list[ToolCallChunk] = chunk.tool_call_chunks
                     for tc_chunk in tool_call_chunks:
                         current_tool_call = self._accumulate_tool_call_chunk(
                             tc_chunk, current_tool_call, accumulated_tool_calls
@@ -749,16 +700,12 @@ class ToolExecutor:
 
                 # Close boundary markers at the end of this streaming chunk
                 if reasoning_started:
-                    yield {"type": EventType.REASONING_END.value}
+                    yield ReasoningEndEvent()
                 if chat_started and accumulated_content:
-                    yield {"type": EventType.CHAT_END.value}
+                    yield ChatEndEvent()
 
                 # Add the last tool call if exists
-                if (
-                    current_tool_call
-                    and "name" in current_tool_call
-                    and current_tool_call["name"]
-                ):
+                if current_tool_call and current_tool_call["name"]:
                     accumulated_tool_calls.append(current_tool_call)
 
             except Exception as stream_error:
@@ -770,17 +717,14 @@ class ToolExecutor:
                 )
                 # Close any open boundaries
                 if reasoning_started:
-                    yield {"type": EventType.REASONING_END.value}
+                    yield ReasoningEndEvent()
                 if chat_started:
-                    yield {"type": EventType.CHAT_END.value}
+                    yield ChatEndEvent()
                 # Yield error event to client
-                yield {
-                    "type": EventType.ERROR.value,
-                    "error": f"LLM error: {str(stream_error)}",
-                }
+                yield ErrorEvent(error=f"LLM error: {str(stream_error)}")
                 # Yield DONE event to signal end of stream
                 # (chat_service doesn't know stream ended early without this)
-                yield {"type": EventType.DONE.value}
+                yield DoneEvent()
                 return  # Stop processing
 
             # If no tool calls, we're done - model finished successfully
@@ -819,41 +763,32 @@ class ToolExecutor:
             # Execute tools and stream results
             for tool_call in accumulated_tool_calls:
                 try:
-                    name = tool_call.get("name", "")
-                    tool_id = tool_call.get("id", "")
-
-                    # Parse accumulated args string to dict
-                    args_str = tool_call.get("args", "{}") or "{}"
-                    # Ensure it's a string; providers stream arguments as a JSON string
-                    if not isinstance(args_str, str):
-                        args_str = str(args_str)
+                    name = tool_call["name"]
+                    tool_id = tool_call["id"]
+                    args_str = tool_call["args"] or "{}"
 
                     args = json.loads(args_str)
 
                     if not name:
                         continue
 
-                    # Emit tool_call as a structured chunk
-                    yield {
-                        "type": EventType.TOOL_CALL.value,
-                        "name": name,
-                        "args": args,
-                    }
+                    # Emit tool_call as a structured event
+                    yield ToolCallEvent(name=name, args=args)
 
                     # Execute tool (tool_manager handles all tool exceptions centrally)
                     result = await self.tool_manager.run_tool(name, **args)
 
                     # Check if tool execution returned an error
-                    # tool_manager.run_tool() catches all exceptions and returns {"type": "tool_error"}
-                    if isinstance(result, dict) and result.get("type") == "tool_error":
+                    # tool_manager.run_tool() catches all exceptions and returns ToolError
+                    if isinstance(result, ToolError):
                         # Tool failed - this is recoverable, model can retry with different approach
                         # Do NOT send to SSE (not terminal), only log and add to conversation
                         consecutive_errors += 1  # Increment error counter
                         agent_logger.error(
                             "Tool execution error (recoverable)",
                             tool_name=name,
-                            error_code=result.get("code"),
-                            error_type=result.get("error_type"),
+                            error_code=result.code,
+                            error_type=result.error_type,
                             consecutive_errors=consecutive_errors,
                         )
 
@@ -889,11 +824,7 @@ class ToolExecutor:
                         diff = result.get("diff")
                         if file_path:
                             # Yield file_edit directly in the chunk stream for immediate delivery
-                            yield {
-                                "type": EventType.FILE_EDIT.value,
-                                "file": file_path,
-                                "diff": diff,
-                            }
+                            yield FileEditEvent(file=file_path, diff=diff)
 
                     # Store result and create reference (tool_id must be present)
                     if not tool_id:
@@ -921,13 +852,12 @@ class ToolExecutor:
                     )
 
                     # Create error result to send back to model
-                    error_result = {
-                        "type": "tool_error",
-                        "name": name,
-                        "code": "args_parse_failed",
-                        "error": f"Failed to parse tool arguments: {str(e)}",
-                        "error_type": "JSONDecodeError",
-                    }
+                    error_result = ToolError(
+                        name=name,
+                        code="args_parse_failed",
+                        error=f"Failed to parse tool arguments: {str(e)}",
+                        error_type="JSONDecodeError",
+                    )
 
                     # Build tool message with error result
                     tool_message, is_ephemeral = await self._build_tool_message(
@@ -958,13 +888,12 @@ class ToolExecutor:
 
                     # Do NOT send to SSE (not terminal), only log and try to add to conversation
                     # Create error result to send back to model
-                    error_result = {
-                        "type": "tool_error",
-                        "name": name,
-                        "code": "processing_failed",
-                        "error": str(e),
-                        "error_type": type(e).__name__,
-                    }
+                    error_result = ToolError(
+                        name=name,
+                        code="processing_failed",
+                        error=str(e),
+                        error_type=type(e).__name__,
+                    )
 
                     # Try to build tool message with error result
                     try:

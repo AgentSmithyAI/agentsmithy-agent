@@ -137,6 +137,25 @@ class DoneEvent(BaseEvent):
     done: bool = True
 
 
+# Union of all event types for type hints
+StreamEvent = (
+    ChatEvent
+    | ReasoningEvent
+    | ChatStartEvent
+    | ChatEndEvent
+    | ReasoningStartEvent
+    | ReasoningEndEvent
+    | SummaryStartEvent
+    | SummaryEndEvent
+    | ToolCallEvent
+    | UserEvent
+    | FileEditEvent
+    | ErrorEvent
+    | SearchEvent
+    | DoneEvent
+)
+
+
 class EventFactory:
     @staticmethod
     def chat(content: str, dialog_id: str | None = None) -> ChatEvent:

@@ -12,6 +12,7 @@ import httpx
 import pytest
 
 from agentsmithy.core.project import Project
+from agentsmithy.domain.events import ChatEvent, ErrorEvent
 
 
 @pytest.fixture
@@ -61,15 +62,12 @@ async def test_httpx_readerror_delivers_error_to_sse(temp_project):
         # This simulates tool_executor._process_streaming behavior
         try:
             async for chunk in llm_stream_with_httpx_readerror():
-                # Simulate tool_executor yielding chat chunks
-                yield {"type": "chat", "content": chunk.content}
+                # Simulate tool_executor yielding chat chunks (now typed events)
+                yield ChatEvent(content=chunk.content)
         except httpx.ReadError as e:
             # This is the exact path in tool_executor.py lines 706-723
             # It should yield ERROR event before returning
-            yield {
-                "type": "error",
-                "error": f"LLM error: {str(e)}",
-            }
+            yield ErrorEvent(error=f"LLM error: {str(e)}")
             return
 
     # Mock the response stream
@@ -191,13 +189,12 @@ async def test_httpx_readerror_in_tool_executor_direct():
     try:
         async for event in tool_executor.process_with_tools(messages, stream=True):
             events.append(event)
-            if isinstance(event, dict) and event.get("type") == "error":
+            if isinstance(event, ErrorEvent):
                 error_found = True
-                error_msg = event.get("error", "")
                 # Verify error message
                 assert (
-                    "LLM error:" in error_msg
-                ), f"Expected 'LLM error:' in message, got: {error_msg}"
+                    "LLM error:" in event.error
+                ), f"Expected 'LLM error:' in message, got: {event.error}"
     except Exception as e:
         # Tool executor should NOT raise - it should yield ERROR and return
         pytest.fail(f"Tool executor raised exception instead of yielding ERROR: {e}")
@@ -215,5 +212,5 @@ async def test_httpx_readerror_in_tool_executor_direct():
     )
 
     # Verify we got some chat events before the error
-    chat_events = [e for e in events if isinstance(e, dict) and e.get("type") == "chat"]
+    chat_events = [e for e in events if isinstance(e, ChatEvent)]
     assert len(chat_events) >= 1, "Should have received chat events before error"

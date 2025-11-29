@@ -28,7 +28,10 @@ async def test_read_file(tmp_path: Path):
 
 
 async def test_write_file_creates_and_overwrites(tmp_path: Path, monkeypatch):
+    # Use isolated temp directory as both HOME and project root (cwd)
+    # so versioning/checkpoints logic does not touch the real workspace.
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
     f = tmp_path / "b.txt"
     t = WriteFileTool()
     await _run(t, path=str(f), content="one")
@@ -39,6 +42,7 @@ async def test_write_file_creates_and_overwrites(tmp_path: Path, monkeypatch):
 
 async def test_replace_in_file_basic(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
     f = tmp_path / "d.txt"
     f.write_text("abc", encoding="utf-8")
     t = ReplaceInFileTool()
@@ -77,6 +81,7 @@ async def test_search_files_regex(tmp_path: Path):
 
 async def test_delete_file(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
     f = tmp_path / "z.txt"
     f.write_text("bye", encoding="utf-8")
     t = DeleteFileTool()

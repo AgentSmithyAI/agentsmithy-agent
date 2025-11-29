@@ -17,6 +17,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from agentsmithy.domain.events import ErrorEvent
+
 
 @pytest.mark.asyncio
 async def test_tool_parse_error_recovery():
@@ -78,8 +80,8 @@ async def test_tool_parse_error_recovery():
 
     async for chunk in executor.process_with_tools(messages, stream=True):
         chunks.append(chunk)
-        if isinstance(chunk, dict) and chunk.get("type") == "error":
-            error_messages.append(chunk.get("error", ""))
+        if isinstance(chunk, ErrorEvent):
+            error_messages.append(chunk.error)
 
     # CRITICAL: Only TERMINAL errors should be sent to SSE
     # Parse errors are recoverable - should NOT be in SSE

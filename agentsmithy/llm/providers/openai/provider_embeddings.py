@@ -1,7 +1,6 @@
 """OpenAI embeddings provider.
 
-Provides a thin wrapper around `langchain_openai.OpenAIEmbeddings` that reads
-nested OpenAI embeddings configuration from settings and prepares kwargs.
+Resolves embeddings configuration via workload -> provider chain.
 """
 
 from __future__ import annotations
@@ -16,30 +15,67 @@ from agentsmithy.config import settings
 
 class OpenAIEmbeddingsProvider:
     def __init__(self, model: str | None = None):
-        self.model = model or settings.openai_embeddings_model
+        # Resolve via models.embeddings.workload -> workloads.<name> -> providers.<name>
+        embeddings_cfg = settings._get("models.embeddings", None)
+        if not isinstance(embeddings_cfg, dict):
+            raise ValueError(
+                "Embeddings configuration not found. "
+                "Check models.embeddings in your config."
+            )
+
+        workload_name = embeddings_cfg.get("workload")
+        if not workload_name:
+            raise ValueError(
+                "Embeddings has no workload specified. "
+                "Set models.embeddings.workload in your config."
+            )
+
+        workload_config = settings._get(f"workloads.{workload_name}", None)
+        if not isinstance(workload_config, dict):
+            raise ValueError(
+                f"Workload '{workload_name}' not found in configuration. "
+                f"Check workloads.{workload_name} in your config."
+            )
+
+        provider_name = workload_config.get("provider")
+        if not provider_name:
+            raise ValueError(
+                f"Workload '{workload_name}' has no provider specified. "
+                f"Set workloads.{workload_name}.provider in your config."
+            )
+
+        provider_def = settings._get(f"providers.{provider_name}", None)
+        if not isinstance(provider_def, dict):
+            raise ValueError(
+                f"Provider '{provider_name}' not found in configuration. "
+                f"Check providers.{provider_name} in your config."
+            )
+
+        # Resolve from config
+        resolved_model = workload_config.get("model") or provider_def.get("model")
+        resolved_api_key = provider_def.get("api_key")
+        resolved_base_url = provider_def.get("base_url")
+        resolved_options = provider_def.get("options", {})
+
+        # Constructor arg overrides config
+        self.model = model or resolved_model
+        self.api_key = resolved_api_key
+        self.base_url = resolved_base_url
+        self.options = resolved_options if isinstance(resolved_options, dict) else {}
+
         if not self.model:
-            raise ValueError("OpenAI embeddings model must be specified")
+            raise ValueError(
+                "Embeddings model not specified. Configure workloads.<name>.model "
+                "or providers.<name>.model in your config."
+            )
 
     @property
     def embeddings(self) -> Embeddings:
         kwargs: dict[str, Any] = {"model": self.model}
-        if settings.openai_base_url:
-            kwargs["base_url"] = settings.openai_base_url
-        # Provider-wide options from providers.openai.options
-        prov = settings.get_provider_config("openai")
-        # Prefer explicit API key in kwargs to avoid env reliance
-        if isinstance(prov, dict) and prov.get("api_key"):
-            kwargs["api_key"] = str(prov.get("api_key"))
-        elif settings.openai_api_key:
-            kwargs["api_key"] = str(settings.openai_api_key)
-        extra = prov.get("options") if isinstance(prov, dict) else None
-        if isinstance(extra, dict) and extra:
-            kwargs.update(extra)
-        # Embeddings-specific options from providers.openai.embeddings.options
-        if isinstance(prov, dict):
-            emb_cfg = prov.get("embeddings") or {}
-            if isinstance(emb_cfg, dict):
-                emb_extra = emb_cfg.get("options")
-                if isinstance(emb_extra, dict) and emb_extra:
-                    kwargs.update(emb_extra)
+        if self.base_url:
+            kwargs["base_url"] = self.base_url
+        if self.api_key:
+            kwargs["api_key"] = self.api_key
+        if self.options:
+            kwargs.update(self.options)
         return OpenAIEmbeddings(**kwargs)
