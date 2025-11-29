@@ -40,6 +40,7 @@ def config_file_without_key(tmp_path: Path):
 @pytest.fixture
 async def config_manager_with_key(config_file_with_key: Path):
     """Config manager with valid API key."""
+    from agentsmithy.config import settings
     from agentsmithy.config.defaults import get_default_config
 
     provider = LocalFileConfigProvider(
@@ -51,16 +52,20 @@ async def config_manager_with_key(config_file_with_key: Path):
     import agentsmithy.config.manager as mgr_module
 
     old_manager = mgr_module._config_manager
+    old_settings_manager = settings._config_manager
     mgr_module._config_manager = manager
+    settings._config_manager = manager
 
     yield manager
 
     mgr_module._config_manager = old_manager
+    settings._config_manager = old_settings_manager
 
 
 @pytest.fixture
 async def config_manager_without_key(config_file_without_key: Path, monkeypatch):
     """Config manager without API key."""
+    from agentsmithy.config import settings
     from agentsmithy.config.defaults import get_default_config
 
     # Remove env var
@@ -75,11 +80,14 @@ async def config_manager_without_key(config_file_without_key: Path, monkeypatch)
     import agentsmithy.config.manager as mgr_module
 
     old_manager = mgr_module._config_manager
+    old_settings_manager = settings._config_manager
     mgr_module._config_manager = manager
+    settings._config_manager = manager
 
     yield manager
 
     mgr_module._config_manager = old_manager
+    settings._config_manager = old_settings_manager
 
 
 def test_health_reports_config_valid_when_key_present(

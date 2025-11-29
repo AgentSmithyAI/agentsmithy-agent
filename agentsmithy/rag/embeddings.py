@@ -2,7 +2,6 @@
 
 from langchain_core.embeddings import Embeddings
 
-from agentsmithy.config import settings
 from agentsmithy.llm.providers.openai.provider_embeddings import (
     OpenAIEmbeddingsProvider,
 )
@@ -28,11 +27,9 @@ class EmbeddingsManager:
     def __init__(
         self, provider: Vendor | str = Vendor.OPENAI, model: str | None = None
     ):
-        from agentsmithy.config import settings
-
         # Normalize provider to enum or string value
         self.provider: Vendor | str = provider
-        self.model = model or settings.embedding_model
+        self.model = model
         self._embeddings: Embeddings | None = None
 
     @property
@@ -45,9 +42,8 @@ class EmbeddingsManager:
                 else self.provider
             )
             if provider_val == Vendor.OPENAI.value:
-                # Route through a dedicated provider for clarity and future parity
-                model_name = self.model or settings.openai_embeddings_model
-                self._embeddings = OpenAIEmbeddingsProvider(model_name).embeddings
+                # OpenAIEmbeddingsProvider resolves config via workload -> provider chain
+                self._embeddings = OpenAIEmbeddingsProvider(self.model).embeddings
             else:
                 raise ValueError(f"Unknown embeddings provider: {provider_val}")
 

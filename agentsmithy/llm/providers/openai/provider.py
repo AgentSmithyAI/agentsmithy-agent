@@ -42,62 +42,77 @@ class OpenAIProvider:
         agent_name: str | None = None,
     ):
         # Agent model selection via models.agents or models.summarization
-        # Special case: "summarization" agent looks in models.summarization
         if agent_name == "summarization":
             agent_entry = settings._get("models.summarization", None)
         else:
-            # Default: look in models.agents
-            agents_cfg = settings._get("models.agents", {})
-            if isinstance(agents_cfg, dict):
-                agent_entry = (
-                    agents_cfg.get(agent_name)
-                    if agent_name
-                    else agents_cfg.get("universal")
+            if not agent_name:
+                agent_name = "universal"
+            agents_cfg = settings._get("models.agents", None)
+            if not isinstance(agents_cfg, dict):
+                raise ValueError(
+                    "models.agents configuration not found. "
+                    "Check models.agents in your config."
                 )
-            else:
-                agent_entry = None
+            agent_entry = agents_cfg.get(agent_name)
 
-        # New structure: check if agent_entry references a provider definition
-        provider_name = None
-        provider_def = None
-        if isinstance(agent_entry, dict) and "provider" in agent_entry:
-            provider_name = agent_entry.get("provider")
-            if provider_name:
-                provider_def = settings._get(f"providers.{provider_name}", None)
-                if not isinstance(provider_def, dict):
-                    agent_logger.warning(
-                        f"Provider '{provider_name}' not found in configuration"
-                    )
-                    provider_def = None
-
-        # Resolve model, api_key, base_url from provider definition or fallback to legacy
-        if provider_def:
-            # New structure: get from provider definition
-            resolved_model = provider_def.get("model")
-            resolved_api_key = provider_def.get("api_key")
-            resolved_base_url = provider_def.get("base_url")
-            resolved_options = provider_def.get("options", {})
-        else:
-            # Legacy structure: get model from agent_entry, credentials from default openai provider
-            resolved_model = (
-                agent_entry.get("model") if isinstance(agent_entry, dict) else None
+        # Resolve workload -> provider chain (NO silent fallbacks!)
+        # Structure: models.agents.universal.workload -> workloads.<name>.provider -> providers.<name>
+        if not isinstance(agent_entry, dict):
+            raise ValueError(
+                f"Agent configuration not found for '{agent_name or 'universal'}'. "
+                f"Check models.agents.{agent_name or 'universal'} in your config."
             )
-            prov_openai = settings.get_provider_config("openai")
-            resolved_api_key = prov_openai.get("api_key") or settings.openai_api_key
-            resolved_base_url = prov_openai.get("base_url") or settings.openai_base_url
-            resolved_options = prov_openai.get("options", {})
 
-        # Apply explicit parameters with highest priority, then resolved values, then global defaults
-        self.model = (
-            model or resolved_model or settings.openai_chat_model or settings.model
-        )
+        workload_name = agent_entry.get("workload")
+        if not workload_name:
+            raise ValueError(
+                f"Agent '{agent_name or 'universal'}' has no workload specified. "
+                f"Set models.agents.{agent_name or 'universal'}.workload in your config."
+            )
+
+        workload_config = settings._get(f"workloads.{workload_name}", None)
+        if not isinstance(workload_config, dict):
+            raise ValueError(
+                f"Workload '{workload_name}' not found in configuration. "
+                f"Check workloads.{workload_name} in your config."
+            )
+
+        provider_name = workload_config.get("provider")
+        if not provider_name:
+            raise ValueError(
+                f"Workload '{workload_name}' has no provider specified. "
+                f"Set workloads.{workload_name}.provider in your config."
+            )
+
+        provider_def = settings._get(f"providers.{provider_name}", None)
+        if not isinstance(provider_def, dict):
+            raise ValueError(
+                f"Provider '{provider_name}' not found in configuration. "
+                f"Check providers.{provider_name} in your config."
+            )
+
+        # Resolve model, api_key, base_url from configuration
+        resolved_model = workload_config.get("model") or provider_def.get("model")
+        resolved_api_key = provider_def.get("api_key")
+        resolved_base_url = provider_def.get("base_url")
+        resolved_options = provider_def.get("options", {})
+
+        # Apply explicit parameters (constructor args override config)
+        final_model = model or resolved_model
+        if not final_model:
+            raise ValueError(
+                "LLM model not specified. Configure workloads.<name>.model "
+                "or providers.<name>.model in your config."
+            )
+
+        self.model: str = final_model
         self.api_key = api_key or resolved_api_key
         self.base_url = base_url or resolved_base_url
         self.provider_options = (
             resolved_options if isinstance(resolved_options, dict) else {}
         )
 
-        # Temperature and max_tokens are not in provider definition; use explicit or settings defaults
+        # Temperature and max_tokens use explicit or defaults
         self.temperature = (
             temperature if temperature is not None else DEFAULT_CHAT_TEMPERATURE
         )
@@ -105,18 +120,13 @@ class OpenAIProvider:
             max_tokens if max_tokens is not None else DEFAULT_CHAT_MAX_TOKENS
         )
 
-        if not self.model:
-            raise ValueError(
-                "LLM model not specified. Set 'model' or configure openai.chat.model"
-            )
-
         agent_logger.info(
             "Initializing OpenAI provider",
             model=self.model,
             temperature=self.temperature,
             max_tokens=self.max_tokens,
             base_url=self.base_url,
-            provider=provider_name or "default",
+            provider=provider_name,
         )
 
         # Ensure adapters are registered (no import side-effects outside this call)
@@ -129,25 +139,20 @@ class OpenAIProvider:
         )
 
         # Apply extended OpenAI per-model options from provider config
-        try:
-            extra_opts = self.provider_options
-            if isinstance(extra_opts, dict) and extra_opts:
-                family = getattr(
-                    get_model_spec(self.model), "family", "chat_completions"
-                )
-                if family == "responses":
-                    # Responses API: top-level kwargs
-                    kwargs.update(extra_opts)
-                else:
-                    # Chat Completions: merge into model_kwargs
-                    if "model_kwargs" not in kwargs or not isinstance(
-                        kwargs.get("model_kwargs"), dict
-                    ):
-                        kwargs["model_kwargs"] = {}
-                    kwargs["model_kwargs"].update(extra_opts)
-        except Exception:
-            # Be lenient if options cannot be applied
-            pass
+        extra_opts = self.provider_options
+        if isinstance(extra_opts, dict) and extra_opts:
+            model_spec = get_model_spec(self.model)
+            family = getattr(model_spec, "family", "chat_completions")
+            if family == "responses":
+                # Responses API: top-level kwargs
+                kwargs.update(extra_opts)
+            else:
+                # Chat Completions: merge into model_kwargs
+                if "model_kwargs" not in kwargs or not isinstance(
+                    kwargs.get("model_kwargs"), dict
+                ):
+                    kwargs["model_kwargs"] = {}
+                kwargs["model_kwargs"].update(extra_opts)
 
         if self.base_url:
             kwargs["base_url"] = self.base_url
@@ -226,12 +231,5 @@ class OpenAIProvider:
         For chat_completions family: include stream_usage=True
         For responses family (gpt-5/gpt-5-mini): no stream_usage (unsupported)
         """
-        try:
-            adapter = get_adapter(self.model)
-            return adapter.stream_kwargs()
-        except Exception:
-            pass
-        family = getattr(get_model_spec(self.model), "family", "chat_completions")
-        if family == "responses":
-            return {}
-        return {"stream_usage": True}
+        adapter = get_adapter(self.model)
+        return adapter.stream_kwargs()
