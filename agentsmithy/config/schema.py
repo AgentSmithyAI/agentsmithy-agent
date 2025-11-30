@@ -142,6 +142,93 @@ def check_deletion_dependencies(
     return errors
 
 
+def rename_entity(
+    config: dict[str, Any],
+    entity_type: str,
+    old_name: str,
+    new_name: str,
+) -> tuple[dict[str, Any], list[str]]:
+    """Rename a workload or provider and update all references.
+
+    Args:
+        config: Current configuration dictionary
+        entity_type: "workload" or "provider"
+        old_name: Current name of the entity
+        new_name: New name for the entity
+
+    Returns:
+        Tuple of (new_config, list_of_updated_references)
+
+    Raises:
+        ValueError: If entity doesn't exist or new name already exists
+    """
+    new_config = deepcopy(config)
+    updated_refs: list[str] = []
+
+    if entity_type == "workload":
+        workloads = new_config.get("workloads", {})
+
+        if old_name not in workloads:
+            raise ValueError(f"Workload '{old_name}' not found")
+        if new_name in workloads:
+            raise ValueError(f"Workload '{new_name}' already exists")
+
+        # Copy workload config to new name
+        workloads[new_name] = workloads.pop(old_name)
+
+        # Update all references in models
+        models = new_config.get("models", {})
+
+        # Check agents
+        agents = models.get("agents", {})
+        if isinstance(agents, dict):
+            for agent_name, agent_cfg in agents.items():
+                if (
+                    isinstance(agent_cfg, dict)
+                    and agent_cfg.get("workload") == old_name
+                ):
+                    agent_cfg["workload"] = new_name
+                    updated_refs.append(f"models.agents.{agent_name}.workload")
+
+        # Check embeddings
+        embeddings = models.get("embeddings", {})
+        if isinstance(embeddings, dict) and embeddings.get("workload") == old_name:
+            embeddings["workload"] = new_name
+            updated_refs.append("models.embeddings.workload")
+
+        # Check summarization
+        summarization = models.get("summarization", {})
+        if (
+            isinstance(summarization, dict)
+            and summarization.get("workload") == old_name
+        ):
+            summarization["workload"] = new_name
+            updated_refs.append("models.summarization.workload")
+
+    elif entity_type == "provider":
+        providers = new_config.get("providers", {})
+
+        if old_name not in providers:
+            raise ValueError(f"Provider '{old_name}' not found")
+        if new_name in providers:
+            raise ValueError(f"Provider '{new_name}' already exists")
+
+        # Copy provider config to new name
+        providers[new_name] = providers.pop(old_name)
+
+        # Update all workloads that reference this provider
+        workloads = new_config.get("workloads", {})
+        for wl_name, wl_cfg in workloads.items():
+            if isinstance(wl_cfg, dict) and wl_cfg.get("provider") == old_name:
+                wl_cfg["provider"] = new_name
+                updated_refs.append(f"workloads.{wl_name}.provider")
+
+    else:
+        raise ValueError(f"Invalid entity_type: {entity_type}")
+
+    return new_config, updated_refs
+
+
 class ProviderConfig(BaseModel):
     type: str = "openai"
     api_key: str | None = None

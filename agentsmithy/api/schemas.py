@@ -151,6 +151,7 @@ class WorkloadMetadata(BaseModel):
     name: str
     provider: str | None = None
     model: str | None = None
+    kind: str | None = None  # "chat" or "embeddings"
 
 
 class ConfigMetadata(BaseModel):
@@ -179,5 +180,25 @@ class ConfigUpdateResponse(BaseModel):
 
     success: bool
     message: str
+    config: dict[str, Any]
+    metadata: ConfigMetadata
+
+
+class ConfigRenameRequest(BaseModel):
+    """Request for POST /api/config/rename."""
+
+    type: str  # "workload" or "provider"
+    old_name: str
+    new_name: str
+
+
+class ConfigRenameResponse(BaseModel):
+    """Response for POST /api/config/rename."""
+
+    success: bool
+    message: str
+    old_name: str
+    new_name: str
+    updated_references: list[str]  # List of paths that were updated
     config: dict[str, Any]
     metadata: ConfigMetadata

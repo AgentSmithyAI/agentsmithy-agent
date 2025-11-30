@@ -150,6 +150,37 @@ class ConfigManager:
         logger.info("Configuration updated with deletions", keys=list(updates.keys()))
         self._notify_callbacks()
 
+    async def set_all(self, config: dict[str, Any]) -> None:
+        """Replace the entire configuration.
+
+        Used for operations like rename where we need to atomically replace
+        the config rather than merge updates.
+        """
+        self._config = config.copy()
+
+        # Update user config for providers that track it
+        if (
+            hasattr(self.provider, "_user_config")
+            and self.provider._user_config is not None
+        ):
+            # For rename, we want to save the full new config
+            # but only the parts that differ from defaults
+            from agentsmithy.config.defaults import get_default_config
+
+            defaults = get_default_config()
+            # Extract user-specific overrides
+            user_cfg: dict[str, Any] = {}
+            for key, value in config.items():
+                if key not in defaults or defaults[key] != value:
+                    user_cfg[key] = value
+            self.provider._user_config = user_cfg
+            await self.provider.save(user_cfg)
+        else:
+            await self.provider.save(self._config)
+
+        logger.info("Configuration replaced", keys=list(config.keys()))
+        self._notify_callbacks()
+
     def get_all(self) -> dict[str, Any]:
         """Get the entire configuration dictionary."""
         return self._config.copy()
