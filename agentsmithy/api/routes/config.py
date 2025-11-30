@@ -15,6 +15,7 @@ from agentsmithy.config.schema import (
     ConfigValidationError,
     apply_deletions,
     build_config_metadata,
+    check_deletion_dependencies,
     deep_merge,
     validate_config,
 )
@@ -72,6 +73,19 @@ async def update_config(request: ConfigUpdateRequest):
         config_manager = get_config_manager()
 
         current_config = config_manager.get_all()
+
+        # Check deletion dependencies BEFORE applying changes
+        # This gives better error messages like "Cannot delete X: referenced by Y"
+        deletion_errors = check_deletion_dependencies(current_config, request.config)
+        if deletion_errors:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "message": "Cannot delete: dependencies exist",
+                    "errors": deletion_errors,
+                },
+            )
+
         # First merge, then apply explicit null deletions
         merged_config = deep_merge(current_config, request.config)
         merged_config = apply_deletions(merged_config, request.config)

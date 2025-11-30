@@ -342,12 +342,61 @@ def test_delete_provider_with_dependencies_shows_clean_error(client: TestClient)
 
     assert response.status_code == 400
     detail = response.json()["detail"]
-    errors = detail["errors"]
 
-    # Should have clean error about the dependency
+    # Should have specific message about deletion being blocked
+    assert detail["message"] == "Cannot delete: dependencies exist"
+
+    errors = detail["errors"]
     errors_text = " ".join(errors)
-    assert "temp-workload" in errors_text or "temp-provider" in errors_text
+
+    # Should have clean error explaining what's blocking deletion
+    assert "Cannot delete provider 'temp-provider'" in errors_text
+    assert "temp-workload" in errors_text
 
     # Should NOT contain Pydantic internals
     assert "input_value" not in errors_text
     assert "ValidationError" not in errors_text
+
+
+def test_delete_workload_with_dependencies_shows_clean_error(client: TestClient):
+    """Deleting a workload referenced by agents should show clean error."""
+    # First add a provider and workload, then make an agent use the workload
+    setup_data = {
+        "config": {
+            "providers": {
+                "temp-provider": {"type": "openai", "api_key": "test"},
+            },
+            "workloads": {
+                "temp-workload": {"provider": "temp-provider", "model": "gpt-4"},
+            },
+            "models": {
+                "agents": {
+                    "universal": {"workload": "temp-workload"},
+                }
+            },
+        }
+    }
+    response = client.put("/api/config", json=setup_data)
+    assert response.status_code == 200
+
+    # Try to delete the workload (should fail because agent references it)
+    delete_data = {
+        "config": {
+            "workloads": {
+                "temp-workload": None,
+            }
+        }
+    }
+    response = client.put("/api/config", json=delete_data)
+
+    assert response.status_code == 400
+    detail = response.json()["detail"]
+
+    assert detail["message"] == "Cannot delete: dependencies exist"
+
+    errors = detail["errors"]
+    errors_text = " ".join(errors)
+
+    # Should explain what's blocking
+    assert "Cannot delete workload 'temp-workload'" in errors_text
+    assert "models.agents.universal" in errors_text

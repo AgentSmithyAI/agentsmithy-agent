@@ -47,6 +47,101 @@ def apply_deletions(config: dict[str, Any], updates: dict[str, Any]) -> dict[str
     return result
 
 
+def check_deletion_dependencies(
+    current_config: dict[str, Any], updates: dict[str, Any]
+) -> list[str]:
+    """Check if deletions would break dependencies. Returns list of errors.
+
+    Checks:
+    - Deleting a provider that is referenced by workloads
+    - Deleting a workload that is referenced by models.agents/embeddings/summarization
+    """
+    errors = []
+
+    # Get what's being deleted
+    providers_updates = updates.get("providers", {})
+    workloads_updates = updates.get("workloads", {})
+
+    if not isinstance(providers_updates, dict):
+        providers_updates = {}
+    if not isinstance(workloads_updates, dict):
+        workloads_updates = {}
+
+    # Find providers being deleted (value is None)
+    deleting_providers = {k for k, v in providers_updates.items() if v is None}
+
+    # Find workloads being deleted
+    deleting_workloads = {k for k, v in workloads_updates.items() if v is None}
+
+    # Check provider dependencies
+    if deleting_providers:
+        current_workloads = current_config.get("workloads", {})
+        # Also consider workloads being updated (they might change provider reference)
+        merged_workloads = deep_merge(current_workloads, workloads_updates)
+        merged_workloads = apply_deletions(merged_workloads, workloads_updates)
+
+        for provider_name in deleting_providers:
+            referencing_workloads = []
+            for wl_name, wl_config in merged_workloads.items():
+                if (
+                    isinstance(wl_config, dict)
+                    and wl_config.get("provider") == provider_name
+                ):
+                    referencing_workloads.append(wl_name)
+            if referencing_workloads:
+                errors.append(
+                    f"Cannot delete provider '{provider_name}': "
+                    f"referenced by workloads: {', '.join(sorted(referencing_workloads))}"
+                )
+
+    # Check workload dependencies
+    if deleting_workloads:
+        current_models = current_config.get("models", {})
+        # Consider models being updated too
+        models_updates = updates.get("models", {})
+        if not isinstance(models_updates, dict):
+            models_updates = {}
+        merged_models = deep_merge(current_models, models_updates)
+        merged_models = apply_deletions(merged_models, models_updates)
+
+        for workload_name in deleting_workloads:
+            references = []
+
+            # Check agents
+            agents = merged_models.get("agents", {})
+            if isinstance(agents, dict):
+                for agent_name, agent_cfg in agents.items():
+                    if (
+                        isinstance(agent_cfg, dict)
+                        and agent_cfg.get("workload") == workload_name
+                    ):
+                        references.append(f"models.agents.{agent_name}")
+
+            # Check embeddings
+            embeddings = merged_models.get("embeddings", {})
+            if (
+                isinstance(embeddings, dict)
+                and embeddings.get("workload") == workload_name
+            ):
+                references.append("models.embeddings")
+
+            # Check summarization
+            summarization = merged_models.get("summarization", {})
+            if (
+                isinstance(summarization, dict)
+                and summarization.get("workload") == workload_name
+            ):
+                references.append("models.summarization")
+
+            if references:
+                errors.append(
+                    f"Cannot delete workload '{workload_name}': "
+                    f"referenced by: {', '.join(sorted(references))}"
+                )
+
+    return errors
+
+
 class ProviderConfig(BaseModel):
     type: str = "openai"
     api_key: str | None = None

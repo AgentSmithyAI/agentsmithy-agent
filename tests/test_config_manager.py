@@ -16,7 +16,11 @@ from agentsmithy.config import (
     get_default_config,
 )
 from agentsmithy.config.constants import DEFAULT_STREAMING_ENABLED
-from agentsmithy.config.schema import apply_deletions, deep_merge
+from agentsmithy.config.schema import (
+    apply_deletions,
+    check_deletion_dependencies,
+    deep_merge,
+)
 
 # =============================================================================
 # Tests for deep_merge and apply_deletions
@@ -139,6 +143,493 @@ def test_deep_merge_and_apply_deletions_combined():
     assert result["providers"]["openai"]["api_key"] == "new-key"
     assert "anthropic" not in result["providers"]
     assert result["workloads"]["default"]["model"] == "gpt-4-turbo"
+
+
+# =============================================================================
+# Tests for check_deletion_dependencies
+# =============================================================================
+
+
+def _make_config(
+    providers: dict | None = None,
+    workloads: dict | None = None,
+    models: dict | None = None,
+) -> dict:
+    """Helper to create test config with sensible defaults."""
+    return {
+        "providers": providers or {},
+        "workloads": workloads or {},
+        "models": models or {"agents": {}, "embeddings": {}, "summarization": {}},
+    }
+
+
+class TestCheckDeletionDependencies:
+    """Tests for check_deletion_dependencies function."""
+
+    # -------------------------------------------------------------------------
+    # Provider deletion tests
+    # -------------------------------------------------------------------------
+
+    def test_delete_provider_with_single_workload_dependency(self):
+        """Deleting a provider referenced by one workload should error."""
+        config = _make_config(
+            providers={"openai": {}, "ollama": {}},
+            workloads={"reasoning": {"provider": "ollama"}},
+        )
+        updates = {"providers": {"ollama": None}}
+
+        errors = check_deletion_dependencies(config, updates)
+
+        assert len(errors) == 1
+        assert "Cannot delete provider 'ollama'" in errors[0]
+        assert "reasoning" in errors[0]
+
+    def test_delete_provider_with_multiple_workload_dependencies(self):
+        """Deleting a provider referenced by multiple workloads should list all."""
+        config = _make_config(
+            providers={"ollama": {}},
+            workloads={
+                "reasoning": {"provider": "ollama"},
+                "execution": {"provider": "ollama"},
+                "summarization": {"provider": "ollama"},
+            },
+        )
+        updates = {"providers": {"ollama": None}}
+
+        errors = check_deletion_dependencies(config, updates)
+
+        assert len(errors) == 1
+        assert "Cannot delete provider 'ollama'" in errors[0]
+        assert "reasoning" in errors[0]
+        assert "execution" in errors[0]
+        assert "summarization" in errors[0]
+
+    def test_delete_provider_without_dependencies_succeeds(self):
+        """Deleting a provider with no references should succeed."""
+        config = _make_config(
+            providers={"openai": {}, "unused": {}},
+            workloads={"reasoning": {"provider": "openai"}},
+        )
+        updates = {"providers": {"unused": None}}
+
+        errors = check_deletion_dependencies(config, updates)
+
+        assert errors == []
+
+    def test_delete_multiple_providers_checks_all(self):
+        """Deleting multiple providers should check each one."""
+        config = _make_config(
+            providers={"a": {}, "b": {}, "c": {}},
+            workloads={
+                "wl1": {"provider": "a"},
+                "wl2": {"provider": "b"},
+            },
+        )
+        updates = {"providers": {"a": None, "b": None, "c": None}}
+
+        errors = check_deletion_dependencies(config, updates)
+
+        assert len(errors) == 2  # a and b have deps, c doesn't
+        error_text = " ".join(errors)
+        assert "provider 'a'" in error_text
+        assert "provider 'b'" in error_text
+        assert "provider 'c'" not in error_text
+
+    def test_delete_provider_and_referencing_workload_together_succeeds(self):
+        """Deleting provider AND the workload that references it should succeed."""
+        config = _make_config(
+            providers={"ollama": {}},
+            workloads={"reasoning": {"provider": "ollama"}},
+        )
+        # Delete both the provider and the workload referencing it
+        updates = {
+            "providers": {"ollama": None},
+            "workloads": {"reasoning": None},
+        }
+
+        errors = check_deletion_dependencies(config, updates)
+
+        assert errors == []
+
+    def test_delete_provider_with_workload_switching_to_another_succeeds(self):
+        """Deleting provider while workload switches to another provider should succeed."""
+        config = _make_config(
+            providers={"openai": {}, "ollama": {}},
+            workloads={"reasoning": {"provider": "ollama"}},
+        )
+        # Delete ollama, but also update reasoning to use openai
+        updates = {
+            "providers": {"ollama": None},
+            "workloads": {"reasoning": {"provider": "openai"}},
+        }
+
+        errors = check_deletion_dependencies(config, updates)
+
+        assert errors == []
+
+    # -------------------------------------------------------------------------
+    # Workload deletion tests
+    # -------------------------------------------------------------------------
+
+    def test_delete_workload_referenced_by_agent(self):
+        """Deleting a workload referenced by an agent should error."""
+        config = _make_config(
+            workloads={"reasoning": {"provider": "openai"}},
+            models={"agents": {"universal": {"workload": "reasoning"}}},
+        )
+        updates = {"workloads": {"reasoning": None}}
+
+        errors = check_deletion_dependencies(config, updates)
+
+        assert len(errors) == 1
+        assert "Cannot delete workload 'reasoning'" in errors[0]
+        assert "models.agents.universal" in errors[0]
+
+    def test_delete_workload_referenced_by_embeddings(self):
+        """Deleting a workload referenced by embeddings should error."""
+        config = _make_config(
+            workloads={"embeddings": {"provider": "openai"}},
+            models={"agents": {}, "embeddings": {"workload": "embeddings"}},
+        )
+        updates = {"workloads": {"embeddings": None}}
+
+        errors = check_deletion_dependencies(config, updates)
+
+        assert len(errors) == 1
+        assert "Cannot delete workload 'embeddings'" in errors[0]
+        assert "models.embeddings" in errors[0]
+
+    def test_delete_workload_referenced_by_summarization(self):
+        """Deleting a workload referenced by summarization should error."""
+        config = _make_config(
+            workloads={"summarization": {"provider": "openai"}},
+            models={"agents": {}, "summarization": {"workload": "summarization"}},
+        )
+        updates = {"workloads": {"summarization": None}}
+
+        errors = check_deletion_dependencies(config, updates)
+
+        assert len(errors) == 1
+        assert "Cannot delete workload 'summarization'" in errors[0]
+        assert "models.summarization" in errors[0]
+
+    def test_delete_workload_with_multiple_references(self):
+        """Deleting a workload referenced by multiple slots should list all."""
+        config = _make_config(
+            workloads={"shared": {"provider": "openai"}},
+            models={
+                "agents": {
+                    "universal": {"workload": "shared"},
+                    "inspector": {"workload": "shared"},
+                },
+                "embeddings": {"workload": "shared"},
+                "summarization": {"workload": "shared"},
+            },
+        )
+        updates = {"workloads": {"shared": None}}
+
+        errors = check_deletion_dependencies(config, updates)
+
+        assert len(errors) == 1
+        error = errors[0]
+        assert "Cannot delete workload 'shared'" in error
+        assert "models.agents.universal" in error
+        assert "models.agents.inspector" in error
+        assert "models.embeddings" in error
+        assert "models.summarization" in error
+
+    def test_delete_workload_without_references_succeeds(self):
+        """Deleting a workload with no references should succeed."""
+        config = _make_config(
+            workloads={
+                "used": {"provider": "openai"},
+                "unused": {"provider": "openai"},
+            },
+            models={"agents": {"universal": {"workload": "used"}}},
+        )
+        updates = {"workloads": {"unused": None}}
+
+        errors = check_deletion_dependencies(config, updates)
+
+        assert errors == []
+
+    def test_delete_workload_and_update_agent_to_another_succeeds(self):
+        """Deleting workload while agent switches to another should succeed."""
+        config = _make_config(
+            workloads={
+                "old": {"provider": "openai"},
+                "new": {"provider": "openai"},
+            },
+            models={"agents": {"universal": {"workload": "old"}}},
+        )
+        updates = {
+            "workloads": {"old": None},
+            "models": {"agents": {"universal": {"workload": "new"}}},
+        }
+
+        errors = check_deletion_dependencies(config, updates)
+
+        assert errors == []
+
+    # -------------------------------------------------------------------------
+    # Edge cases and corner cases
+    # -------------------------------------------------------------------------
+
+    def test_empty_config(self):
+        """Empty config should not cause errors."""
+        config = _make_config()
+        updates = {"providers": {"nonexistent": None}}
+
+        errors = check_deletion_dependencies(config, updates)
+
+        assert errors == []
+
+    def test_empty_updates(self):
+        """Empty updates should not cause errors."""
+        config = _make_config(
+            providers={"openai": {}},
+            workloads={"reasoning": {"provider": "openai"}},
+        )
+        updates = {}
+
+        errors = check_deletion_dependencies(config, updates)
+
+        assert errors == []
+
+    def test_no_deletions_in_updates(self):
+        """Updates without null values should not cause errors."""
+        config = _make_config(
+            providers={"openai": {}},
+            workloads={"reasoning": {"provider": "openai"}},
+        )
+        updates = {
+            "providers": {"openai": {"api_key": "new-key"}},
+            "workloads": {"reasoning": {"model": "gpt-4"}},
+        }
+
+        errors = check_deletion_dependencies(config, updates)
+
+        assert errors == []
+
+    def test_malformed_workload_config_is_skipped(self):
+        """Workloads with non-dict config should be skipped gracefully."""
+        config = {
+            "providers": {"openai": {}},
+            "workloads": {
+                "valid": {"provider": "openai"},
+                "invalid": "not-a-dict",
+                "also_invalid": None,
+            },
+            "models": {"agents": {}},
+        }
+        updates = {"providers": {"openai": None}}
+
+        errors = check_deletion_dependencies(config, updates)
+
+        # Should still detect valid workload dependency
+        assert len(errors) == 1
+        assert "valid" in errors[0]
+
+    def test_malformed_agent_config_is_skipped(self):
+        """Agents with non-dict config should be skipped gracefully."""
+        config = _make_config(
+            workloads={"reasoning": {"provider": "openai"}},
+            models={
+                "agents": {
+                    "valid": {"workload": "reasoning"},
+                    "invalid": "not-a-dict",
+                    "also_invalid": None,
+                },
+            },
+        )
+        updates = {"workloads": {"reasoning": None}}
+
+        errors = check_deletion_dependencies(config, updates)
+
+        # Should still detect valid agent dependency
+        assert len(errors) == 1
+        assert "models.agents.valid" in errors[0]
+
+    def test_missing_models_section(self):
+        """Config without models section should not crash."""
+        config = {
+            "providers": {"openai": {}},
+            "workloads": {"reasoning": {"provider": "openai"}},
+            # No "models" key
+        }
+        updates = {"workloads": {"reasoning": None}}
+
+        errors = check_deletion_dependencies(config, updates)
+
+        # No references without models section
+        assert errors == []
+
+    def test_missing_workloads_section(self):
+        """Config without workloads section should not crash."""
+        config = {
+            "providers": {"openai": {}},
+            # No "workloads" key
+            "models": {"agents": {}},
+        }
+        updates = {"providers": {"openai": None}}
+
+        errors = check_deletion_dependencies(config, updates)
+
+        # No workload dependencies without workloads section
+        assert errors == []
+
+    def test_providers_updates_not_dict(self):
+        """Non-dict providers in updates should be handled."""
+        config = _make_config(providers={"openai": {}})
+        updates = {"providers": "invalid"}
+
+        errors = check_deletion_dependencies(config, updates)
+
+        assert errors == []
+
+    def test_workloads_updates_not_dict(self):
+        """Non-dict workloads in updates should be handled."""
+        config = _make_config(workloads={"reasoning": {}})
+        updates = {"workloads": "invalid"}
+
+        errors = check_deletion_dependencies(config, updates)
+
+        assert errors == []
+
+    def test_combined_provider_and_workload_deletion_with_deps(self):
+        """Deleting provider and unrelated workload should check both."""
+        config = _make_config(
+            providers={"openai": {}, "anthropic": {}},
+            workloads={
+                "reasoning": {"provider": "openai"},
+                "execution": {"provider": "anthropic"},
+            },
+            models={"agents": {"universal": {"workload": "reasoning"}}},
+        )
+        # Delete anthropic (has dep) and reasoning (has dep)
+        updates = {
+            "providers": {"anthropic": None},
+            "workloads": {"reasoning": None},
+        }
+
+        errors = check_deletion_dependencies(config, updates)
+
+        # Should have errors for both
+        assert len(errors) == 2
+        error_text = " ".join(errors)
+        assert "provider 'anthropic'" in error_text
+        assert "workload 'reasoning'" in error_text
+
+
+class TestConfigStructureCanary:
+    """Canary tests that will FAIL if config structure changes.
+
+    These tests ensure that check_deletion_dependencies stays in sync
+    with the actual config structure. If you add new slots that reference
+    workloads or providers, these tests will fail to remind you to update
+    the dependency checking logic.
+    """
+
+    def test_known_workload_reference_slots(self):
+        """Verify we know all slots that can reference workloads.
+
+        If this test fails, a new workload reference slot was added.
+        Update check_deletion_dependencies to handle it!
+        """
+        from agentsmithy.config.defaults import get_default_config
+
+        defaults = get_default_config()
+        models = defaults.get("models", {})
+
+        # These are the slots we know about and check in check_deletion_dependencies
+        known_slots = {"agents", "embeddings", "summarization"}
+
+        actual_slots = set(models.keys())
+
+        # If a new slot was added that we don't know about, fail
+        unknown_slots = actual_slots - known_slots
+        assert unknown_slots == set(), (
+            f"New slot(s) found in models: {unknown_slots}. "
+            f"Update check_deletion_dependencies() to handle workload references in these slots!"
+        )
+
+    def test_known_agent_names(self):
+        """Verify we handle all default agent names.
+
+        If this test fails, new default agents were added.
+        Update tests to cover them!
+        """
+        from agentsmithy.config.defaults import get_default_config
+
+        defaults = get_default_config()
+        agents = defaults.get("models", {}).get("agents", {})
+
+        # Known agent names in defaults
+        known_agents = {"universal", "inspector"}
+
+        actual_agents = set(agents.keys())
+
+        unknown_agents = actual_agents - known_agents
+        assert unknown_agents == set(), (
+            f"New default agent(s) found: {unknown_agents}. "
+            f"Update tests to cover workload dependency checking for these agents!"
+        )
+
+    def test_workload_config_has_provider_field(self):
+        """Verify workloads still reference providers via 'provider' field.
+
+        If this fails, the workload schema changed.
+        Update check_deletion_dependencies!
+        """
+        from agentsmithy.config.schema import WorkloadConfig
+
+        # WorkloadConfig should have a 'provider' field
+        assert hasattr(WorkloadConfig, "model_fields")
+        fields = WorkloadConfig.model_fields
+        assert "provider" in fields, (
+            "WorkloadConfig no longer has 'provider' field! "
+            "Update check_deletion_dependencies to use the new field name."
+        )
+
+    def test_agent_config_has_workload_field(self):
+        """Verify agents still reference workloads via 'workload' field.
+
+        If this fails, the agent config schema changed.
+        Update check_deletion_dependencies!
+        """
+        from agentsmithy.config.schema import AgentModelConfig
+
+        # AgentModelConfig should have a 'workload' field
+        assert hasattr(AgentModelConfig, "model_fields")
+        fields = AgentModelConfig.model_fields
+        assert "workload" in fields, (
+            "AgentModelConfig no longer has 'workload' field! "
+            "Update check_deletion_dependencies to use the new field name."
+        )
+
+    def test_model_slots_reference_workloads_consistently(self):
+        """Verify embeddings and summarization use same 'workload' key.
+
+        If this fails, the schema changed.
+        Update check_deletion_dependencies!
+        """
+        from agentsmithy.config.defaults import get_default_config
+
+        defaults = get_default_config()
+        models = defaults.get("models", {})
+
+        # Both should use 'workload' key
+        embeddings = models.get("embeddings", {})
+        summarization = models.get("summarization", {})
+
+        assert "workload" in embeddings, (
+            "models.embeddings no longer uses 'workload' key! "
+            "Update check_deletion_dependencies!"
+        )
+        assert "workload" in summarization, (
+            "models.summarization no longer uses 'workload' key! "
+            "Update check_deletion_dependencies!"
+        )
 
 
 # =============================================================================
