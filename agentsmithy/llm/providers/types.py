@@ -13,6 +13,13 @@ class Vendor(str, Enum):
     OTHER = "other"
 
 
+class WorkloadKind(str, Enum):
+    """Type of workload - determines what the model is used for."""
+
+    CHAT = "chat"
+    EMBEDDINGS = "embeddings"
+
+
 # --- Type aliases for LangChain content ---
 MessageContent = str | list[str | dict[str, Any]]
 

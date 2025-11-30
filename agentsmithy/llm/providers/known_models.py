@@ -5,7 +5,7 @@ Used to auto-detect workload kind (chat vs embeddings) when not explicitly set.
 
 from __future__ import annotations
 
-from .types import Vendor
+from .types import Vendor, WorkloadKind
 
 # Known embedding models by provider
 # If a model is in this set, it's classified as "embeddings"
@@ -60,7 +60,9 @@ def is_embedding_model(model: str, vendor: Vendor | str | None = None) -> bool:
     return False
 
 
-def infer_workload_kind(model: str | None, vendor: Vendor | str | None = None) -> str:
+def infer_workload_kind(
+    model: str | None, vendor: Vendor | str | None = None
+) -> WorkloadKind:
     """Infer workload kind from model name.
 
     Args:
@@ -68,12 +70,13 @@ def infer_workload_kind(model: str | None, vendor: Vendor | str | None = None) -
         vendor: Optional vendor hint.
 
     Returns:
-        "embeddings" if model is known embedding model, "chat" otherwise.
+        WorkloadKind.EMBEDDINGS if model is known embedding model,
+        WorkloadKind.CHAT otherwise.
     """
     if not model:
-        return "chat"
+        return WorkloadKind.CHAT
 
     if is_embedding_model(model, vendor):
-        return "embeddings"
+        return WorkloadKind.EMBEDDINGS
 
-    return "chat"
+    return WorkloadKind.CHAT

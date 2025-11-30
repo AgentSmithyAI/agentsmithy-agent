@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
-from agentsmithy.llm.providers.types import Vendor
+from agentsmithy.llm.providers.types import Vendor, WorkloadKind
 
 ALLOWED_PROVIDER_TYPES: list[str] = [vendor.value for vendor in Vendor]
+ALLOWED_WORKLOAD_KINDS: list[str] = [kind.value for kind in WorkloadKind]
 
 
 def deep_merge(base: dict[str, Any], updates: dict[str, Any]) -> dict[str, Any]:
@@ -242,7 +243,7 @@ class ProviderConfig(BaseModel):
 class WorkloadConfig(BaseModel):
     provider: str | None = None
     model: str | None = None
-    kind: Literal["chat", "embeddings"] | None = None  # None = auto-detect
+    kind: WorkloadKind | None = None  # None = auto-detect from model name
     options: dict[str, Any] = Field(default_factory=dict)
 
     model_config = ConfigDict(extra="ignore")
@@ -451,7 +452,12 @@ def build_config_metadata(config: dict[str, Any]) -> dict[str, Any]:
         # Determine kind: use explicit value or infer from model name
         explicit_kind = workload_cfg.get("kind")
         if explicit_kind is not None:
-            kind = explicit_kind
+            # explicit_kind can be WorkloadKind enum or string
+            kind = (
+                explicit_kind.value
+                if hasattr(explicit_kind, "value")
+                else explicit_kind
+            )
         else:
             # Auto-detect from model name
             from agentsmithy.llm.providers.known_models import infer_workload_kind
@@ -464,7 +470,7 @@ def build_config_metadata(config: dict[str, Any]) -> dict[str, Any]:
                 provider_cfg = providers[provider_name]
                 if isinstance(provider_cfg, dict):
                     vendor = provider_cfg.get("type")
-            kind = infer_workload_kind(model, vendor)
+            kind = infer_workload_kind(model, vendor).value
 
         workload_meta.append(
             {
