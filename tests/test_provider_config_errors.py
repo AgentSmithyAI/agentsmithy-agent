@@ -84,11 +84,10 @@ class TestOpenAIProviderConfigErrors:
         def mock_get(key, default):
             if key == "models.agents":
                 return {"universal": {"workload": "nonexistent"}}
-            if key == "workloads.nonexistent":
-                return None  # workload not found
             return default
 
         mock_settings._get.side_effect = mock_get
+        mock_settings._get_workload_config.return_value = None  # workload not found
 
         with patch("agentsmithy.llm.providers.openai.provider.settings", mock_settings):
             with pytest.raises(ValueError) as exc_info:
@@ -109,11 +108,12 @@ class TestOpenAIProviderConfigErrors:
         def mock_get(key, default):
             if key == "models.agents":
                 return {"universal": {"workload": "reasoning"}}
-            if key == "workloads.reasoning":
-                return {"model": "gpt-4"}  # no provider key
             return default
 
         mock_settings._get.side_effect = mock_get
+        mock_settings._get_workload_config.return_value = {
+            "model": "gpt-4"
+        }  # no provider
 
         with patch("agentsmithy.llm.providers.openai.provider.settings", mock_settings):
             with pytest.raises(ValueError) as exc_info:
@@ -134,13 +134,15 @@ class TestOpenAIProviderConfigErrors:
         def mock_get(key, default):
             if key == "models.agents":
                 return {"universal": {"workload": "reasoning"}}
-            if key == "workloads.reasoning":
-                return {"provider": "nonexistent", "model": "gpt-4"}
             if key == "providers.nonexistent":
                 return None  # provider not found
             return default
 
         mock_settings._get.side_effect = mock_get
+        mock_settings._get_workload_config.return_value = {
+            "provider": "nonexistent",
+            "model": "gpt-4",
+        }
 
         with patch("agentsmithy.llm.providers.openai.provider.settings", mock_settings):
             with pytest.raises(ValueError) as exc_info:
@@ -161,13 +163,14 @@ class TestOpenAIProviderConfigErrors:
         def mock_get(key, default):
             if key == "models.agents":
                 return {"universal": {"workload": "reasoning"}}
-            if key == "workloads.reasoning":
-                return {"provider": "openai"}  # no model
             if key == "providers.openai":
                 return {"api_key": "sk-xxx"}  # no model here either
             return default
 
         mock_settings._get.side_effect = mock_get
+        mock_settings._get_workload_config.return_value = {
+            "provider": "openai"
+        }  # no model
 
         with patch("agentsmithy.llm.providers.openai.provider.settings", mock_settings):
             with pytest.raises(ValueError) as exc_info:
@@ -187,13 +190,15 @@ class TestOpenAIProviderConfigErrors:
         def mock_get(key, default):
             if key == "models.summarization":
                 return {"workload": "summarization"}
-            if key == "workloads.summarization":
-                return {"provider": "openai", "model": "gpt-4"}
             if key == "providers.openai":
                 return {"api_key": "sk-xxx"}
             return default
 
         mock_settings._get.side_effect = mock_get
+        mock_settings._get_workload_config.return_value = {
+            "provider": "openai",
+            "model": "gpt-4",
+        }
 
         with patch("agentsmithy.llm.providers.openai.provider.settings", mock_settings):
             with patch(
@@ -282,11 +287,10 @@ class TestOpenAIEmbeddingsProviderConfigErrors:
         def mock_get(key, default):
             if key == "models.embeddings":
                 return {"workload": "nonexistent"}
-            if key == "workloads.nonexistent":
-                return None
             return default
 
         mock_settings._get.side_effect = mock_get
+        mock_settings._get_workload_config.return_value = None
 
         with patch(
             "agentsmithy.llm.providers.openai.provider_embeddings.settings",
@@ -311,11 +315,12 @@ class TestOpenAIEmbeddingsProviderConfigErrors:
         def mock_get(key, default):
             if key == "models.embeddings":
                 return {"workload": "embeddings"}
-            if key == "workloads.embeddings":
-                return {"model": "text-embedding-3-small"}  # no provider
             return default
 
         mock_settings._get.side_effect = mock_get
+        mock_settings._get_workload_config.return_value = {
+            "model": "text-embedding-3-small"
+        }  # no provider
 
         with patch(
             "agentsmithy.llm.providers.openai.provider_embeddings.settings",
@@ -340,13 +345,15 @@ class TestOpenAIEmbeddingsProviderConfigErrors:
         def mock_get(key, default):
             if key == "models.embeddings":
                 return {"workload": "embeddings"}
-            if key == "workloads.embeddings":
-                return {"provider": "nonexistent", "model": "text-embedding-3-small"}
             if key == "providers.nonexistent":
                 return None
             return default
 
         mock_settings._get.side_effect = mock_get
+        mock_settings._get_workload_config.return_value = {
+            "provider": "nonexistent",
+            "model": "text-embedding-3-small",
+        }
 
         with patch(
             "agentsmithy.llm.providers.openai.provider_embeddings.settings",
@@ -371,13 +378,14 @@ class TestOpenAIEmbeddingsProviderConfigErrors:
         def mock_get(key, default):
             if key == "models.embeddings":
                 return {"workload": "embeddings"}
-            if key == "workloads.embeddings":
-                return {"provider": "openai"}  # no model
             if key == "providers.openai":
                 return {"api_key": "sk-xxx"}  # no model here either
             return default
 
         mock_settings._get.side_effect = mock_get
+        mock_settings._get_workload_config.return_value = {
+            "provider": "openai"
+        }  # no model
 
         with patch(
             "agentsmithy.llm.providers.openai.provider_embeddings.settings",
@@ -402,13 +410,15 @@ class TestOpenAIEmbeddingsProviderConfigErrors:
         def mock_get(key, default):
             if key == "models.embeddings":
                 return {"workload": "embeddings"}
-            if key == "workloads.embeddings":
-                return {"provider": "openai", "model": "text-embedding-3-small"}
             if key == "providers.openai":
                 return {"api_key": "sk-xxx"}
             return default
 
         mock_settings._get.side_effect = mock_get
+        mock_settings._get_workload_config.return_value = {
+            "provider": "openai",
+            "model": "text-embedding-3-small",
+        }
 
         with patch(
             "agentsmithy.llm.providers.openai.provider_embeddings.settings",

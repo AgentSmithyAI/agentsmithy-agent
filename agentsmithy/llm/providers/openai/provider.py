@@ -71,7 +71,7 @@ class OpenAIProvider:
                 f"Set models.agents.{agent_name or 'universal'}.workload in your config."
             )
 
-        workload_config = settings._get(f"workloads.{workload_name}", None)
+        workload_config = settings._get_workload_config(workload_name)
         if not isinstance(workload_config, dict):
             raise ValueError(
                 f"Workload '{workload_name}' not found in configuration. "

@@ -827,11 +827,12 @@ async def test_settings_with_config_manager():
         expected_model = defaults["workloads"][workload_name]["model"]
         assert settings.model == expected_model
         assert settings.openai_chat_model == expected_model
-        assert settings.embedding_model == defaults["workloads"]["embeddings"]["model"]
-        assert (
-            settings.openai_embeddings_model
-            == defaults["workloads"]["embeddings"]["model"]
-        )
+
+        # Embedding model resolved via models.embeddings.workload
+        embeddings_workload = defaults["models"]["embeddings"]["workload"]
+        expected_embedding_model = defaults["workloads"][embeddings_workload]["model"]
+        assert settings.embedding_model == expected_embedding_model
+        assert settings.openai_embeddings_model == expected_embedding_model
         assert settings.streaming_enabled == DEFAULT_STREAMING_ENABLED
 
 
@@ -849,10 +850,12 @@ async def test_settings_embedding_model_tracks_workload_updates():
         settings = Settings(config_manager=manager)
         assert settings.embedding_model == "text-embedding-3-small"
 
+        # Get the actual workload name from defaults (now named by model)
+        embeddings_workload = defaults["models"]["embeddings"]["workload"]
         await manager.update(
             {
                 "workloads": {
-                    "embeddings": {
+                    embeddings_workload: {
                         "provider": "openai",
                         "model": "text-embedding-3-large",
                     }

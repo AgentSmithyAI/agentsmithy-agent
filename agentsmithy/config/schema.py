@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
@@ -155,6 +155,7 @@ class ProviderConfig(BaseModel):
 class WorkloadConfig(BaseModel):
     provider: str | None = None
     model: str | None = None
+    kind: Literal["chat", "embeddings"] | None = None  # None = auto-detect
     options: dict[str, Any] = Field(default_factory=dict)
 
     model_config = ConfigDict(extra="ignore")
@@ -359,11 +360,31 @@ def build_config_metadata(config: dict[str, Any]) -> dict[str, Any]:
     for name, workload_cfg in workloads.items():
         if not isinstance(workload_cfg, dict):
             continue
+
+        # Determine kind: use explicit value or infer from model name
+        explicit_kind = workload_cfg.get("kind")
+        if explicit_kind is not None:
+            kind = explicit_kind
+        else:
+            # Auto-detect from model name
+            from agentsmithy.llm.providers.known_models import infer_workload_kind
+
+            model = workload_cfg.get("model")
+            provider_name = workload_cfg.get("provider")
+            # Get vendor type from provider config
+            vendor = None
+            if provider_name and provider_name in providers:
+                provider_cfg = providers[provider_name]
+                if isinstance(provider_cfg, dict):
+                    vendor = provider_cfg.get("type")
+            kind = infer_workload_kind(model, vendor)
+
         workload_meta.append(
             {
                 "name": name,
                 "provider": workload_cfg.get("provider"),
                 "model": workload_cfg.get("model"),
+                "kind": kind,
             }
         )
 
@@ -372,23 +393,23 @@ def build_config_metadata(config: dict[str, Any]) -> dict[str, Any]:
         "providers": provider_meta,
         "agent_provider_slots": agent_slots,
         "workloads": workload_meta,
-        "model_catalog": _build_model_catalog(),
+        "model_catalog": _build_model_catalog(providers),
     }
 
 
-def _build_model_catalog() -> dict[str, Any]:
-    """Return supported models grouped by provider/vendor."""
-    catalog: dict[str, Any] = {}
+def _build_model_catalog(providers: dict[str, Any]) -> dict[str, Any]:
+    """Return supported models grouped by provider/vendor.
 
-    # OpenAI-compatible models (chat + embeddings)
-    try:
-        from agentsmithy.llm.providers.openai import models as openai_models
+    Delegates to registered catalog providers for each vendor.
 
-        catalog[Vendor.OPENAI.value] = {
-            "chat": sorted(list(openai_models.SUPPORTED_OPENAI_CHAT_MODELS)),
-            "embeddings": sorted(list(openai_models.SUPPORTED_OPENAI_EMBEDDING_MODELS)),
-        }
-    except Exception:
-        catalog[Vendor.OPENAI.value] = {"chat": [], "embeddings": []}
+    Args:
+        providers: Provider configurations from config, used for
+                   dynamic model discovery (e.g., Ollama base_url).
+    """
+    from agentsmithy.llm.providers import register_builtin_catalog_providers
+    from agentsmithy.llm.providers.catalog import build_full_model_catalog
 
-    return catalog
+    # Ensure catalog providers are registered
+    register_builtin_catalog_providers()
+
+    return build_full_model_catalog(providers)
