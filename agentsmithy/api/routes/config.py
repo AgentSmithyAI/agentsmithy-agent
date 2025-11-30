@@ -12,6 +12,8 @@ from agentsmithy.api.schemas import (
 )
 from agentsmithy.config.manager import get_config_manager
 from agentsmithy.config.schema import (
+    ConfigValidationError,
+    apply_deletions,
     build_config_metadata,
     deep_merge,
     validate_config,
@@ -70,19 +72,22 @@ async def update_config(request: ConfigUpdateRequest):
         config_manager = get_config_manager()
 
         current_config = config_manager.get_all()
+        # First merge, then apply explicit null deletions
         merged_config = deep_merge(current_config, request.config)
+        merged_config = apply_deletions(merged_config, request.config)
         try:
             validate_config(merged_config)
-        except ValueError as e:
+        except ConfigValidationError as e:
             raise HTTPException(
                 status_code=400,
                 detail={
                     "message": "Invalid configuration",
-                    "errors": str(e).split("; "),
+                    "errors": e.errors,
                 },
             ) from e
 
-        await config_manager.update(request.config)
+        # Pass both updates and deletions to manager
+        await config_manager.update_with_deletions(request.config)
 
         updated_config = config_manager.get_all()
         metadata = ConfigMetadata(**build_config_metadata(updated_config))

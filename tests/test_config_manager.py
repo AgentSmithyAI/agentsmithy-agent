@@ -9,12 +9,141 @@ import pytest
 
 from agentsmithy.config import (
     ConfigManager,
+    ConfigValidationError,
     LayeredConfigProvider,
     LocalFileConfigProvider,
     Settings,
     get_default_config,
 )
 from agentsmithy.config.constants import DEFAULT_STREAMING_ENABLED
+from agentsmithy.config.schema import apply_deletions, deep_merge
+
+# =============================================================================
+# Tests for deep_merge and apply_deletions
+# =============================================================================
+
+
+def test_deep_merge_basic():
+    """Test basic deep merge behavior."""
+    base = {"a": 1, "b": {"c": 2, "d": 3}}
+    updates = {"b": {"c": 10, "e": 5}}
+
+    result = deep_merge(base, updates)
+
+    assert result["a"] == 1
+    assert result["b"]["c"] == 10
+    assert result["b"]["d"] == 3
+    assert result["b"]["e"] == 5
+
+
+def test_deep_merge_none_preserves_value():
+    """Test that None in updates preserves base value (skip behavior)."""
+    base = {"a": 1, "b": 2}
+    updates = {"a": None}
+
+    result = deep_merge(base, updates)
+
+    assert result["a"] == 1  # None means "don't touch"
+    assert result["b"] == 2
+
+
+def test_deep_merge_nested_none_preserves():
+    """Test that nested None preserves nested base value."""
+    base = {"providers": {"openai": {"api_key": "secret", "model": "gpt-4"}}}
+    updates = {"providers": {"openai": {"api_key": None, "model": "gpt-4-turbo"}}}
+
+    result = deep_merge(base, updates)
+
+    assert result["providers"]["openai"]["api_key"] == "secret"
+    assert result["providers"]["openai"]["model"] == "gpt-4-turbo"
+
+
+def test_apply_deletions_removes_null_keys():
+    """Test that apply_deletions removes keys with null values."""
+    config = {"a": 1, "b": 2, "c": 3}
+    updates = {"b": None}
+
+    result = apply_deletions(config, updates)
+
+    assert result["a"] == 1
+    assert "b" not in result
+    assert result["c"] == 3
+
+
+def test_apply_deletions_nested():
+    """Test nested deletion with apply_deletions."""
+    config = {
+        "providers": {
+            "openai": {"api_key": "sk-123"},
+            "anthropic": {"api_key": "ant-456"},
+        }
+    }
+    updates = {"providers": {"anthropic": None}}
+
+    result = apply_deletions(config, updates)
+
+    assert "openai" in result["providers"]
+    assert "anthropic" not in result["providers"]
+
+
+def test_apply_deletions_deeply_nested():
+    """Test deeply nested deletion."""
+    config = {
+        "level1": {
+            "level2": {
+                "keep": "value",
+                "remove": "gone",
+            }
+        }
+    }
+    updates = {"level1": {"level2": {"remove": None}}}
+
+    result = apply_deletions(config, updates)
+
+    assert result["level1"]["level2"]["keep"] == "value"
+    assert "remove" not in result["level1"]["level2"]
+
+
+def test_apply_deletions_does_not_mutate_original():
+    """Test that apply_deletions doesn't mutate the original config."""
+    config = {"a": 1, "b": 2}
+    updates = {"b": None}
+
+    result = apply_deletions(config, updates)
+
+    assert config == {"a": 1, "b": 2}  # Original unchanged
+    assert "b" not in result
+
+
+def test_deep_merge_and_apply_deletions_combined():
+    """Test using both functions together as API does."""
+    base = {
+        "providers": {
+            "openai": {"api_key": "old-key"},
+            "anthropic": {"api_key": "ant-key"},
+        },
+        "workloads": {"default": {"model": "gpt-4"}},
+    }
+    updates = {
+        "providers": {
+            "openai": {"api_key": "new-key"},
+            "anthropic": None,
+        },
+        "workloads": {"default": {"model": "gpt-4-turbo"}},
+    }
+
+    # First merge, then apply deletions (as API does)
+    merged = deep_merge(base, updates)
+    result = apply_deletions(merged, updates)
+
+    assert result["providers"]["openai"]["api_key"] == "new-key"
+    assert "anthropic" not in result["providers"]
+    assert result["workloads"]["default"]["model"] == "gpt-4-turbo"
+
+
+# =============================================================================
+# Tests for LocalFileConfigProvider
+# =============================================================================
 
 
 @pytest.mark.asyncio
@@ -88,8 +217,10 @@ async def test_local_file_provider_rejects_invalid_workload_refs():
         config_path.write_text(json.dumps(invalid_config), encoding="utf-8")
 
         provider = LocalFileConfigProvider(config_path, defaults=defaults)
-        with pytest.raises(ValueError):
+        with pytest.raises(ConfigValidationError) as exc_info:
             await provider.load()
+        # Check that error message is structured
+        assert "unknown provider" in exc_info.value.errors[0]
 
 
 @pytest.mark.asyncio

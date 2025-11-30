@@ -3,7 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from agentsmithy.llm.providers.types import Vendor
 
@@ -11,7 +11,12 @@ ALLOWED_PROVIDER_TYPES: list[str] = [vendor.value for vendor in Vendor]
 
 
 def deep_merge(base: dict[str, Any], updates: dict[str, Any]) -> dict[str, Any]:
-    """Deep-merge updates into base without mutating inputs."""
+    """Deep-merge updates into base without mutating inputs.
+
+    - Keys present in updates with non-None values are merged/overwritten
+    - Keys present in updates with None values are skipped (preserve base value)
+    - Keys not present in updates are preserved from base
+    """
     result = deepcopy(base)
     for key, value in updates.items():
         if key in result and isinstance(result[key], dict) and isinstance(value, dict):
@@ -21,6 +26,24 @@ def deep_merge(base: dict[str, Any], updates: dict[str, Any]) -> dict[str, Any]:
             continue
         else:
             result[key] = value
+    return result
+
+
+def apply_deletions(config: dict[str, Any], updates: dict[str, Any]) -> dict[str, Any]:
+    """Apply explicit null deletions from updates to config.
+
+    Recursively removes keys from config where updates has explicit None values.
+    Used by API to handle {"providers": {"old-provider": null}} deletion requests.
+    """
+    result = deepcopy(config)
+    for key, value in updates.items():
+        if value is None:
+            # Explicit None means "delete this key"
+            result.pop(key, None)
+        elif (
+            isinstance(value, dict) and key in result and isinstance(result[key], dict)
+        ):
+            result[key] = apply_deletions(result[key], value)
     return result
 
 
@@ -121,8 +144,20 @@ class AppConfig(BaseModel):
         return self
 
 
+class ConfigValidationError(Exception):
+    """Structured configuration validation error."""
+
+    def __init__(self, errors: list[str]):
+        self.errors = errors
+        super().__init__("; ".join(errors))
+
+
 def validate_config(config: dict[str, Any]) -> dict[str, Any]:
-    """Validate configuration using Pydantic schema."""
+    """Validate configuration using Pydantic schema.
+
+    Raises:
+        ConfigValidationError: With structured list of human-readable error messages.
+    """
     try:
         # Parse and validate using Pydantic
         # This handles type checking, defaults, and stripping unknown fields (extra='ignore')
@@ -130,9 +165,47 @@ def validate_config(config: dict[str, Any]) -> dict[str, Any]:
 
         # Return as dict for compatibility with existing code
         return app_config.model_dump(mode="json")
-    except Exception as e:
-        # Wrap Pydantic validation errors in ValueError for consistent error handling
-        raise ValueError(str(e)) from e
+    except ValidationError as e:
+        # Extract human-readable errors from Pydantic ValidationError
+        errors = _extract_validation_errors(e)
+        raise ConfigValidationError(errors) from e
+    except ValueError as e:
+        # Our own ValueError from check_referential_integrity
+        # Already contains semicolon-separated messages
+        errors = [err.strip() for err in str(e).split(";") if err.strip()]
+        raise ConfigValidationError(errors) from e
+
+
+def _extract_validation_errors(exc: ValidationError) -> list[str]:
+    """Convert Pydantic ValidationError to list of human-readable messages."""
+    errors = []
+    for err in exc.errors():
+        loc = ".".join(str(x) for x in err["loc"]) if err["loc"] else "config"
+        msg = err["msg"]
+
+        # Strip Pydantic's "Value error, " prefix from our custom messages
+        if msg.startswith("Value error, "):
+            msg = msg[len("Value error, ") :]
+
+        # Handle our custom ValueError messages from check_referential_integrity
+        if err["type"] == "value_error" and ("Workload" in msg or "Provider" in msg):
+            # Already a good message from our validator
+            errors.append(msg)
+        elif err["type"] == "missing":
+            errors.append(f"Missing required field: {loc}")
+        elif err["type"] == "string_type":
+            errors.append(f"Expected string at '{loc}'")
+        elif err["type"] == "int_type":
+            errors.append(f"Expected integer at '{loc}'")
+        elif err["type"] == "bool_type":
+            errors.append(f"Expected boolean at '{loc}'")
+        elif err["type"] == "dict_type":
+            errors.append(f"Expected object at '{loc}'")
+        else:
+            # Generic fallback - still human readable
+            errors.append(f"{loc}: {msg}")
+
+    return errors if errors else ["Invalid configuration"]
 
 
 def build_config_metadata(config: dict[str, Any]) -> dict[str, Any]:
