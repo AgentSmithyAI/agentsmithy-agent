@@ -879,3 +879,306 @@ class TestWorkloadKindAutoDetection:
             w for w in metadata["workloads"] if w["name"] == "text-embedding-3-large"
         )
         assert wl["kind"] == "embeddings"  # Auto-detected from model name
+
+
+# =============================================================================
+# Tests for model validation removal (regression)
+# =============================================================================
+
+
+class TestModelValidationRemoved:
+    """Regression tests: any model should be allowed, no validation errors."""
+
+    def test_custom_model_allowed_in_validation(self):
+        """validate_or_raise should NOT reject unknown models."""
+        from agentsmithy.config.validation import validate_or_raise
+
+        # This should NOT raise - any model is allowed
+        validate_or_raise(
+            model="gpt-3.5-turbo",  # Not in SUPPORTED list
+            embedding_model="text-embedding-3-small",
+            api_key="sk-test-key",
+        )
+
+    def test_completely_custom_model_allowed(self):
+        """Completely custom model names should be allowed."""
+        from agentsmithy.config.validation import validate_or_raise
+
+        validate_or_raise(
+            model="my-custom-finetuned-model",
+            embedding_model="custom-embedding-model",
+            api_key="sk-test-key",
+        )
+
+    def test_openrouter_model_allowed(self):
+        """OpenRouter-style model paths should be allowed."""
+        from agentsmithy.config.validation import validate_or_raise
+
+        validate_or_raise(
+            model="anthropic/claude-3-opus",
+            embedding_model="openai/text-embedding-3-large",
+            api_key="sk-test-key",
+        )
+
+    def test_ollama_model_allowed(self):
+        """Ollama model names should be allowed."""
+        from agentsmithy.config.validation import validate_or_raise
+
+        validate_or_raise(
+            model="llama3:70b",
+            embedding_model="nomic-embed-text:latest",
+            api_key="sk-test-key",
+        )
+
+    def test_empty_model_still_requires_api_key(self, monkeypatch):
+        """Even with no model validation, API key is still required."""
+        from agentsmithy.config.validation import validate_or_raise
+
+        # Clear env var to ensure test works regardless of environment
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+        with pytest.raises(ValueError) as exc_info:
+            validate_or_raise(
+                model="any-model",
+                embedding_model="any-embedding",
+                api_key=None,
+            )
+        assert "OPENAI_API_KEY is required" in str(exc_info.value)
+
+
+# =============================================================================
+# Tests for OpenAI dynamic catalog (with mocks)
+# =============================================================================
+
+
+class TestOpenAIDynamicCatalog:
+    """Tests for OpenAI catalog fetching from API."""
+
+    def test_catalog_fetches_from_api_when_key_provided(self):
+        """Should fetch models from OpenAI API when api_key is provided."""
+        from unittest.mock import MagicMock, patch
+
+        from agentsmithy.llm.providers.openai.catalog import OpenAIModelCatalogProvider
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "data": [
+                {"id": "gpt-4o"},
+                {"id": "gpt-4-turbo"},
+                {"id": "text-embedding-3-small"},
+            ]
+        }
+
+        provider = OpenAIModelCatalogProvider()
+
+        with patch("httpx.Client") as mock_client:
+            mock_client.return_value.__enter__.return_value.get.return_value = (
+                mock_response
+            )
+
+            catalog = provider.get_catalog(
+                {"api_key": "sk-test", "base_url": "https://api.openai.com/v1"}
+            )
+
+        assert "gpt-4o" in catalog.chat
+        assert "gpt-4-turbo" in catalog.chat
+        assert "text-embedding-3-small" in catalog.embeddings
+
+    def test_catalog_falls_back_to_static_on_api_error(self):
+        """Should fall back to static catalog when API fails."""
+        from unittest.mock import patch
+
+        from agentsmithy.llm.providers.openai.catalog import OpenAIModelCatalogProvider
+
+        provider = OpenAIModelCatalogProvider()
+
+        with patch("httpx.Client") as mock_client:
+            mock_client.return_value.__enter__.return_value.get.side_effect = Exception(
+                "Network error"
+            )
+
+            catalog = provider.get_catalog(
+                {"api_key": "sk-test", "base_url": "https://api.openai.com/v1"}
+            )
+
+        # Should have static models as fallback
+        assert len(catalog.chat) > 0
+        assert "gpt-5.1-codex" in catalog.chat  # From static registry
+
+    def test_catalog_uses_static_when_no_api_key(self):
+        """Should use static catalog when no api_key provided."""
+        from agentsmithy.llm.providers.openai.catalog import OpenAIModelCatalogProvider
+
+        provider = OpenAIModelCatalogProvider()
+        catalog = provider.get_catalog({})  # No api_key
+
+        # Should have static models
+        assert len(catalog.chat) > 0
+        assert "gpt-5.1-codex" in catalog.chat
+
+    def test_catalog_filters_out_excluded_models(self):
+        """Should exclude fine-tuned, audio, image models."""
+        from unittest.mock import MagicMock, patch
+
+        from agentsmithy.llm.providers.openai.catalog import OpenAIModelCatalogProvider
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "data": [
+                {"id": "gpt-4o"},
+                {"id": "ft:gpt-4:my-org:custom:id"},  # fine-tuned - exclude
+                {"id": "whisper-1"},  # audio - exclude
+                {"id": "dall-e-3"},  # image - exclude
+                {"id": "tts-1"},  # text-to-speech - exclude
+                {"id": "davinci-002"},  # old completions - exclude
+            ]
+        }
+
+        provider = OpenAIModelCatalogProvider()
+
+        with patch("httpx.Client") as mock_client:
+            mock_client.return_value.__enter__.return_value.get.return_value = (
+                mock_response
+            )
+
+            catalog = provider.get_catalog(
+                {"api_key": "sk-test", "base_url": "https://api.openai.com/v1"}
+            )
+
+        assert "gpt-4o" in catalog.chat
+        assert "ft:gpt-4:my-org:custom:id" not in catalog.chat
+        assert "whisper-1" not in catalog.chat
+        assert "dall-e-3" not in catalog.chat
+        assert "tts-1" not in catalog.chat
+        assert "davinci-002" not in catalog.chat
+
+
+# =============================================================================
+# Tests for workload lookup with dots in names (regression)
+# =============================================================================
+
+
+class TestWorkloadLookupWithDots:
+    """Regression tests for workload names containing dots (e.g., gpt-5.1-codex)."""
+
+    def test_get_workload_config_handles_dots(self):
+        """_get_workload_config should handle workload names with dots."""
+        from unittest.mock import MagicMock
+
+        from agentsmithy.config.settings import Settings
+
+        mock_manager = MagicMock()
+        mock_manager.get_all.return_value = {
+            "workloads": {
+                "gpt-5.1-codex": {
+                    "provider": "openai",
+                    "model": "gpt-5.1-codex",
+                }
+            }
+        }
+
+        settings = Settings(config_manager=mock_manager)
+        config = settings._get_workload_config("gpt-5.1-codex")
+
+        assert config is not None
+        assert config["provider"] == "openai"
+        assert config["model"] == "gpt-5.1-codex"
+
+    def test_get_workload_config_multiple_dots(self):
+        """Should handle workload names with multiple dots."""
+        from unittest.mock import MagicMock
+
+        from agentsmithy.config.settings import Settings
+
+        mock_manager = MagicMock()
+        mock_manager.get_all.return_value = {
+            "workloads": {
+                "openai/gpt-4.1.preview": {
+                    "provider": "openrouter",
+                    "model": "openai/gpt-4.1.preview",
+                }
+            }
+        }
+
+        settings = Settings(config_manager=mock_manager)
+        config = settings._get_workload_config("openai/gpt-4.1.preview")
+
+        assert config is not None
+        assert config["model"] == "openai/gpt-4.1.preview"
+
+    def test_provider_finds_workload_with_dots(self):
+        """OpenAIProvider should find workloads with dots in name."""
+        from unittest.mock import MagicMock, patch
+
+        mock_settings = MagicMock()
+
+        def mock_get(key, default):
+            if key == "models.agents":
+                return {"universal": {"workload": "gpt-5.1-codex"}}
+            if key == "providers.openai":
+                return {"api_key": "sk-xxx", "type": "openai"}
+            return default
+
+        mock_settings._get.side_effect = mock_get
+        mock_settings._get_workload_config.return_value = {
+            "provider": "openai",
+            "model": "gpt-5.1-codex",
+        }
+
+        with patch("agentsmithy.llm.providers.openai.provider.settings", mock_settings):
+            with patch(
+                "agentsmithy.llm.providers.openai.provider.register_builtin_adapters"
+            ):
+                with patch(
+                    "agentsmithy.llm.providers.openai.provider.get_adapter"
+                ) as mock_adapter:
+                    mock_adapter.return_value.build_langchain.return_value = (
+                        "langchain_openai.ChatOpenAI",
+                        {},
+                    )
+                    with patch(
+                        "agentsmithy.llm.providers.openai.provider.import_module"
+                    ) as mock_import:
+                        mock_import.return_value.ChatOpenAI = MagicMock()
+
+                        from agentsmithy.llm.providers.openai.provider import (
+                            OpenAIProvider,
+                        )
+
+                        provider = OpenAIProvider()
+
+                        # Should successfully find the workload
+                        assert provider.model == "gpt-5.1-codex"
+
+    def test_embeddings_provider_finds_workload_with_dots(self):
+        """OpenAIEmbeddingsProvider should find workloads with dots."""
+        from unittest.mock import MagicMock, patch
+
+        mock_settings = MagicMock()
+
+        def mock_get(key, default):
+            if key == "models.embeddings":
+                return {"workload": "text-embedding-3.5-large"}
+            if key == "providers.openai":
+                return {"api_key": "sk-xxx"}
+            return default
+
+        mock_settings._get.side_effect = mock_get
+        mock_settings._get_workload_config.return_value = {
+            "provider": "openai",
+            "model": "text-embedding-3.5-large",
+        }
+
+        with patch(
+            "agentsmithy.llm.providers.openai.provider_embeddings.settings",
+            mock_settings,
+        ):
+            from agentsmithy.llm.providers.openai.provider_embeddings import (
+                OpenAIEmbeddingsProvider,
+            )
+
+            provider = OpenAIEmbeddingsProvider()
+
+            assert provider.model == "text-embedding-3.5-large"
