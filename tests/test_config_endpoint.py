@@ -4,13 +4,17 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from fastapi.testclient import TestClient
 
+import agentsmithy.config.manager as mgr_module
 from agentsmithy.api.app import create_app
-from agentsmithy.config.manager import ConfigManager
 from agentsmithy.config.providers import LocalFileConfigProvider
+
+if TYPE_CHECKING:
+    from agentsmithy.config.manager import ConfigManager
 
 
 @pytest.fixture
@@ -33,12 +37,10 @@ async def config_manager(config_file: Path):
     }
 
     provider = LocalFileConfigProvider(config_file, defaults=defaults)
-    manager = ConfigManager(provider)
+    manager = mgr_module.ConfigManager(provider)
     await manager.initialize()
 
     # Set as global instance
-    import agentsmithy.config.manager as mgr_module
-
     old_manager = mgr_module._config_manager
     mgr_module._config_manager = manager
 

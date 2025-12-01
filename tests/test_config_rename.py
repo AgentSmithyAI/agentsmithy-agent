@@ -14,7 +14,6 @@ from fastapi.testclient import TestClient
 
 import agentsmithy.config.manager as mgr_module
 from agentsmithy.config import get_default_config
-from agentsmithy.config.manager import ConfigManager
 from agentsmithy.config.providers import LocalFileConfigProvider
 from agentsmithy.config.schema import rename_entity
 
@@ -240,7 +239,7 @@ async def config_manager_with_workloads(tmp_path: Path):
 
     defaults = get_default_config()
     provider = LocalFileConfigProvider(config_path, defaults=defaults)
-    manager = ConfigManager(provider)
+    manager = mgr_module.ConfigManager(provider)
     await manager.initialize()
 
     old_manager = mgr_module._config_manager
