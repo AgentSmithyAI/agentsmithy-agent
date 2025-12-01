@@ -41,8 +41,10 @@ class OpenAIModelSpec(IModelSpec):
 class CustomChatCompletionsSpec(OpenAIModelSpec):
     """Fallback spec for custom/unknown models using standard chat completions API.
 
-    Used for OpenAI-compatible endpoints (OpenRouter, LMStudio, Ollama, etc.)
+    Used for OpenAI-compatible endpoints (OpenRouter, LMStudio, etc.)
     or new OpenAI models not yet added to the registry.
+
+    Note: For Ollama, use type: 'ollama' in provider config instead.
     """
 
     family: Literal["chat_completions"] = "chat_completions"

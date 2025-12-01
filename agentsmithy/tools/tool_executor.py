@@ -641,7 +641,7 @@ class ToolExecutor:
                 yield ErrorEvent(error=error_msg)
                 break
 
-            agent_logger.debug(
+            agent_logger.info(
                 "LLM streaming",
                 model=getattr(self.llm_provider, "model", "unknown"),
                 messages=len(conversation),

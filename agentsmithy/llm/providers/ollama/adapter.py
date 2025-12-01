@@ -54,18 +54,6 @@ class OllamaChatAdapter(IProviderChatAdapter):
         return {}
 
 
-def factory(model: str) -> IProviderChatAdapter | None:
-    """Factory that creates adapter for any Ollama model.
-
-    This factory is not used directly for model matching since Ollama
-    models can have any name. Instead, it's used when provider type
-    is explicitly set to 'ollama' in config.
-    """
-    # This factory doesn't auto-match models by name.
-    # Ollama models are matched via provider type in config.
-    return None
-
-
 def create_ollama_adapter(model: str) -> OllamaChatAdapter:
     """Create an Ollama adapter for the given model name.
 

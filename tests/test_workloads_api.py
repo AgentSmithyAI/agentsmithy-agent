@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+import agentsmithy.config.manager as mgr_module
 from agentsmithy.config import get_default_config
 from agentsmithy.config.manager import ConfigManager
 from agentsmithy.config.providers import LocalFileConfigProvider
@@ -31,8 +32,6 @@ async def config_manager_with_defaults(tmp_path: Path, defaults):
     provider = LocalFileConfigProvider(config_path, defaults=defaults)
     manager = ConfigManager(provider)
     await manager.initialize()
-
-    import agentsmithy.config.manager as mgr_module
 
     old_manager = mgr_module._config_manager
     mgr_module._config_manager = manager
