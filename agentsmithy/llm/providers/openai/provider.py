@@ -141,6 +141,13 @@ class OpenAIProvider:
             from agentsmithy.llm.providers.ollama.adapter import create_ollama_adapter
 
             adapter = create_ollama_adapter(self.model)
+        elif provider_type == Vendor.ANTHROPIC.value:
+            # Anthropic: use dedicated adapter for Claude models
+            from agentsmithy.llm.providers.anthropic.adapter import (
+                create_anthropic_adapter,
+            )
+
+            adapter = create_anthropic_adapter(self.model)
         else:
             # OpenAI and compatible: use registry-based adapter resolution
             register_builtin_adapters()
@@ -160,6 +167,13 @@ class OpenAIProvider:
         if isinstance(extra_opts, dict) and extra_opts:
             if provider_type == Vendor.OLLAMA.value:
                 # Ollama: merge into model_kwargs (chat_completions style)
+                if "model_kwargs" not in kwargs or not isinstance(
+                    kwargs.get("model_kwargs"), dict
+                ):
+                    kwargs["model_kwargs"] = {}
+                kwargs["model_kwargs"].update(extra_opts)
+            elif provider_type == Vendor.ANTHROPIC.value:
+                # Anthropic: merge into model_kwargs
                 if "model_kwargs" not in kwargs or not isinstance(
                     kwargs.get("model_kwargs"), dict
                 ):

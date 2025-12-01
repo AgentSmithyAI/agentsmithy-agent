@@ -167,6 +167,8 @@ langchain-core==1.1.0
     #   langgraph
     #   langgraph-checkpoint
     #   langgraph-prebuilt
+langchain-anthropic==1.2.0
+    # via -r requirements.in
 langchain-openai==1.0.3
     # via -r requirements.in
 langchain-text-splitters==1.0.0
