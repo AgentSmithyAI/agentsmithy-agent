@@ -12,8 +12,9 @@ def _build_default_workloads() -> dict[str, Any]:
     When new models are added to the catalog, they automatically appear
     as available workloads for all users via config merge.
 
-    Note: 'kind' field is not set explicitly in defaults - it will be
-    auto-detected from the model name when building metadata.
+    The 'kind' field is explicitly set for all default workloads:
+    - "chat" for chat models
+    - "embeddings" for embedding models
     """
     workloads: dict[str, Any] = {}
 
@@ -23,19 +24,21 @@ def _build_default_workloads() -> dict[str, Any]:
             SUPPORTED_OPENAI_EMBEDDING_MODELS,
         )
 
-        # Chat models → workloads (kind will be auto-detected as "chat")
+        # Chat models → workloads with kind="chat"
         for model in SUPPORTED_OPENAI_CHAT_MODELS:
             workloads[model] = {
                 "provider": "openai",
                 "model": model,
+                "kind": "chat",
                 "options": {},
             }
 
-        # Embedding models → workloads (kind will be auto-detected as "embeddings")
+        # Embedding models → workloads with kind="embeddings"
         for model in SUPPORTED_OPENAI_EMBEDDING_MODELS:
             workloads[model] = {
                 "provider": "openai",
                 "model": model,
+                "kind": "embeddings",
                 "options": {},
             }
     except ImportError:

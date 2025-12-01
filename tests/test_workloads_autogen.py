@@ -882,6 +882,99 @@ class TestWorkloadKindAutoDetection:
 
 
 # =============================================================================
+# Tests for workload_kinds in metadata
+# =============================================================================
+
+
+class TestWorkloadKindsMetadata:
+    """Tests for workload_kinds enum values in metadata."""
+
+    def test_workload_kinds_in_metadata(self):
+        """Metadata should include workload_kinds with possible values."""
+        from agentsmithy.config.schema import build_config_metadata
+
+        config = get_default_config()
+        metadata = build_config_metadata(config)
+
+        assert "workload_kinds" in metadata
+        assert metadata["workload_kinds"] == ["chat", "embeddings"]
+
+    def test_workload_kinds_matches_enum(self):
+        """workload_kinds should match WorkloadKind enum values."""
+        from agentsmithy.config.schema import build_config_metadata
+        from agentsmithy.llm.providers.types import WorkloadKind
+
+        config = get_default_config()
+        metadata = build_config_metadata(config)
+
+        expected = [k.value for k in WorkloadKind]
+        assert metadata["workload_kinds"] == expected
+
+    def test_all_workloads_have_valid_kind(self):
+        """All workloads should have kind from workload_kinds."""
+        from agentsmithy.config.schema import build_config_metadata
+
+        config = get_default_config()
+        metadata = build_config_metadata(config)
+
+        valid_kinds = set(metadata["workload_kinds"])
+        for wl in metadata["workloads"]:
+            assert wl["kind"] in valid_kinds, f"Workload {wl['name']} has invalid kind"
+
+
+# =============================================================================
+# Tests for explicit kind in default workloads
+# =============================================================================
+
+
+class TestDefaultWorkloadsExplicitKind:
+    """Tests that default workloads have explicit kind set (not null)."""
+
+    def test_default_chat_workloads_have_explicit_kind(self):
+        """Default chat workloads should have kind='chat' explicitly set."""
+        config = get_default_config()
+        workloads = config["workloads"]
+
+        # Check a known chat model
+        assert "gpt-5.1-codex" in workloads
+        assert workloads["gpt-5.1-codex"]["kind"] == "chat"
+
+    def test_default_embedding_workloads_have_explicit_kind(self):
+        """Default embedding workloads should have kind='embeddings' explicitly set."""
+        config = get_default_config()
+        workloads = config["workloads"]
+
+        # Check a known embedding model
+        assert "text-embedding-3-small" in workloads
+        assert workloads["text-embedding-3-small"]["kind"] == "embeddings"
+
+    def test_all_default_workloads_have_explicit_kind(self):
+        """All default workloads should have kind explicitly set (not null)."""
+        config = get_default_config()
+        workloads = config["workloads"]
+
+        for name, wl in workloads.items():
+            assert "kind" in wl, f"Workload {name} missing 'kind' field"
+            assert wl["kind"] is not None, f"Workload {name} has null 'kind'"
+            assert wl["kind"] in (
+                "chat",
+                "embeddings",
+            ), f"Workload {name} has invalid kind"
+
+    def test_default_workloads_kind_not_null_in_config(self):
+        """Verify kind is NOT null in raw default config (regression test)."""
+        config = get_default_config()
+        workloads = config["workloads"]
+
+        # Explicitly check that kind is string, not None
+        for name, wl in workloads.items():
+            kind_value = wl.get("kind")
+            assert isinstance(
+                kind_value, str
+            ), f"Workload {name} kind should be string, got {type(kind_value)}"
+
+
+# =============================================================================
 # Tests for model validation removal (regression)
 # =============================================================================
 

@@ -481,8 +481,11 @@ def build_config_metadata(config: dict[str, Any]) -> dict[str, Any]:
             }
         )
 
+    from agentsmithy.llm.providers.types import WorkloadKind
+
     return {
         "provider_types": ALLOWED_PROVIDER_TYPES,
+        "workload_kinds": [k.value for k in WorkloadKind],
         "providers": provider_meta,
         "agent_provider_slots": agent_slots,
         "workloads": workload_meta,

@@ -156,6 +156,9 @@ class WorkloadMetadata(BaseModel):
 
 class ConfigMetadata(BaseModel):
     provider_types: list[str]
+    workload_kinds: list[str] = (
+        []
+    )  # Possible values for workload.kind: ["chat", "embeddings"]
     providers: list[ProviderMetadata] = []
     agent_provider_slots: list[AgentProviderSlot] = []
     workloads: list[WorkloadMetadata] = []
