@@ -76,7 +76,7 @@ pluggy==1.6.0
     # via
     #   pytest
     #   pytest-cov
-pydantic==2.12.4
+pydantic==2.12.5
     # via python-semantic-release
 pydantic-core==2.41.5
     # via pydantic
