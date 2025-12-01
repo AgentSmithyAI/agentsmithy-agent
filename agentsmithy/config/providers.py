@@ -10,7 +10,11 @@ from typing import Any
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
-from agentsmithy.config.schema import deep_merge, validate_config
+from agentsmithy.config.schema import (
+    ConfigValidationError,
+    deep_merge,
+    validate_config,
+)
 from agentsmithy.utils.logger import get_logger
 
 logger = get_logger("config.providers")
@@ -117,10 +121,10 @@ class LocalFileConfigProvider(ConfigProvider):
                     path=str(self.config_path),
                 )
                 return self.defaults.copy()
-        except ValueError as exc:
+        except ConfigValidationError as exc:
             logger.error(
                 "Invalid configuration structure",
-                error=str(exc),
+                errors=exc.errors,
                 path=str(self.config_path),
             )
             raise
@@ -148,10 +152,10 @@ class LocalFileConfigProvider(ConfigProvider):
         """Atomically save configuration to file."""
         try:
             merged = validate_config(deep_merge(self.defaults, config))
-        except ValueError as exc:
+        except ConfigValidationError as exc:
             logger.error(
                 "Refusing to save invalid configuration",
-                error=str(exc),
+                errors=exc.errors,
                 path=str(self.config_path),
             )
             raise

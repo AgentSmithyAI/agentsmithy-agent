@@ -36,3 +36,38 @@ class OpenAIModelSpec(IModelSpec):
         dict[str, Any], dict[str, Any]
     ]:  # pragma: no cover - must be implemented by subclasses
         raise NotImplementedError
+
+
+class CustomChatCompletionsSpec(OpenAIModelSpec):
+    """Fallback spec for custom/unknown models using standard chat completions API.
+
+    Used for OpenAI-compatible endpoints (OpenRouter, LMStudio, etc.)
+    or new OpenAI models not yet added to the registry.
+
+    Note: For Ollama, use type: 'ollama' in provider config instead.
+    """
+
+    family: Literal["chat_completions"] = "chat_completions"
+
+    def __init__(self, name: str):
+        # Bypass decorator-based model_name, pass name directly
+        super(OpenAIModelSpec, self).__init__(name=name, vendor=Vendor.OPENAI)
+
+    def supports_temperature(self) -> bool:
+        return True
+
+    def build_langchain_kwargs(
+        self, temperature: float | None, max_tokens: int | None, reasoning_effort: str
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        base_kwargs: dict[str, Any] = {
+            "model": self.name,
+        }
+        if temperature is not None:
+            base_kwargs["temperature"] = temperature
+        if max_tokens is not None:
+            base_kwargs["max_tokens"] = max_tokens
+        model_kwargs: dict[str, Any] = {
+            # Ensure usage is included in final chunk
+            "stream_options": {"include_usage": True}
+        }
+        return base_kwargs, model_kwargs

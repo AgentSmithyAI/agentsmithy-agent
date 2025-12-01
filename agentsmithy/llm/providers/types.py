@@ -6,10 +6,18 @@ from typing import Any, Literal, TypedDict, TypeGuard
 
 class Vendor(str, Enum):
     OPENAI = "openai"
+    OLLAMA = "ollama"
     ANTHROPIC = "anthropic"
     XAI = "xai"
     DEEPSEEK = "deepseek"
     OTHER = "other"
+
+
+class WorkloadKind(str, Enum):
+    """Type of workload - determines what the model is used for."""
+
+    CHAT = "chat"
+    EMBEDDINGS = "embeddings"
 
 
 # --- Type aliases for LangChain content ---

@@ -1,6 +1,6 @@
 # Configuration API Endpoint
 
-Retrieve and update AgentSmithy configuration at runtime via HTTP.
+Retrieve, update, and rename AgentSmithy configuration at runtime via HTTP.
 
 ## Config File Location
 
@@ -49,10 +49,6 @@ Response includes configuration validation:
 
 When `config_valid` is `false`, client should prompt user to configure API keys via `/api/config`.
 
-**Config validation is updated automatically:**
-- On server startup → checks config, writes to status.json
-- On config change via `/api/config` → rechecks, updates status.json
-
 ## Configuration Scope
 
 - **Global config (read/write):**
@@ -65,12 +61,6 @@ When `config_valid` is `false`, client should prompt user to configure API keys 
   - Merged on top of the global file so a single repo can use different providers
   - Useful for project-specific API keys/models
   - Never modified via `/api/config`
-
-**Layering overview**
-- The runtime loads the global file, then overlays any project-level overrides (defaults → global → local).
-- Only the global layer is writable via `/api/config`, so new providers and model bindings apply to every workspace that shares the same user config.
-- A filesystem watcher re-validates the merged result after each change and updates `status.json`.
-- A baseline `providers.openai` entry is always present (with `null` values) so the UI can render empty fields before anything is configured. Additional providers only appear after you create them.
 
 ## Hot Reload
 
@@ -85,15 +75,7 @@ When updating via `PUT /api/config`:
 
 ### GET /api/config
 
-Returns the current provider catalog plus the model → provider map. Nothing else is surfaced, keeping the payload small and predictable.
-
-`metadata` mirrors the config so the UI can render form controls without hard-coded enums:
-
-- `provider_types`: allowed values for `providers.<name>.type`
-- `providers`: every configured provider (name, type, whether an API key is set)
-- `workloads`: each workload entry (name, provider, model) so the UI can render task-specific controls
-- `agent_provider_slots`: every `models.*.(workload|provider)` path that must reference an existing workload/provider entry
-- `model_catalog`: supported model IDs grouped by provider/vendor (chat vs embeddings); use it to populate model dropdowns or autocomplete hints
+Returns the current configuration with metadata for UI rendering.
 
 **Response:**
 
@@ -106,95 +88,86 @@ Returns the current provider catalog plus the model → provider map. Nothing el
         "api_key": "sk-live-123",
         "base_url": "https://api.openai.com/v1",
         "options": {}
-      },
+      }
     },
     "workloads": {
-      "reasoning":    { "provider": "openai", "model": "gpt-5",             "options": {} },
-      "execution":    { "provider": "openai", "model": "gpt-5-mini",        "options": {} },
-      "summarization":{ "provider": "openai", "model": "gpt-5-mini",        "options": {} },
-      "embeddings":   { "provider": "openai", "model": "text-embedding-3-small", "options": {} }
+      "gpt-5.1-codex": {
+        "provider": "openai",
+        "model": "gpt-5.1-codex",
+        "kind": null,
+        "options": {}
+      },
+      "text-embedding-3-small": {
+        "provider": "openai",
+        "model": "text-embedding-3-small",
+        "kind": null,
+        "options": {}
+      }
     },
     "models": {
       "agents": {
-        "writer":   { "workload": "reasoning" }
+        "universal": { "workload": "gpt-5.1-codex" },
+        "inspector": { "workload": "gpt-5.1-codex-mini" }
       },
-      "embeddings": { "workload": "embeddings" },
-      "summarization": { "workload": "summarization" }
+      "embeddings": { "workload": "text-embedding-3-small" },
+      "summarization": { "workload": "gpt-5.1-codex-mini" }
     }
   },
   "metadata": {
-    "provider_types": ["openai", "anthropic", "xai", "deepseek", "other"],
+    "provider_types": ["openai", "ollama", "anthropic", "xai", "deepseek", "other"],
     "providers": [
       { "name": "openai", "type": "openai", "has_api_key": true }
     ],
     "workloads": [
-      { "name": "reasoning", "provider": "openai", "model": "gpt-5" },
-      { "name": "execution", "provider": "openai", "model": "gpt-5-mini" },
-      { "name": "summarization", "provider": "openai", "model": "gpt-5-mini" },
-      { "name": "embeddings", "provider": "openai", "model": "text-embedding-3-small" }
+      { "name": "gpt-5.1-codex", "provider": "openai", "model": "gpt-5.1-codex", "kind": "chat" },
+      { "name": "gpt-5.1-codex-mini", "provider": "openai", "model": "gpt-5.1-codex-mini", "kind": "chat" },
+      { "name": "text-embedding-3-small", "provider": "openai", "model": "text-embedding-3-small", "kind": "embeddings" }
     ],
     "agent_provider_slots": [
-      { "path": "models.agents.writer.workload", "workload": "reasoning" },
-      { "path": "models.embeddings.workload", "workload": "embeddings" },
-      { "path": "models.summarization.workload", "workload": "summarization" }
+      { "path": "models.agents.universal.workload", "workload": "gpt-5.1-codex" },
+      { "path": "models.agents.inspector.workload", "workload": "gpt-5.1-codex-mini" },
+      { "path": "models.embeddings.workload", "workload": "text-embedding-3-small" },
+      { "path": "models.summarization.workload", "workload": "gpt-5.1-codex-mini" }
     ],
     "model_catalog": {
       "openai": {
-        "chat": ["gpt-5", "gpt-5-mini"],
+        "chat": ["gpt-5.1", "gpt-5.1-codex", "gpt-5.1-codex-mini"],
         "embeddings": ["text-embedding-3-small", "text-embedding-3-large"]
+      },
+      "ollama": {
+        "chat": ["llama3:70b", "mistral:7b"],
+        "embeddings": []
       }
     }
   }
 }
 ```
 
-**Example:**
+**Metadata fields:**
 
-```bash
-curl http://localhost:8765/api/config
-```
+| Field | Description |
+|-------|-------------|
+| `provider_types` | Allowed values for `providers.<name>.type` |
+| `providers` | Configured providers with status |
+| `workloads` | All workloads with name, provider, model, and **kind** |
+| `agent_provider_slots` | Config paths that reference workloads |
+| `model_catalog` | Supported models by vendor, grouped by chat/embeddings |
 
-### Rendering recommendations
-
-Treat `/api/config` as the single source of truth. Every dropdown on the UI should be populated from `metadata`, and every text field should write back into `config`.
-
-1. **Providers (credentials layer)**
-   - Limited enum for types: `metadata.provider_types`. Bind this to the `type` select inside each provider row.
-   - Provider rows themselves come from `config.providers`. Render editable inputs for `api_key`, `base_url`, `options` here.
-   - Use `metadata.providers[*]` (name, type, `has_api_key`) to build provider pickers elsewhere and to surface “key missing” warnings.
-
-2. **Workloads (task → model bindings)**
-   - `config.workloads` is where the user actually picks a provider + model per task (`reasoning`, `execution`, `summarization`, `embeddings`, custom slots, etc.).
-   - `metadata.workloads` mirrors this data with `{name, provider, model}` so the UI can easily render workload selectors without walking the config tree.
-   - When the workload form needs a provider dropdown, use `metadata.providers`. When it needs a model dropdown, use `metadata.model_catalog[vendor][category]`:
-     - vendor = the provider’s `type` (e.g. `openai`);
-     - category = `"chat"` for agent workloads or `"embeddings"` for embedding workloads.
-   - If a provider has no catalog entry (custom/other), fall back to free-form input but still write it under `config.workloads.<name>.model`.
-
-3. **Slot wiring (`models.*`)**
-   - `metadata.agent_provider_slots` enumerates every config path the UI should expose. The suffix tells you which selector to render:
-     - Path ending in `.workload` → show a dropdown populated from `config.workloads` / `metadata.workloads`.
-     - Path ending in `.provider` → show a provider dropdown sourced from `metadata.providers` (legacy compatibility).
-   - When the user changes a slot binding, update the corresponding entry inside `config.models` and submit the diff via `PUT /api/config`.
-
-4. **Model catalog**
-   - `metadata.model_catalog` groups supported model IDs by vendor and category. Use it for autocomplete lists, tooltips, or validation (“Pick one of these known models for OpenAI chat”).
-   - Because the catalog is delivered by the backend, new models appear automatically without a frontend release.
-
-With this approach the UI never hardcodes provider types, workloads, or model names. All limits come from the metadata payload, and edits go straight into the `config` object submitted back to the server.
+**Important:** Workloads in metadata include `kind` field ("chat" or "embeddings") which is auto-detected from the model name if not explicitly set.
 
 ### PUT /api/config
 
-Updates one or more configuration values. The changes are persisted to the configuration file and take effect immediately.
+Updates configuration values. Changes are persisted and take effect immediately.
 
-**Request Body:**
+**Request:**
 
 ```json
 {
   "config": {
     "workloads": {
-      "reasoning": {
-        "model": "gpt-4.1-preview"
+      "gpt-5.1-codex": {
+        "provider": "openrouter",
+        "model": "anthropic/claude-3-opus"
       }
     }
   }
@@ -207,34 +180,84 @@ Updates one or more configuration values. The changes are persisted to the confi
 {
   "success": true,
   "message": "Successfully updated 1 configuration key(s)",
-  "config": {
-    "workloads": {
-      "reasoning": {
-        "provider": "openai",
-        "model": "gpt-4.1-preview",
-        "options": {}
-      }
-    },
-    ...
-  }
+  "config": { ... },
+  "metadata": { ... }
 }
 ```
 
-**Example:**
+### POST /api/config/rename
 
-```bash
-curl -X PUT http://localhost:8765/api/config \
-  -H "Content-Type: application/json" \
-  -d '{
-    "config": {
-      "workloads": {
-        "reasoning": {
-          "model": "gpt-4.1-preview"
-        }
-      }
-    }
-  }'
+Renames a workload or provider and updates all references.
+
+**Request:**
+
+```json
+{
+  "type": "workload",
+  "old_name": "gpt-5.1-codex",
+  "new_name": "my-reasoning-model"
+}
 ```
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "message": "Successfully renamed workload 'gpt-5.1-codex' to 'my-reasoning-model'",
+  "old_name": "gpt-5.1-codex",
+  "new_name": "my-reasoning-model",
+  "updated_references": [
+    "models.agents.universal.workload",
+    "models.summarization.workload"
+  ],
+  "config": { ... },
+  "metadata": { ... }
+}
+```
+
+**Parameters:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `type` | "workload" \| "provider" | Entity type to rename |
+| `old_name` | string | Current name |
+| `new_name` | string | New name |
+
+**Errors:**
+- 400 if entity not found
+- 400 if new name already exists
+- 400 if old_name equals new_name
+
+## Rendering Recommendations
+
+Treat `/api/config` as the single source of truth.
+
+### 1. Providers (credentials layer)
+
+- `metadata.provider_types` → dropdown for provider type
+- `config.providers` → editable fields for api_key, base_url, options
+- `metadata.providers` → build provider pickers, show "key missing" warnings
+
+### 2. Workloads (model bindings)
+
+- `metadata.workloads` → list of available workloads with kind
+- Filter by `kind` for appropriate dropdowns:
+  - `kind: "chat"` for agent model selection
+  - `kind: "embeddings"` for embedding model selection
+- `model_catalog[vendor][category]` → model suggestions when creating workloads
+
+### 3. Slot Wiring (models.*)
+
+- `metadata.agent_provider_slots` → config paths to expose
+- Paths ending in `.workload` → workload dropdown
+
+### 4. Model Catalog
+
+- `metadata.model_catalog` → autocomplete/suggestions for model names
+- Grouped by vendor and category (chat/embeddings)
+- **OpenAI models**: Fetched dynamically from API if api_key is set, otherwise static list
+- **Ollama models**: Fetched dynamically from running Ollama server
 
 ## Examples
 
@@ -247,15 +270,14 @@ curl -X PUT http://localhost:8765/api/config \
     "config": {
       "providers": {
         "openai": {
-          "api_key": "sk-your-key",
-          "base_url": "https://api.openai.com/v1"
+          "api_key": "sk-your-key"
         }
       }
     }
   }'
 ```
 
-### Point a workload to OpenRouter (custom endpoint)
+### Add Ollama Provider
 
 ```bash
 curl -X PUT http://localhost:8765/api/config \
@@ -263,39 +285,73 @@ curl -X PUT http://localhost:8765/api/config \
   -d '{
     "config": {
       "providers": {
-        "openrouter": {
-          "type": "openai",
-          "api_key": "sk-openrouter-key",
-          "base_url": "https://openrouter.ai/api/v1"
+        "ollama": {
+          "type": "ollama",
+          "base_url": "http://localhost:11434/v1"
         }
       },
       "workloads": {
-        "execution": {
-          "provider": "openrouter",
-          "model": "anthropic/claude-3-haiku"
+        "llama3": {
+          "provider": "ollama",
+          "model": "llama3:70b"
         }
       }
     }
   }'
 ```
 
-### View Current Config
+### Change Universal Agent Model
 
 ```bash
-curl http://localhost:8765/api/config | jq .
+curl -X PUT http://localhost:8765/api/config \
+  -H "Content-Type: application/json" \
+  -d '{
+    "config": {
+      "models": {
+        "agents": {
+          "universal": { "workload": "gpt-5.1-codex-mini" }
+        }
+      }
+    }
+  }'
 ```
 
-## Common configuration scenarios
+### Rename Workload
+
+```bash
+curl -X POST http://localhost:8765/api/config/rename \
+  -H "Content-Type: application/json" \
+  -d '{
+    "type": "workload",
+    "old_name": "gpt-5.1-codex",
+    "new_name": "main-reasoning"
+  }'
+```
+
+### Delete Provider
+
+Set value to `null` to delete:
+
+```bash
+curl -X PUT http://localhost:8765/api/config \
+  -H "Content-Type: application/json" \
+  -d '{
+    "config": {
+      "providers": {
+        "old-provider": null
+      }
+    }
+  }'
+```
+
+**Note:** Deletion fails if provider/workload is still referenced.
+
+## Common Scenarios
 
 | Scenario | How to configure |
-| --- | --- |
-| **Single OpenAI account, defaults suit me** | Set `providers.openai.api_key` (and optionally `base_url`). Leave `config.workloads.*` untouched — every task inherits this provider/model pairing. |
-| **Different models for reasoning vs execution** | Update `config.workloads.reasoning.model` and `config.workloads.execution.model` via the endpoint. Both workloads can still point to `provider: "openai"` if they share the same key. |
-| **Use OpenRouter or another OpenAI-compatible proxy** | Add a provider entry with its endpoint/key, e.g. `providers.openrouter`. Point the relevant workloads (`execution`, `summarization`, etc.) to that provider and choose a model from the catalog (e.g. `anthropic/claude-3-haiku`). |
-| **Dedicated credentials for embeddings** | Create another provider (maybe `providers.embeddings`) with its own key. Set `config.workloads.embeddings.provider` to that entry so all embedding calls use the dedicated account/endpoint. |
-| **Local OpenAI-compatible server (Ollama, LM Studio)** | Add a provider with `type: "openai"`, `api_key`: `"not-needed"` (or whatever the server expects), `base_url`: `"http://localhost:11434/v1"`. Point selected workloads to it. |
-| **Future non-OpenAI vendors (Anthropic, xAI, DeepSeek)** | Add `providers.<name>` with `type` set to the vendor and capture credentials now. Even if the adapter isn’t implemented yet, the config stays forward-compatible; once the backend supports it, workloads referencing that provider will start working automatically. |
-
-Remember: credentials live in `providers.*`, workloads pick the provider/model per task, and `models.*` wire workloads into actual features. Always use `metadata` from `/api/config` to populate dropdowns so the UI adapts when we add new provider types or tasks.
-
-
+|----------|------------------|
+| **Single OpenAI account** | Set `providers.openai.api_key`. Default workloads are auto-generated. |
+| **Different models per task** | Change `models.agents.universal.workload` and `models.agents.inspector.workload` to different workloads. |
+| **Use OpenRouter** | Add provider with OpenRouter endpoint/key. Create workloads pointing to it with OpenRouter model names (e.g., `anthropic/claude-3-opus`). |
+| **Local Ollama** | Add `providers.ollama` with `type: "ollama"`. Ollama models appear automatically in `model_catalog`. |
+| **Custom model not in catalog** | Create a workload with any model name — no validation restrictions. |

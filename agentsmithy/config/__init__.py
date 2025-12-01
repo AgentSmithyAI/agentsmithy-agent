@@ -9,6 +9,7 @@ from .providers import (
     LocalFileConfigProvider,
     RemoteConfigProvider,
 )
+from .schema import ConfigValidationError
 from .settings import Settings, settings
 
 __all__ = [
@@ -16,6 +17,7 @@ __all__ = [
     "Settings",
     "LOGGING_CONFIG",
     "ConfigManager",
+    "ConfigValidationError",
     "create_config_manager",
     "get_config_manager",
     "ConfigProvider",

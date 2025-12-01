@@ -18,6 +18,7 @@ from agentsmithy.domain.events import EventType
 from agentsmithy.llm.providers import register_builtin_adapters
 from agentsmithy.llm.providers.openai.models import get_model_spec
 from agentsmithy.llm.providers.registry import get_adapter
+from agentsmithy.llm.providers.types import Vendor
 from agentsmithy.utils.logger import agent_logger
 
 DEFAULT_CHAT_TEMPERATURE = 0.7
@@ -70,7 +71,7 @@ class OpenAIProvider:
                 f"Set models.agents.{agent_name or 'universal'}.workload in your config."
             )
 
-        workload_config = settings._get(f"workloads.{workload_name}", None)
+        workload_config = settings._get_workload_config(workload_name)
         if not isinstance(workload_config, dict):
             raise ValueError(
                 f"Workload '{workload_name}' not found in configuration. "
@@ -96,6 +97,7 @@ class OpenAIProvider:
         resolved_api_key = provider_def.get("api_key")
         resolved_base_url = provider_def.get("base_url")
         resolved_options = provider_def.get("options", {})
+        provider_type = provider_def.get("type", Vendor.OPENAI.value)
 
         # Apply explicit parameters (constructor args override config)
         final_model = model or resolved_model
@@ -121,38 +123,62 @@ class OpenAIProvider:
         )
 
         agent_logger.info(
-            "Initializing OpenAI provider",
+            "Initializing LLM provider",
             model=self.model,
             temperature=self.temperature,
             max_tokens=self.max_tokens,
             base_url=self.base_url,
             provider=provider_name,
+            provider_type=provider_type,
         )
 
-        # Ensure adapters are registered (no import side-effects outside this call)
-        register_builtin_adapters()
-        adapter = get_adapter(self.model)
+        # Get adapter based on provider type
+        from agentsmithy.llm.providers.base_adapter import IProviderChatAdapter
+
+        adapter: IProviderChatAdapter
+        if provider_type == Vendor.OLLAMA.value:
+            # Ollama: use dedicated adapter without stream_options
+            from agentsmithy.llm.providers.ollama.adapter import create_ollama_adapter
+
+            adapter = create_ollama_adapter(self.model)
+        else:
+            # OpenAI and compatible: use registry-based adapter resolution
+            register_builtin_adapters()
+            adapter = get_adapter(self.model)
+
+        # Store adapter for get_stream_kwargs()
+        self._adapter = adapter
+
         class_path, kwargs = adapter.build_langchain(
             temperature=self.temperature,
             max_tokens=self.max_tokens,
             reasoning_effort=DEFAULT_REASONING_EFFORT,
         )
 
-        # Apply extended OpenAI per-model options from provider config
+        # Apply extended per-model options from provider config
         extra_opts = self.provider_options
         if isinstance(extra_opts, dict) and extra_opts:
-            model_spec = get_model_spec(self.model)
-            family = getattr(model_spec, "family", "chat_completions")
-            if family == "responses":
-                # Responses API: top-level kwargs
-                kwargs.update(extra_opts)
-            else:
-                # Chat Completions: merge into model_kwargs
+            if provider_type == Vendor.OLLAMA.value:
+                # Ollama: merge into model_kwargs (chat_completions style)
                 if "model_kwargs" not in kwargs or not isinstance(
                     kwargs.get("model_kwargs"), dict
                 ):
                     kwargs["model_kwargs"] = {}
                 kwargs["model_kwargs"].update(extra_opts)
+            else:
+                # OpenAI: check model family
+                model_spec = get_model_spec(self.model)
+                family = getattr(model_spec, "family", "chat_completions")
+                if family == "responses":
+                    # Responses API: top-level kwargs
+                    kwargs.update(extra_opts)
+                else:
+                    # Chat Completions: merge into model_kwargs
+                    if "model_kwargs" not in kwargs or not isinstance(
+                        kwargs.get("model_kwargs"), dict
+                    ):
+                        kwargs["model_kwargs"] = {}
+                    kwargs["model_kwargs"].update(extra_opts)
 
         if self.base_url:
             kwargs["base_url"] = self.base_url
@@ -228,8 +254,8 @@ class OpenAIProvider:
     def get_stream_kwargs(self) -> dict[str, Any]:
         """Return vendor-specific kwargs for astream() calls.
 
-        For chat_completions family: include stream_usage=True
-        For responses family (gpt-5/gpt-5-mini): no stream_usage (unsupported)
+        For OpenAI chat_completions: include stream_usage=True
+        For OpenAI responses family: no stream_usage (unsupported)
+        For Ollama: no stream_usage (unsupported)
         """
-        adapter = get_adapter(self.model)
-        return adapter.stream_kwargs()
+        return self._adapter.stream_kwargs()

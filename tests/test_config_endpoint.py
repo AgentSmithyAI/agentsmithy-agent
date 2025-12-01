@@ -4,13 +4,17 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from fastapi.testclient import TestClient
 
+import agentsmithy.config.manager as mgr_module
 from agentsmithy.api.app import create_app
-from agentsmithy.config.manager import ConfigManager
 from agentsmithy.config.providers import LocalFileConfigProvider
+
+if TYPE_CHECKING:
+    from agentsmithy.config.manager import ConfigManager
 
 
 @pytest.fixture
@@ -33,12 +37,10 @@ async def config_manager(config_file: Path):
     }
 
     provider = LocalFileConfigProvider(config_file, defaults=defaults)
-    manager = ConfigManager(provider)
+    manager = mgr_module.ConfigManager(provider)
     await manager.initialize()
 
     # Set as global instance
-    import agentsmithy.config.manager as mgr_module
-
     old_manager = mgr_module._config_manager
     mgr_module._config_manager = manager
 
@@ -230,3 +232,173 @@ def test_update_config_rejects_unknown_agent_provider(client: TestClient):
     assert response.status_code == 400
     detail = response.json()["detail"]
     assert any("unknown workload" in err for err in detail["errors"])
+
+
+def test_delete_provider_with_null(client: TestClient):
+    """Test that setting a provider to null removes it from config."""
+    # First, add a provider
+    add_data = {
+        "config": {
+            "providers": {
+                "to-delete": {
+                    "type": "openai",
+                    "api_key": "test-key",
+                }
+            }
+        }
+    }
+    response = client.put("/api/config", json=add_data)
+    assert response.status_code == 200
+    assert "to-delete" in response.json()["config"]["providers"]
+
+    # Now delete it with null
+    delete_data = {
+        "config": {
+            "providers": {
+                "to-delete": None,
+            }
+        }
+    }
+    response = client.put("/api/config", json=delete_data)
+    assert response.status_code == 200
+    assert "to-delete" not in response.json()["config"]["providers"]
+
+
+def test_validation_errors_are_clean_no_pydantic_internals(client: TestClient):
+    """Validation errors should be human-readable without Pydantic internals."""
+    update_data = {
+        "config": {
+            "providers": {
+                "bad": {"type": "nonexistent-provider-type"},
+            }
+        }
+    }
+
+    response = client.put("/api/config", json=update_data)
+
+    assert response.status_code == 400
+    detail = response.json()["detail"]
+    errors = detail["errors"]
+
+    # Should have clean error messages
+    assert len(errors) >= 1
+
+    # Should NOT contain Pydantic internal details
+    errors_text = " ".join(errors)
+    assert "input_value" not in errors_text
+    assert "input_type" not in errors_text
+    assert "type=value_error" not in errors_text
+    assert "For further information visit" not in errors_text
+    assert "pydantic" not in errors_text.lower()
+    assert "ValidationError" not in errors_text
+
+
+def test_type_error_is_clean(client: TestClient):
+    """Type errors should be human-readable."""
+    update_data = {
+        "config": {
+            "server_port": "not-a-number",
+        }
+    }
+
+    response = client.put("/api/config", json=update_data)
+
+    assert response.status_code == 400
+    detail = response.json()["detail"]
+    errors = detail["errors"]
+
+    # Should mention the field
+    errors_text = " ".join(errors)
+    assert "server_port" in errors_text
+
+    # Should NOT contain Pydantic internals
+    assert "input_value" not in errors_text
+    assert "input_type" not in errors_text
+
+
+def test_delete_provider_with_dependencies_shows_clean_error(client: TestClient):
+    """Deleting a provider with dependencies should show clean error."""
+    # First add a provider and workload that uses it
+    setup_data = {
+        "config": {
+            "providers": {
+                "temp-provider": {"type": "openai", "api_key": "test"},
+            },
+            "workloads": {
+                "temp-workload": {"provider": "temp-provider"},
+            },
+        }
+    }
+    response = client.put("/api/config", json=setup_data)
+    assert response.status_code == 200
+
+    # Try to delete the provider (should fail)
+    delete_data = {
+        "config": {
+            "providers": {
+                "temp-provider": None,
+            }
+        }
+    }
+    response = client.put("/api/config", json=delete_data)
+
+    assert response.status_code == 400
+    detail = response.json()["detail"]
+
+    # Should have specific message about deletion being blocked
+    assert detail["message"] == "Cannot delete: dependencies exist"
+
+    errors = detail["errors"]
+    errors_text = " ".join(errors)
+
+    # Should have clean error explaining what's blocking deletion
+    assert "Cannot delete provider 'temp-provider'" in errors_text
+    assert "temp-workload" in errors_text
+
+    # Should NOT contain Pydantic internals
+    assert "input_value" not in errors_text
+    assert "ValidationError" not in errors_text
+
+
+def test_delete_workload_with_dependencies_shows_clean_error(client: TestClient):
+    """Deleting a workload referenced by agents should show clean error."""
+    # First add a provider and workload, then make an agent use the workload
+    setup_data = {
+        "config": {
+            "providers": {
+                "temp-provider": {"type": "openai", "api_key": "test"},
+            },
+            "workloads": {
+                "temp-workload": {"provider": "temp-provider", "model": "gpt-4"},
+            },
+            "models": {
+                "agents": {
+                    "universal": {"workload": "temp-workload"},
+                }
+            },
+        }
+    }
+    response = client.put("/api/config", json=setup_data)
+    assert response.status_code == 200
+
+    # Try to delete the workload (should fail because agent references it)
+    delete_data = {
+        "config": {
+            "workloads": {
+                "temp-workload": None,
+            }
+        }
+    }
+    response = client.put("/api/config", json=delete_data)
+
+    assert response.status_code == 400
+    detail = response.json()["detail"]
+
+    assert detail["message"] == "Cannot delete: dependencies exist"
+
+    errors = detail["errors"]
+    errors_text = " ".join(errors)
+
+    # Should explain what's blocking
+    assert "Cannot delete workload 'temp-workload'" in errors_text
+    assert "models.agents.universal" in errors_text

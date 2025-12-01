@@ -11,7 +11,7 @@ from agentsmithy.config.providers import (
     LayeredConfigProvider,
     LocalFileConfigProvider,
 )
-from agentsmithy.config.schema import deep_merge
+from agentsmithy.config.schema import apply_deletions, deep_merge
 from agentsmithy.utils.logger import get_logger
 
 logger = get_logger("config.manager")
@@ -119,6 +119,66 @@ class ConfigManager:
             await self.provider.save(self._config)
 
         logger.info("Configuration updated", keys=list(updates.keys()))
+        self._notify_callbacks()
+
+    async def update_with_deletions(self, updates: dict[str, Any]) -> None:
+        """Update config values, treating null values as deletions.
+
+        Unlike update(), this method will remove keys where updates has null values.
+        Used by API to handle requests like {"providers": {"old-provider": null}}.
+        """
+        # First merge, then apply deletions
+        self._config = deep_merge(self._config, updates)
+        self._config = apply_deletions(self._config, updates)
+
+        # Update only user config (without defaults)
+        if (
+            hasattr(self.provider, "_user_config")
+            and self.provider._user_config is not None
+        ):
+            user_cfg = self.provider._user_config
+            if not isinstance(user_cfg, dict):
+                user_cfg = {}
+            user_cfg = deep_merge(user_cfg, updates)
+            user_cfg = apply_deletions(user_cfg, updates)
+            self.provider._user_config = user_cfg
+            await self.provider.save(user_cfg)
+        else:
+            # Fallback for providers without user_config tracking
+            await self.provider.save(self._config)
+
+        logger.info("Configuration updated with deletions", keys=list(updates.keys()))
+        self._notify_callbacks()
+
+    async def set_all(self, config: dict[str, Any]) -> None:
+        """Replace the entire configuration.
+
+        Used for operations like rename where we need to atomically replace
+        the config rather than merge updates.
+        """
+        self._config = config.copy()
+
+        # Update user config for providers that track it
+        if (
+            hasattr(self.provider, "_user_config")
+            and self.provider._user_config is not None
+        ):
+            # For rename, we want to save the full new config
+            # but only the parts that differ from defaults
+            from agentsmithy.config.defaults import get_default_config
+
+            defaults = get_default_config()
+            # Extract user-specific overrides
+            user_cfg: dict[str, Any] = {}
+            for key, value in config.items():
+                if key not in defaults or defaults[key] != value:
+                    user_cfg[key] = value
+            self.provider._user_config = user_cfg
+            await self.provider.save(user_cfg)
+        else:
+            await self.provider.save(self._config)
+
+        logger.info("Configuration replaced", keys=list(config.keys()))
         self._notify_callbacks()
 
     def get_all(self) -> dict[str, Any]:

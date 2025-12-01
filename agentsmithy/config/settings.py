@@ -175,6 +175,22 @@ class Settings:
         )
 
     # LLM Configuration
+    def _get_workload_config(self, workload_name: str) -> dict | None:
+        """Get workload config by name.
+
+        Uses direct dict lookup instead of dot-notation because workload names
+        can contain dots (e.g., 'gpt-5.1-codex').
+        """
+        if self._config_manager:
+            cfg = self._config_manager.get_all()
+            workloads = cfg.get("workloads") if isinstance(cfg, dict) else None
+        else:
+            workloads = None
+        if not isinstance(workloads, dict):
+            return None
+        wl_config = workloads.get(workload_name)
+        return wl_config if isinstance(wl_config, dict) else None
+
     @property
     def model(self) -> str | None:
         # Resolve from models.agents.universal -> workload -> model
@@ -187,8 +203,8 @@ class Settings:
         workload = uni.get("workload")
         if not workload:
             return None
-        wl_config = self._get(f"workloads.{workload}", None)
-        if not isinstance(wl_config, dict):
+        wl_config = self._get_workload_config(workload)
+        if not wl_config:
             return None
         return wl_config.get("model")
 
@@ -201,8 +217,8 @@ class Settings:
         workload = models.get("workload")
         if not workload:
             return None
-        wl_config = self._get(f"workloads.{workload}", None)
-        if not isinstance(wl_config, dict):
+        wl_config = self._get_workload_config(workload)
+        if not wl_config:
             return None
         return wl_config.get("model")
 

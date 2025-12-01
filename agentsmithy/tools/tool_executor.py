@@ -642,7 +642,10 @@ class ToolExecutor:
                 break
 
             agent_logger.info(
-                "LLM streaming", messages=len(conversation), iteration=iteration_count
+                "LLM streaming",
+                model=getattr(self.llm_provider, "model", "unknown"),
+                messages=len(conversation),
+                iteration=iteration_count,
             )
 
             # Use astream for true streaming

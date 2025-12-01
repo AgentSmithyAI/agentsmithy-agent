@@ -20,7 +20,7 @@ Create a `.env` file in your workdir with the following variables:
 OPENAI_API_KEY=sk-your-api-key-here
 
 # Optional model configuration
-MODEL=gpt-4o
+MODEL=gpt-5.1-codex
 EMBEDDING_MODEL=text-embedding-3-small
 OPENAI_BASE_URL=https://api.openai.com/v1
 
@@ -45,7 +45,7 @@ Each provider entry describes **credentials + transport** — API key, base URL,
 ```json
 {
   "providers": {
-    "openai-shared": {
+    "openai": {
       "type": "openai",
       "api_key": "sk-openai-key",
       "base_url": "https://api.openai.com/v1",
@@ -55,79 +55,155 @@ Each provider entry describes **credentials + transport** — API key, base URL,
       "type": "openai",
       "api_key": "sk-openrouter-key",
       "base_url": "https://openrouter.ai/api/v1",
-      "options": {
-        "default_provider": "anthropic"
-      }
+      "options": {}
+    },
+    "ollama": {
+      "type": "ollama",
+      "base_url": "http://localhost:11434/v1",
+      "options": {}
     }
   }
 }
 ```
 
-### Workloads and Model References
+### Workloads
 
-`workloads` connect a provider profile to a concrete model (or per-task overrides). Then `models.*` simply reference the workload by name:
+Workloads connect a provider to a specific model. **Workload names are typically model names** for clarity:
 
 ```json
 {
   "workloads": {
-    "reasoning":  { "provider": "openai-shared", "model": "gpt-5" },
-    "execution":  { "provider": "openai-shared", "model": "gpt-5-mini" },
-    "summarizer": { "provider": "openai-shared", "model": "gpt-5-mini" },
-    "embeddings": { "provider": "openai-shared", "model": "text-embedding-3-small" }
-  },
-  "models": {
-    "agents": {
-      "universal": {
-        "workload": "reasoning"
-      },
-      "inspector": {
-        "workload": "execution"
-      }
+    "gpt-5.1-codex": {
+      "provider": "openai",
+      "model": "gpt-5.1-codex",
+      "kind": "chat",
+      "options": {}
     },
-    "embeddings": {
-      "workload": "embeddings"
+    "gpt-5.1-codex-mini": {
+      "provider": "openai",
+      "model": "gpt-5.1-codex-mini",
+      "kind": "chat",
+      "options": {}
     },
-    "summarization": {
-      "workload": "summarizer"
+    "text-embedding-3-small": {
+      "provider": "openai",
+      "model": "text-embedding-3-small",
+      "kind": "embeddings",
+      "options": {}
     }
   }
 }
 ```
 
-The `summarization` model is used for generating dialog summaries when history becomes too long. Using a weaker/cheaper model for summarization helps reduce costs while maintaining quality for the main agent work.
+**Note:** Default workloads are auto-generated from the model catalog. You only need to define custom workloads for:
+- Using a different provider (e.g., OpenRouter, Ollama)
+- Custom model options
+- Models not in the default catalog
+
+### Workload Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `provider` | string | Reference to a provider name |
+| `model` | string | Model name to use |
+| `kind` | "chat" \| "embeddings" \| null | Workload type. Auto-detected if null |
+| `options` | object | Model-specific options (temperature, etc.) |
+
+### Model References
+
+`models.*` reference workloads by name:
+
+```json
+{
+  "models": {
+    "agents": {
+      "universal": { "workload": "gpt-5.1-codex" },
+      "inspector": { "workload": "gpt-5.1-codex-mini" }
+    },
+    "embeddings": { "workload": "text-embedding-3-small" },
+    "summarization": { "workload": "gpt-5.1-codex-mini" }
+  }
+}
+```
 
 ## Provider Fields
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `type` | string | Provider type (currently only "openai") |
-| `model` | string | Model name to use |
+| `type` | string | Provider type: "openai", "ollama", "anthropic", "xai", "deepseek", "other" |
 | `api_key` | string/null | API key for authentication |
 | `base_url` | string/null | Base URL for the API endpoint |
 | `options` | object | Additional provider-specific options |
 
 ## Examples
 
-### Local OpenAI-compatible Server (Ollama)
+### Default Configuration (OpenAI)
 
-**Note:** Port 11434 is Ollama's default port, not AgentSmithy's server port (which is 8765).
+Minimal config - just set the API key:
 
 ```json
 {
   "providers": {
-    "local-llm": {
+    "openai": {
       "type": "openai",
-      "model": "gpt-4.1",
-      "api_key": "not-needed",
-      "base_url": "http://localhost:11434/v1",  // Ollama server
-      "options": {}
+      "api_key": "sk-your-key"
+    }
+  }
+}
+```
+
+Default workloads are auto-generated for all supported models.
+
+### Local Ollama Server
+
+```json
+{
+  "providers": {
+    "ollama": {
+      "type": "ollama",
+      "base_url": "http://localhost:11434/v1"
+    }
+  },
+  "workloads": {
+    "llama3:70b": {
+      "provider": "ollama",
+      "model": "llama3:70b"
     }
   },
   "models": {
     "agents": {
-      "universal": {
-        "provider": "local-llm"
-      }
+      "universal": { "workload": "llama3:70b" }
+    }
+  }
+}
+```
+
+**Note:** Ollama models are dynamically discovered from the Ollama API when the server is running.
+
+### OpenRouter (Multiple Models)
+
+```json
+{
+  "providers": {
+    "openrouter": {
+      "type": "openai",
+      "api_key": "sk-openrouter-key",
+      "base_url": "https://openrouter.ai/api/v1"
+    }
+  },
+  "workloads": {
+    "claude-3-opus": {
+      "provider": "openrouter",
+      "model": "anthropic/claude-3-opus"
+    },
+    "gemini-pro": {
+      "provider": "openrouter",
+      "model": "google/gemini-pro"
+    }
+  },
+  "models": {
+    "agents": {
+      "universal": { "workload": "claude-3-opus" }
     }
   }
 }
@@ -140,18 +216,22 @@ The `summarization` model is used for generating dialog summaries when history b
   "providers": {
     "openai-prod": {
       "type": "openai",
-      "api_key": "sk-prod-key",
-      "base_url": "https://api.openai.com/v1"
+      "api_key": "sk-prod-key"
     },
     "openai-dev": {
       "type": "openai",
-      "api_key": "sk-dev-key",
-      "base_url": "https://api.openai.com/v1"
+      "api_key": "sk-dev-key"
     }
   },
   "workloads": {
-    "reasoning": { "provider": "openai-prod", "model": "gpt-5" },
-    "execution": { "provider": "openai-dev", "model": "gpt-4.1" }
+    "prod-gpt5": {
+      "provider": "openai-prod",
+      "model": "gpt-5.1-codex"
+    },
+    "dev-gpt5-mini": {
+      "provider": "openai-dev",
+      "model": "gpt-5.1-codex-mini"
+    }
   }
 }
 ```
@@ -163,7 +243,6 @@ The `summarization` model is used for generating dialog summaries when history b
   "providers": {
     "azure": {
       "type": "openai",
-      "model": "gpt-5",
       "api_key": "your-azure-key",
       "base_url": "https://your-resource.openai.azure.com/",
       "options": {
@@ -174,50 +253,47 @@ The `summarization` model is used for generating dialog summaries when history b
 }
 ```
 
-## Backwards Compatibility
+## Auto-Generated Workloads
 
-The legacy configuration format is still supported:
+Default workloads are automatically generated from the model catalog:
 
-```json
-{
-  "models": {
-    "agents": {
-      "universal": {
-        "model": "gpt-5"
-      }
-    }
-  },
-  "providers": {
-    "openai": {
-      "api_key": null,
-      "base_url": null
-    }
-  }
-}
-```
+- **OpenAI chat models**: `gpt-5.1`, `gpt-5.1-codex`, `gpt-5.1-codex-mini`
+- **OpenAI embedding models**: `text-embedding-3-small`, `text-embedding-3-large`
+- **Ollama models**: Dynamically discovered from running Ollama server
 
-When no provider is specified, the system falls back to the default "openai" provider credentials.
+When you configure a custom workload with the same name, your settings override the defaults.
+
+## Workload Kind Auto-Detection
+
+The `kind` field determines whether a workload is for chat or embeddings:
+
+- **Explicit**: Set `"kind": "chat"` or `"kind": "embeddings"`
+- **Auto-detect**: Leave `kind` as `null` or omit it — detected from model name:
+  - Models containing "embedding" → `embeddings`
+  - Everything else → `chat`
+
+Known embedding models (auto-detected):
+- OpenAI: `text-embedding-3-small`, `text-embedding-3-large`, `text-embedding-ada-002`
+- Ollama: `nomic-embed-text`, `mxbai-embed-large`, `all-minilm`, `snowflake-arctic-embed`
 
 ## Model Types
 
 ### Agent Models
 
-- **universal**: Main agent used for general-purpose tasks (strong model)
+- **universal**: Main agent used for general-purpose tasks (strong model recommended)
 - **inspector**: Project inspector agent (can use weaker model)
 
 ### Summarization Model
 
-The `summarization` model is specifically used for generating dialog history summaries. When a conversation becomes too long, the system automatically creates summaries to maintain context while reducing token usage.
-
-**Best Practice**: Use a weaker/cheaper model (like `gpt-5-mini`) for summarization to optimize costs, while keeping strong models (like `gpt-5`) for actual agent work.
-
-Example configuration:
+The `summarization` model generates dialog history summaries. Use a weaker/cheaper model to optimize costs:
 
 ```json
 {
-  "workloads": {
-    "reasoning": { "provider": "openai-shared", "model": "gpt-5" },
-    "summarization": { "provider": "openai-shared", "model": "gpt-5-mini" }
+  "models": {
+    "agents": {
+      "universal": { "workload": "gpt-5.1-codex" }
+    },
+    "summarization": { "workload": "gpt-5.1-codex-mini" }
   }
 }
 ```
@@ -229,9 +305,8 @@ The `embeddings` model is used for RAG (Retrieval-Augmented Generation) operatio
 ## Benefits
 
 1. **Multiple Endpoints**: Use different OpenAI-compatible servers for different agents
-2. **Cost Optimization**: Route different workloads to different API keys or accounts (e.g., weak models for summarization, strong models for main work)
+2. **Cost Optimization**: Route workloads to appropriate models (strong for reasoning, cheap for summarization)
 3. **Development/Production Separation**: Use different configurations for different environments
-4. **Local Development**: Use local models for development while keeping production configs separate
+4. **Local Development**: Use Ollama for development while keeping production configs separate
 5. **Fallback Support**: Configure multiple providers for redundancy
-6. **Smart Resource Allocation**: Use powerful models where they matter and cheaper models for background tasks
-
+6. **Any Model**: Use any model from any provider — no validation restrictions

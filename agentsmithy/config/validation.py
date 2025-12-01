@@ -1,44 +1,24 @@
-"""Configuration validation for supported OpenAI models and API key."""
+"""Configuration validation for API key.
+
+Note: Model validation is NOT performed here. Users can use any model.
+The SUPPORTED_*_MODELS lists are only used for UI suggestions/recommendations.
+"""
 
 from __future__ import annotations
 
 import os
-from collections.abc import Iterable
-
-from agentsmithy.llm.providers.openai.models import (
-    SUPPORTED_OPENAI_CHAT_MODELS,
-    SUPPORTED_OPENAI_EMBEDDING_MODELS,
-)
-
-
-def _format_options(options: Iterable[str]) -> str:
-    # Convert to list to ensure we can sort it (handles lazy iterables)
-    return ", ".join(sorted(list(options)))
 
 
 def validate_or_raise(
     model: str | None, embedding_model: str | None, api_key: str | None
 ) -> None:
-    """Validate configured chat and embedding models and OpenAI API key.
+    """Validate OpenAI API key is configured.
 
-    Rules:
-    - model must be one of strictly supported OpenAI chat models
-    - embedding_model must be one of strictly supported embedding models
-    - OPENAI_API_KEY must be set (via settings or environment)
+    Note: Model names are NOT validated. Users can use any model supported
+    by their provider (OpenAI, OpenRouter, Ollama, etc.).
     """
-    m = model or ""
-    if m not in SUPPORTED_OPENAI_CHAT_MODELS:
-        raise ValueError(
-            "Unsupported OpenAI chat model: '" + (model or "") + "'. "
-            "Supported: " + _format_options(SUPPORTED_OPENAI_CHAT_MODELS)
-        )
-
-    em = embedding_model or ""
-    if em not in SUPPORTED_OPENAI_EMBEDDING_MODELS:
-        raise ValueError(
-            "Unsupported OpenAI embedding model: '" + (embedding_model or "") + "'. "
-            "Supported: " + _format_options(SUPPORTED_OPENAI_EMBEDDING_MODELS)
-        )
+    # Model validation removed - any model is allowed
+    # SUPPORTED_*_MODELS are only for UI suggestions
 
     key = api_key or os.getenv("OPENAI_API_KEY")
     if not key:
