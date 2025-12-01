@@ -57,6 +57,7 @@ async def test_tool_execution_error_centralized_handling():
     mock_provider = MagicMock()
     mock_llm = MagicMock()
     mock_provider.bind_tools = MagicMock(return_value=mock_llm)
+    mock_provider.bind_tools_without_thinking = MagicMock(return_value=mock_llm)
     mock_llm.astream = MagicMock(side_effect=mock_llm_stream)
     mock_provider.get_stream_kwargs = MagicMock(return_value={})
 

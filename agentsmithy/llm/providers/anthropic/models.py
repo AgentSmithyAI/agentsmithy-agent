@@ -1,10 +1,10 @@
 """Anthropic model specifications.
 
 Anthropic uses the Messages API with specific features:
-- Supports temperature (0.0-1.0)
+- Supports temperature (0.0-1.0) when extended thinking is disabled
 - Supports max_tokens (required for Claude)
 - Supports streaming with usage info
-- Extended thinking available for Claude 4+ models via thinking parameter
+- Extended thinking enabled by default for Claude 4+ models
 """
 
 from __future__ import annotations
@@ -63,6 +63,7 @@ class AnthropicModelSpec(IModelSpec):
         """Build kwargs for ChatAnthropic.
 
         Anthropic requires max_tokens to be set.
+        Extended thinking is enabled by default for Claude 4+ models.
         """
         base_kwargs: dict[str, Any] = {
             "model": self.name,
@@ -72,24 +73,25 @@ class AnthropicModelSpec(IModelSpec):
         if max_tokens is not None:
             base_kwargs["max_tokens"] = max_tokens
         else:
-            # Default max_tokens for Claude
-            base_kwargs["max_tokens"] = 4096
+            # Default max_tokens for Claude (higher for extended thinking)
+            base_kwargs["max_tokens"] = (
+                16384 if self.supports_extended_thinking() else 4096
+            )
 
         # Temperature (not supported for extended thinking models)
         if temperature is not None and self.supports_temperature():
             base_kwargs["temperature"] = temperature
 
-        # Extended thinking configuration
+        # Extended thinking configuration for Claude 4+ models
         model_kwargs: dict[str, Any] = {}
         if self.supports_extended_thinking():
-            # Extended thinking models require thinking budget
             # Map reasoning_effort to budget_tokens
             budget_map = {
-                "low": 1024,
-                "medium": 4096,
-                "high": 16384,
+                "low": 2048,
+                "medium": 8192,
+                "high": 32768,
             }
-            budget_tokens = budget_map.get(reasoning_effort, 4096)
+            budget_tokens = budget_map.get(reasoning_effort, 8192)
             model_kwargs["thinking"] = {
                 "type": "enabled",
                 "budget_tokens": budget_tokens,

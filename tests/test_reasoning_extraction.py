@@ -64,8 +64,9 @@ class TestLangChainResponsesV1Format:
                 }
             ]
         )
-        result = executor._extract_reasoning_from_chunk(chunk)
+        result, signature = executor._extract_reasoning_from_chunk(chunk)
         assert result == "Analyzing..."
+        assert signature is None
 
     def test_multiple_summary_items(self, executor: ToolExecutor) -> None:
         """Extract and concatenate multiple summary items."""
@@ -81,13 +82,13 @@ class TestLangChainResponsesV1Format:
                 }
             ]
         )
-        result = executor._extract_reasoning_from_chunk(chunk)
+        result, _ = executor._extract_reasoning_from_chunk(chunk)
         assert result == "First. Second."
 
     def test_empty_summary_list(self, executor: ToolExecutor) -> None:
         """Handle empty summary list gracefully."""
         chunk = make_chunk(content=[{"type": "reasoning", "summary": [], "index": 0}])
-        result = executor._extract_reasoning_from_chunk(chunk)
+        result, _ = executor._extract_reasoning_from_chunk(chunk)
         assert result is None
 
     def test_summary_item_without_text(self, executor: ToolExecutor) -> None:
@@ -101,7 +102,7 @@ class TestLangChainResponsesV1Format:
                 }
             ]
         )
-        result = executor._extract_reasoning_from_chunk(chunk)
+        result, _ = executor._extract_reasoning_from_chunk(chunk)
         assert result is None
 
     def test_mixed_content_blocks(self, executor: ToolExecutor) -> None:
@@ -116,7 +117,7 @@ class TestLangChainResponsesV1Format:
                 {"type": "text", "text": "World"},
             ]
         )
-        result = executor._extract_reasoning_from_chunk(chunk)
+        result, _ = executor._extract_reasoning_from_chunk(chunk)
         assert result == "Thinking..."
 
 
@@ -131,7 +132,7 @@ class TestDirectReasoningField:
         chunk = make_chunk(
             content=[{"type": "reasoning", "reasoning": "Direct reasoning"}]
         )
-        result = executor._extract_reasoning_from_chunk(chunk)
+        result, _ = executor._extract_reasoning_from_chunk(chunk)
         assert result == "Direct reasoning"
 
     def test_multiple_reasoning_blocks_concatenated(
@@ -144,7 +145,7 @@ class TestDirectReasoningField:
                 {"type": "reasoning", "reasoning": "Second block."},
             ]
         )
-        result = executor._extract_reasoning_from_chunk(chunk)
+        result, _ = executor._extract_reasoning_from_chunk(chunk)
         assert result == "First block. Second block."
 
 
@@ -164,7 +165,7 @@ class TestOtherProvidersFormat:
             additional_kwargs={"reasoning_content": "Legacy reasoning"},
             response_metadata={},  # No model_provider
         )
-        result = executor._extract_reasoning_from_chunk(chunk)
+        result, _ = executor._extract_reasoning_from_chunk(chunk)
         assert result == "Legacy reasoning"
 
 
@@ -174,31 +175,31 @@ class TestEdgeCases:
     def test_none_content(self, executor: ToolExecutor) -> None:
         """Handle None content gracefully."""
         chunk = make_chunk(content=None)
-        result = executor._extract_reasoning_from_chunk(chunk)
+        result, _ = executor._extract_reasoning_from_chunk(chunk)
         assert result is None
 
     def test_string_content(self, executor: ToolExecutor) -> None:
         """Handle string content (non-list) gracefully."""
         chunk = make_chunk(content="Just a string")
-        result = executor._extract_reasoning_from_chunk(chunk)
+        result, _ = executor._extract_reasoning_from_chunk(chunk)
         assert result is None
 
     def test_empty_content_list(self, executor: ToolExecutor) -> None:
         """Handle empty content list."""
         chunk = make_chunk(content=[])
-        result = executor._extract_reasoning_from_chunk(chunk)
+        result, _ = executor._extract_reasoning_from_chunk(chunk)
         assert result is None
 
     def test_empty_reasoning_string(self, executor: ToolExecutor) -> None:
         """Empty reasoning string should return None."""
         chunk = make_chunk(content=[{"type": "reasoning", "reasoning": ""}])
-        result = executor._extract_reasoning_from_chunk(chunk)
+        result, _ = executor._extract_reasoning_from_chunk(chunk)
         assert result is None
 
     def test_no_reasoning_blocks(self, executor: ToolExecutor) -> None:
         """No reasoning blocks should return None."""
         chunk = make_chunk(content=[{"type": "text", "text": "Hello"}])
-        result = executor._extract_reasoning_from_chunk(chunk)
+        result, _ = executor._extract_reasoning_from_chunk(chunk)
         assert result is None
 
 

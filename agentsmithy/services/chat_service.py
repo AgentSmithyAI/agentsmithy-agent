@@ -926,8 +926,11 @@ class ChatService:
                                     AIMessage,
                                 )
 
+                                # IMPORTANT: Preserve structured content (list of blocks)
+                                # for Anthropic thinking support
+                                original_content = getattr(msg, "content", "")
                                 persisted = AIMessage(
-                                    content=getattr(msg, "content", ""),
+                                    content=original_content,
                                     tool_calls=filtered_calls,
                                 )
                                 try:

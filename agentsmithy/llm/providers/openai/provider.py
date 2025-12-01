@@ -211,6 +211,10 @@ class OpenAIProvider:
             pass
         self.llm = cls(**kwargs)
 
+        # Store for creating LLM without thinking
+        self._llm_class = cls
+        self._llm_kwargs = kwargs.copy()
+
         # Track last observed usage in streaming mode
         self._last_usage: dict[str, Any] | None = None
 
@@ -273,3 +277,35 @@ class OpenAIProvider:
         For Ollama: no stream_usage (unsupported)
         """
         return self._adapter.stream_kwargs()
+
+    def is_extended_thinking_enabled(self) -> bool:
+        """Check if extended thinking is enabled for current model.
+
+        Returns True for Anthropic models that support and have extended thinking enabled.
+        """
+        if self._adapter.vendor() != Vendor.ANTHROPIC:
+            return False
+        # Check if model spec supports extended thinking
+        impl = getattr(self._adapter, "_impl", None)
+        if impl and hasattr(impl, "supports_extended_thinking"):
+            return impl.supports_extended_thinking()
+        return False
+
+    def bind_tools_without_thinking(self, tools: list[BaseTool]):
+        """Bind tools to LLM with extended thinking disabled.
+
+        For Anthropic models with extended thinking, this creates a new LLM
+        instance with thinking disabled to avoid the requirement for
+        thinking blocks in multi-turn tool conversations.
+        """
+        if self.is_extended_thinking_enabled():
+            # Create new LLM without thinking
+            kwargs_no_thinking = self._llm_kwargs.copy()
+            model_kwargs = kwargs_no_thinking.get("model_kwargs", {}).copy()
+            # Remove thinking from model_kwargs
+            model_kwargs.pop("thinking", None)
+            kwargs_no_thinking["model_kwargs"] = model_kwargs
+            llm_no_thinking = self._llm_class(**kwargs_no_thinking)
+            return llm_no_thinking.bind_tools(tools)
+        else:
+            return self.llm.bind_tools(tools)

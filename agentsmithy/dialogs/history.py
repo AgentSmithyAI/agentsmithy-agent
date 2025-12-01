@@ -116,9 +116,20 @@ class DialogHistory:
         self._cached_messages = None  # Invalidate cache
 
     @_touch_metadata
-    def add_ai_message(self, content: str) -> None:
-        """Add an AI message to the history."""
-        self.history.add_ai_message(content)
+    def add_ai_message(self, content: str | list) -> None:
+        """Add an AI message to the history.
+
+        Args:
+            content: Message content. Can be:
+                - str: Simple text content (OpenAI style)
+                - list: Structured content blocks (Anthropic style with thinking)
+        """
+        from langchain_core.messages import AIMessage
+
+        # Use AIMessage directly to preserve structured content (list of blocks)
+        # SQLChatMessageHistory will serialize it properly to JSON
+        message = AIMessage(content=content)
+        self.history.add_message(message)
         self._cached_messages = None  # Invalidate cache
 
     @_touch_metadata
