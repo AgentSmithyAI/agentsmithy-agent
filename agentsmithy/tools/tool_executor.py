@@ -123,7 +123,7 @@ class ToolExecutor:
                 )
 
     def _bind_tools(self):
-        # The provider returns an LLM object with tools bound (LangChain style)
+        """Bind tools to LLM with thinking enabled if supported."""
         tools = as_langchain_tools(self.tool_manager)
         return self.llm_provider.bind_tools(tools)
 
@@ -219,21 +219,45 @@ class ToolExecutor:
                 dialog_id=self._dialog_id,
             )
 
-    def _extract_reasoning_from_chunk(self, chunk: AIMessageChunk) -> str | None:
-        """Extract reasoning text from a streaming chunk.
+    def _extract_reasoning_from_chunk(
+        self, chunk: AIMessageChunk
+    ) -> tuple[str | None, str | None]:
+        """Extract reasoning text and signature from a streaming chunk.
 
         Uses LangChain's content_blocks which normalizes reasoning across providers.
-        Returns reasoning text if found, None otherwise.
+        Returns (reasoning_text, signature) tuple.
         """
         # content_blocks normalizes all formats (summary, reasoning_content, etc.)
         # into standard ReasoningContentBlock with 'reasoning' field
-        parts: list[str] = []
+        # For Anthropic: thinking -> reasoning, signature goes to extras
+        reasoning_parts: list[str] = []
+        signature: str | None = None
+
         for block in chunk.content_blocks:
-            if block.get("type") == "reasoning":
+            block_type = block.get("type")
+            if block_type == "reasoning":
+                # LangChain normalized format
                 reasoning = block.get("reasoning")
                 if isinstance(reasoning, str) and reasoning:
-                    parts.append(reasoning)
-        return "".join(parts) if parts else None
+                    reasoning_parts.append(reasoning)
+                # Signature may be in extras (LangChain normalization)
+                extras = block.get("extras", {})
+                if isinstance(extras, dict):
+                    sig = extras.get("signature")
+                    if isinstance(sig, str) and sig:
+                        signature = sig
+            elif block_type == "thinking":
+                # Anthropic native format (extended thinking)
+                # Can have either 'thinking' text or 'signature'
+                thinking = block.get("thinking")
+                if isinstance(thinking, str) and thinking:
+                    reasoning_parts.append(thinking)
+                sig = block.get("signature")
+                if isinstance(sig, str) and sig:
+                    signature = sig
+
+        reasoning_text = "".join(reasoning_parts) if reasoning_parts else None
+        return reasoning_text, signature
 
     def _build_tool_calls_payload(
         self, accumulated_tool_calls: list[AccumulatedToolCall]
@@ -485,10 +509,12 @@ class ToolExecutor:
                             filtered_calls.append(tc)
 
                     # Build a shallow copy of the message for persistence
+                    # IMPORTANT: Preserve structured content (list of blocks) for Anthropic thinking
                     from langchain_core.messages import AIMessage
 
+                    original_content = getattr(ai_message, "content", "")
                     persisted = AIMessage(
-                        content=getattr(ai_message, "content", ""),
+                        content=original_content,  # Preserve structured content as-is
                         tool_calls=filtered_calls,
                     )
                     try:
@@ -519,6 +545,7 @@ class ToolExecutor:
         self, messages: list[BaseMessage]
     ) -> dict[str, Any]:
         """Non-streaming path using iterative tool loop until completion."""
+        # First request with thinking enabled
         bound_llm = self._bind_tools()
         conversation: list[BaseMessage] = list(messages)
         aggregated_tool_results: list[dict[str, Any]] = []
@@ -617,6 +644,7 @@ class ToolExecutor:
         self, messages: list[BaseMessage]
     ) -> AsyncGenerator[StreamEvent]:
         """Streaming loop: emit typed event objects as they happen."""
+        # First request with thinking enabled (for reasoning on first turn)
         bound_llm = self._bind_tools()
         conversation: list[BaseMessage] = list(messages)
 
@@ -653,6 +681,10 @@ class ToolExecutor:
             accumulated_tool_calls: list[AccumulatedToolCall] = []
             current_tool_call: AccumulatedToolCall | None = None
 
+            # Accumulate thinking blocks for Anthropic (need thinking + signature)
+            accumulated_thinking: str = ""
+            accumulated_signature: str = ""
+
             # Boundary markers for chat and reasoning
             chat_started = False
             reasoning_started = False
@@ -676,16 +708,22 @@ class ToolExecutor:
                         last_usage = usage
 
                     # Extract and yield reasoning if present
-                    reasoning_text = self._extract_reasoning_from_chunk(chunk)
+                    reasoning_text, signature = self._extract_reasoning_from_chunk(
+                        chunk
+                    )
                     if reasoning_text:
+                        accumulated_thinking += reasoning_text
                         if not reasoning_started:
                             reasoning_started = True
                             yield ReasoningStartEvent()
                         yield ReasoningEvent(content=reasoning_text)
+                    if signature:
+                        accumulated_signature = signature
 
                     # Handle content chunks
                     content = chunk.content
                     if content:
+                        # Extract text for streaming to client
                         text = self._extract_text_from_content(content)
                         if text:
                             if not chat_started:
@@ -744,9 +782,27 @@ class ToolExecutor:
             # Build tool_calls payload using helper
             tool_calls_payload = self._build_tool_calls_payload(accumulated_tool_calls)
 
+            # Build content for AI message
+            # Include thinking block with signature if available (for Anthropic multi-turn)
+            content_for_message: Any
+            if accumulated_thinking and accumulated_signature:
+                # Anthropic requires thinking block with signature at start of assistant message
+                content_blocks: list[dict[str, Any]] = [
+                    {
+                        "type": "thinking",
+                        "thinking": accumulated_thinking,
+                        "signature": accumulated_signature,
+                    }
+                ]
+                if accumulated_content:
+                    content_blocks.append({"type": "text", "text": accumulated_content})
+                content_for_message = content_blocks
+            else:
+                content_for_message = accumulated_content or ""
+
             # Create AI message with tool_calls set at construction
             ai_message = AIMessage(
-                content=accumulated_content or "", tool_calls=tool_calls_payload
+                content=content_for_message, tool_calls=tool_calls_payload
             )
             # Ensure tool_calls are also present in additional_kwargs for SQL history round-trip
             try:
@@ -912,5 +968,9 @@ class ToolExecutor:
 
                     # Continue processing (don't return) - model may retry
                     continue
+
+            # Reset accumulated thinking for next iteration
+            accumulated_thinking = ""
+            accumulated_signature = ""
 
             # Assistant message already appended above

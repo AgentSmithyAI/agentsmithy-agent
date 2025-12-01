@@ -122,17 +122,18 @@ class BaseAgent(ABC):
                 - True: Load all tool results
                 - list[str]: Load specific tool_call_ids
         """
+        # Build combined system prompt (Anthropic requires single system message)
+        system_parts: list[str] = []
+
         # Get runtime-enhanced system prompt if available
         system_prompt = self._get_runtime_system_prompt(context)
-        messages: list[BaseMessage] = [SystemMessage(content=system_prompt)]
+        system_parts.append(system_prompt)
 
-        # If a dialog summary is available, include it as a SystemMessage first
+        # If a dialog summary is available, include it in system prompt
         dialog_summary = context.get("dialog_summary")
         if dialog_summary:
-            messages.append(
-                SystemMessage(
-                    content=f"Dialog Summary (earlier turns):\n{dialog_summary}"
-                )
+            system_parts.append(
+                f"\n\nDialog Summary (earlier turns):\n{dialog_summary}"
             )
 
         # Extract project and dialog_id for tool results loading
@@ -145,6 +146,9 @@ class BaseAgent(ABC):
             from agentsmithy.dialogs.history import DialogHistory
 
             _ = DialogHistory(project, dialog_id).db_path
+
+        # Collect dialog history messages (will be added after system message)
+        history_messages: list[BaseMessage] = []
 
         # Add dialog history as actual messages (not as context text)
         if context and context.get("dialog") and context["dialog"].get("messages"):
@@ -163,29 +167,49 @@ class BaseAgent(ABC):
                     if isinstance(msg, ToolMessage):
                         continue
 
-                    # Sanitize AIMessage with tool_calls: historical assistant tool_calls must not be
-                    # included unless followed immediately by ToolMessages (which we purposefully skip).
-                    # To satisfy OpenAI constraints, convert any AIMessage that has tool_calls (empty or not)
-                    # into a plain assistant message without tool_calls.
+                    # Sanitize AIMessage: filter out tool_use blocks but keep thinking with signature
+                    # - tool_use: historical tool calls must not be in content (they're in tool_calls)
+                    # - thinking blocks WITH signature: keep for Anthropic extended thinking
+                    # - thinking blocks WITHOUT signature: filter out (incomplete)
                     if isinstance(msg, AIMessage):
-                        try:
-                            has_tool_calls = getattr(msg, "tool_calls", None)
-                        except Exception:
-                            has_tool_calls = None
-                        if has_tool_calls is not None:
-                            messages.append(
-                                AIMessage(content=getattr(msg, "content", ""))
-                            )
+                        original_content = getattr(msg, "content", "")
+                        if isinstance(original_content, list):
+                            # Filter blocks: keep text and thinking-with-signature
+                            filtered_blocks: list[Any] = []
+                            for block in original_content:
+                                if isinstance(block, str):
+                                    if block.strip():
+                                        filtered_blocks.append(block)
+                                elif isinstance(block, dict):
+                                    block_type = block.get("type", "")
+                                    if block_type == "text":
+                                        text = block.get("text", "")
+                                        if text and text.strip():
+                                            filtered_blocks.append(block)
+                                    elif block_type == "thinking":
+                                        # Keep thinking block only if it has signature
+                                        if block.get("signature"):
+                                            filtered_blocks.append(block)
+                                    # Skip tool_use, redacted_thinking without signature
+                            # Only include if there are blocks
+                            if filtered_blocks:
+                                history_messages.append(
+                                    AIMessage(content=filtered_blocks)
+                                )
                         else:
-                            messages.append(msg)
+                            # String content - include if non-empty
+                            if original_content and original_content.strip():
+                                history_messages.append(
+                                    AIMessage(content=original_content)
+                                )
                     else:
-                        messages.append(msg)
+                        history_messages.append(msg)
                 # Otherwise convert from dict (backward compatibility)
                 elif isinstance(msg, dict):
                     if msg.get("role") == "user":
-                        messages.append(HumanMessage(content=msg["content"]))
+                        history_messages.append(HumanMessage(content=msg["content"]))
                     elif msg.get("role") == "assistant":
-                        messages.append(AIMessage(content=msg["content"]))
+                        history_messages.append(AIMessage(content=msg["content"]))
 
             # Remove dialog from context to avoid duplication
             context = dict(context)
@@ -197,10 +221,16 @@ class BaseAgent(ABC):
             context = dict(context)
             context.pop("project", None)
 
-        # Add remaining context if available
+        # Add remaining context to system prompt if available
         formatted_context = self.context_builder.format_context_for_prompt(context)
         if formatted_context:
-            messages.append(SystemMessage(content=f"Context:\n{formatted_context}"))
+            system_parts.append(f"\n\nContext:\n{formatted_context}")
+
+        # Create single combined system message (required for Anthropic compatibility)
+        messages: list[BaseMessage] = [SystemMessage(content="".join(system_parts))]
+
+        # Add dialog history messages
+        messages.extend(history_messages)
 
         # Add current user query
         messages.append(HumanMessage(content=query))

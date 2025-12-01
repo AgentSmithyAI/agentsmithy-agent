@@ -45,7 +45,21 @@ def _build_default_workloads() -> dict[str, Any]:
         # Fallback if import fails (shouldn't happen in normal operation)
         pass
 
-    # TODO: Add Anthropic, Google, xAI model catalogs when implemented
+    # Anthropic models
+    try:
+        from agentsmithy.llm.providers.anthropic.models import ANTHROPIC_WORKLOADS
+
+        for workload_name, model_id in ANTHROPIC_WORKLOADS.items():
+            workloads[workload_name] = {
+                "provider": "anthropic",
+                "model": model_id,
+                "kind": "chat",
+                "options": {},
+            }
+    except ImportError:
+        pass
+
+    # TODO: Add Google, xAI model catalogs when implemented
 
     return workloads
 
@@ -61,6 +75,12 @@ def get_default_config() -> dict[str, Any]:
                 "type": "openai",
                 "api_key": None,
                 "base_url": "https://api.openai.com/v1",
+                "options": {},
+            },
+            # Anthropic Claude models
+            "anthropic": {
+                "type": "anthropic",
+                "api_key": None,
                 "options": {},
             },
         },

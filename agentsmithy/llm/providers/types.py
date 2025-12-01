@@ -68,4 +68,11 @@ class TextContentBlock(TypedDict, total=False):
 
 def is_text_content_block(block: dict[str, Any]) -> TypeGuard[TextContentBlock]:
     """Type guard to check if a dict is a TextContentBlock."""
-    return "text" in block
+    # Must have type=="text" or have "text" key without being thinking/tool_use block
+    block_type = block.get("type")
+    if block_type == "text":
+        return True
+    # Some providers omit type but have text key
+    if block_type is None and "text" in block:
+        return True
+    return False

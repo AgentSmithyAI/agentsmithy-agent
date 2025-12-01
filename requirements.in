@@ -11,6 +11,7 @@ click<8.2
 # LangChain and LangGraph
 langchain
 langchain-openai
+langchain-anthropic
 langchain-community
 langchain-core
 langgraph

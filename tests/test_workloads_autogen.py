@@ -71,13 +71,13 @@ class TestBuildDefaultWorkloads:
         """Workloads for models with dots (e.g., gpt-5.1-codex) should be generated."""
         workloads = _build_default_workloads()
 
-        # These models have dots in their names
-        models_with_dots = [k for k in workloads.keys() if "." in k]
-        assert len(models_with_dots) > 0, "Should have models with dots in names"
+        # These workloads have dots in their names
+        workloads_with_dots = [k for k in workloads.keys() if "." in k]
+        assert len(workloads_with_dots) > 0, "Should have workloads with dots in names"
 
-        # Verify they're properly structured
-        for model in models_with_dots:
-            assert workloads[model]["model"] == model
+        # Verify they're properly structured (have model field)
+        for name in workloads_with_dots:
+            assert "model" in workloads[name], f"Workload {name} missing 'model' field"
 
     def test_workloads_not_empty(self):
         """Generated workloads should not be empty."""
