@@ -1,5 +1,13 @@
 <!-- version list -->
 
+## v1.13.0 (2025-12-01)
+
+### Features
+
+- Ollama provider ([#74](https://github.com/AgentSmithyAI/agentsmithy-agent/pull/74),
+  [`1725dfb`](https://github.com/AgentSmithyAI/agentsmithy-agent/commit/1725dfb25b063b4f7feb141006580be1c47a43f6))
+
+
 ## v1.12.0 (2025-11-29)
 
 ### Chores
