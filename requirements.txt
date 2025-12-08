@@ -147,7 +147,7 @@ jsonschema-specifications==2025.9.1
     # via jsonschema
 kubernetes==34.1.0
     # via chromadb
-langchain==1.0.8
+langchain==1.1.2
     # via -r requirements.in
 langchain-chroma==1.0.0
     # via -r requirements.in
@@ -155,7 +155,7 @@ langchain-classic==1.0.0
     # via langchain-community
 langchain-community==0.4.1
     # via -r requirements.in
-langchain-core==1.1.0
+langchain-core==1.1.1
     # via
     #   -r requirements.in
     #   langchain
@@ -167,7 +167,7 @@ langchain-core==1.1.0
     #   langgraph
     #   langgraph-checkpoint
     #   langgraph-prebuilt
-langchain-openai==1.0.3
+langchain-openai==1.1.0
     # via -r requirements.in
 langchain-text-splitters==1.0.0
     # via
@@ -437,6 +437,8 @@ urllib3==2.3.0
     #   dulwich
     #   kubernetes
     #   requests
+uuid-utils==0.12.0
+    # via langchain-core
 uvicorn[standard]==0.38.0
     # via
     #   -r requirements.in
